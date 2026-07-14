@@ -2,9 +2,7 @@
 # .gitignore — CR5 ROS1 catkin workspace
 # ============================================================
 
-# Catkin generated directories
+# Catkin generated directories and files
 /build/
 /devel/
 /install/
-/log/
-/lo
