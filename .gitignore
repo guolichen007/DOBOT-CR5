@@ -5,4 +5,5 @@
 # Catkin generated directories and files
 /build/
 /devel/
-/install/
+/install/catkin_workspace
+src/CMakeLists.txt
