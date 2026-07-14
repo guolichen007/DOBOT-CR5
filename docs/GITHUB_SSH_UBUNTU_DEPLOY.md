@@ -1,40 +1,63 @@
 # GitHub SSH 与 Ubuntu 部署指南
 
-本文档适用于 Ubuntu 笔记本（Ubuntu 20.04 + ROS Noetic），通过 Wi-Fi 从 GitHub 拉取 DOBOT-CR5 代码，有线网口直连 DOBOT CR5 控制柜。
+本文档指导你在 Ubuntu 笔记本上完成 DOBOT-CR5 项目的全部配置，包括 SSH 密钥、GitHub 连接、双网卡设置、仓库克隆、首次编译和机械臂网络配置。
+
+适用环境：Ubuntu 20.04 LTS + ROS Noetic。
+
+---
+
+## 目录
+
+1. 网络结构
+2. 安装 Git 和 SSH
+3. 创建专用 SSH 密钥
+4. 配置 SSH Host 别名
+5. 添加公钥到 GitHub
+6. 测试 SSH 连接
+7. 首次克隆
+8. 首次编译
+9. 机械臂网络配置
+10. 日常拉取与编译
+11. 功能分支工作流
+12. 常见问题
 
 ---
 
 ## 1. 网络结构
 
+Ubuntu 笔记本采用双网卡设计：
+
 ```text
 Ubuntu 笔记本
-├── Wi-Fi ────────── 互联网 / GitHub
-└── 有线网口 ─────── 192.168.110.100/24 ── 控制柜 192.168.110.214
-      (不设网关、不设 DNS，默认路由走 Wi-Fi)
+├── Wi-Fi ────────────── 互联网 / GitHub（默认路由）
+└── 有线网口 ──────────── 192.168.110.100/24 ── 控制柜 192.168.110.214
+                          （不设网关、不设 DNS）
 ```
 
-检查当前网络：
+有线网口仅用于与 DOBOT CR5 控制柜通信，所有互联网流量（包括 GitHub）通过 Wi-Fi 走默认路由。
+
+### 1.1 检查当前网络状态
 
 ```bash
 ip -br addr
 ip route
 ```
 
-验证连通性：
+### 1.2 验证双网卡连通性
 
 ```bash
 ping -c 3 github.com        # 应通过 Wi-Fi 成功
 ping -c 3 192.168.110.214    # 应通过有线成功
 ```
 
-正确路由示例：
+### 1.3 正确的路由表示例
 
 ```text
-default via 192.168.1.1 dev wlp2s0          ← Wi-Fi 网关
-192.168.110.0/24 dev enp3s0 src 192.168.110.100   ← 有线，无网关
+default via 192.168.1.1 dev wlp2s0                ← Wi-Fi 网关，负责互联网流量
+192.168.110.0/24 dev enp3s0 src 192.168.110.100    ← 有线，仅用于控制柜通信
 ```
 
-如果默认路由指向有线网口，说明有线配置了网关，需要移除后重试。
+如果默认路由指向有线网口（如 `default via 192.168.110.xxx dev enp3s0`），说明有线接口配置了网关，需要移除后重试。参见第 12.7 节。
 
 ---
 
@@ -44,40 +67,58 @@ default via 192.168.1.1 dev wlp2s0          ← Wi-Fi 网关
 sudo apt update
 sudo apt install -y git openssh-client
 
+# 验证安装
 git --version
 ssh -V
 
+# 配置 Git
 git config --global init.defaultBranch main
 git config --global core.autocrlf input
 ```
 
-> 注意：不要使用 `sudo git clone`、`sudo git pull` 或 `sudo git commit`。
+> 注意：本项目的所有 Git 操作（clone、pull、commit 等）都不要使用 `sudo`。使用 `sudo` 会导致文件权限问题，后续操作可能需要一直使用 `sudo`。
 
 ---
 
 ## 3. 创建专用 SSH 密钥
 
-密钥路径：`~/.ssh/id_ed25519_github_dobot_cr5_ubuntu`
+为本项目创建独立的 SSH 密钥，不与其他用途混合：
 
 ```bash
 mkdir -p ~/.ssh
 chmod 700 ~/.ssh
+```
 
+### 3.1 生成密钥
+
+密钥路径：`~/.ssh/id_ed25519_github_dobot_cr5_ubuntu`
+
+```bash
 if [ ! -f ~/.ssh/id_ed25519_github_dobot_cr5_ubuntu ]; then
   ssh-keygen -t ed25519 \
     -C "guolichen007@gmail.com Ubuntu DOBOT-CR5" \
     -f ~/.ssh/id_ed25519_github_dobot_cr5_ubuntu
 fi
+```
 
+提示 `Enter passphrase` 时可以直接按 Enter 跳过（不设密码），也可以输入一个密码保护私钥。如果设置了密码，每次开机后首次使用 SSH 时需要输入。
+
+### 3.2 启动 ssh-agent 并加载密钥
+
+```bash
 eval "$(ssh-agent -s)"
 ssh-add ~/.ssh/id_ed25519_github_dobot_cr5_ubuntu
 ```
+
+如果设置了 passphrase，此时需要输入。
 
 ---
 
 ## 4. 配置 SSH Host 别名
 
-以下命令会检查 `~/.ssh/config` 中是否已存在 `github-dobot-cr5`，如不存在则追加：
+使用独立的 Host 别名 `github-dobot-cr5` 指向 `github.com`，确保 Git 操作使用本项目的专用密钥。
+
+### 4.1 追加配置（不覆盖现有文件）
 
 ```bash
 CONFIG="$HOME/.ssh/config"
@@ -98,7 +139,11 @@ SSHEOF
 fi
 ```
 
-设置权限：
+> 此命令只会追加，不会覆盖 `~/.ssh/config` 中已有的其他 Host 配置。
+
+### 4.2 设置文件权限
+
+SSH 对文件权限要求严格，权限过宽会导致 SSH 拒绝使用密钥：
 
 ```bash
 chmod 600 ~/.ssh/config
@@ -110,19 +155,24 @@ chmod 644 ~/.ssh/id_ed25519_github_dobot_cr5_ubuntu.pub
 
 ## 5. 添加公钥到 GitHub
 
-显示公钥并复制：
+### 5.1 显示公钥
 
 ```bash
 cat ~/.ssh/id_ed25519_github_dobot_cr5_ubuntu.pub
 ```
 
-将输出的完整内容添加到 GitHub：
+复制输出的完整内容（以 `ssh-ed25519` 开头的整行）。
 
-1. 打开 <https://github.com/settings/keys>
+### 5.2 在 GitHub 上添加
+
+1. 浏览器打开 <https://github.com/settings/keys>
 2. 点击 **New SSH key**
-3. Title 填写：`Ubuntu-Laptop-DOBOT-CR5`
+3. Title 填写：`Ubuntu-Laptop-DOBOT-CR5`（方便日后识别）
 4. Key type 选择：**Authentication Key**
-5. 粘贴公钥内容，点击 **Add SSH key**
+5. 将公钥内容粘贴到 Key 文本框
+6. 点击 **Add SSH key**
+
+> 只添加 `.pub` 公钥文件的内容，绝不添加没有扩展名的私钥文件。
 
 ---
 
@@ -132,7 +182,7 @@ cat ~/.ssh/id_ed25519_github_dobot_cr5_ubuntu.pub
 ssh -T git@github-dobot-cr5
 ```
 
-首次连接会提示确认主机指纹，输入 `yes`。
+首次连接会提示确认 GitHub 主机指纹，输入 `yes`。
 
 成功输出应包含：
 
@@ -140,27 +190,52 @@ ssh -T git@github-dobot-cr5
 Hi guolichen007! You've successfully authenticated, but GitHub does not provide shell access.
 ```
 
-> GitHub 不提供 shell，命令返回非零退出码是正常的，以认证文本为准。
+> GitHub 不提供 shell 访问，因此 SSH 命令可能返回非零退出码，这是正常的。判断是否成功的依据是输出中包含认证成功信息。
 
 ---
 
 ## 7. 首次克隆
 
+### 7.1 如果 ~/cr5_ros1_ws 目录不存在
+
 ```bash
 cd ~
 git clone git@github-dobot-cr5:guolichen007/DOBOT-CR5.git cr5_ros1_ws
 cd ~/cr5_ros1_ws
-
-git config pull.ff only
-git remote -v
-git branch -vv
-git status
 ```
 
-如果 `~/cr5_ros1_ws` 已存在但不是本仓库，先备份：
+### 7.2 如果 ~/cr5_ros1_ws 已存在但不是本仓库
+
+先备份：
 
 ```bash
 mv ~/cr5_ros1_ws ~/cr5_ros1_ws_backup_$(date +%Y%m%d_%H%M%S)
+```
+
+然后重新执行第 7.1 节的克隆命令。
+
+### 7.3 克隆后配置
+
+```bash
+cd ~/cr5_ros1_ws
+git config pull.ff only
+```
+
+此配置确保 `git pull` 在无法快进时拒绝合并，避免意外产生合并提交。
+
+### 7.4 验证
+
+```bash
+git remote -v
+# 应显示：
+# origin  git@github-dobot-cr5:guolichen007/DOBOT-CR5.git (fetch)
+# origin  git@github-dobot-cr5:guolichen007/DOBOT-CR5.git (push)
+
+git branch -vv
+# 应显示 main 分支跟踪 origin/main
+
+git status
+# 应显示 working tree clean
 ```
 
 ---
@@ -169,160 +244,52 @@ mv ~/cr5_ros1_ws ~/cr5_ros1_ws_backup_$(date +%Y%m%d_%H%M%S)
 
 ```bash
 cd ~/cr5_ros1_ws
+
+# 确保脚本有执行权限
 chmod +x scripts/*.sh
+
+# 创建日志目录
 mkdir -p ~/cr5_test_logs
 
+# 执行编译并记录日志
 ./scripts/build.sh 2>&1 | \
   tee ~/cr5_test_logs/build_first_$(date +%Y%m%d_%H%M%S).log
 ```
 
-编译后检查：
+编译完成后检查：
 
 ```bash
 git status --short
 ```
 
-正常情况下不应出现 `build/`、`devel/` 等生成目录（已被 `.gitignore` 忽略）。
+正常情况下不应出现 `build/`、`devel/` 等目录（已被 `.gitignore` 忽略）。如果出现，说明 `.gitignore` 可能未生效，需检查。
+
+### 8.1 加载工作空间环境
+
+编译成功后，加载 ROS 环境：
+
+```bash
+source devel/setup.bash
+```
+
+建议将此行添加到 `~/.bashrc` 中，每次打开终端自动加载：
+
+```bash
+echo "source ~/cr5_ros1_ws/devel/setup.bash" >> ~/.bashrc
+```
 
 ---
 
 ## 9. 机械臂网络配置
 
-先查看有线接口名：
+### 9.1 查看有线接口名
 
 ```bash
 ip -br link
 ```
 
-然后使用项目脚本配置有线网口（将 `enp3s0` 替换为实际接口名）：
+找到连接控制柜的有线接口（通常为 `enp3s0`、`eth0` 或类似名称）。
 
-```bash
-cd ~/cr5_ros1_ws
-sudo ./scripts/configure_robot_network.sh enp3s0
-./scripts/network_check.sh
-```
+### 9.2 使用项目脚本配置
 
-> **重要提醒：**
-> - 有线网口只连接控制柜，不连接其他网络设备
-> - 有线网口不配置默认网关
-> - GitHub 网络流量应走 Wi-Fi
-> - 不要将控制柜网络桥接到互联网
-
----
-
-## 10. 日常拉取与编译
-
-```bash
-cd ~/cr5_ros1_ws
-git status --short
-git pull --ff-only origin main
-./scripts/build.sh
-```
-
-如果主机推送了功能分支：
-
-```bash
-cd ~/cr5_ros1_ws
-git fetch --prune origin
-git branch -a
-git switch <分支名>
-git pull --ff-only
-./scripts/build.sh
-```
-
----
-
-## 11. 常见问题
-
-### 11.1 Permission denied (publickey)
-
-```bash
-# 检查密钥是否已加入 agent
-ssh-add -l
-
-# 如果列表中没有，手动添加
-ssh-add ~/.ssh/id_ed25519_github_dobot_cr5_ubuntu
-
-# 检查 ~/.ssh/config 中 Host 别名是否正确
-cat ~/.ssh/config
-
-# 确认 GitHub 上已添加对应公钥
-```
-
-### 11.2 Host key verification failed
-
-```bash
-# 删除旧指纹后重新连接
-ssh-keygen -R github.com
-ssh -T git@github-dobot-cr5
-# 首次提示时确认指纹与 github.com 一致后输入 yes
-```
-
-### 11.3 Repository not found
-
-- 检查 GitHub 账号 `guolichen007` 是否有仓库访问权限
-- 确认 SSH 登录的是正确的账号：`ssh -T git@github-dobot-cr5`
-- 确认仓库地址为 `git@github-dobot-cr5:guolichen007/DOBOT-CR5.git`
-
-### 11.4 Your local changes would be overwritten
-
-```bash
-# 查看本地修改
-git status
-
-# 方案一：提交本地修改
-git add -A
-git commit -m "保存本地修改"
-
-# 方案二：暂存后拉取
-git stash
-git pull --ff-only origin main
-git stash pop
-```
-
-> 不要使用 `git push --force` 或 `git reset --hard`，除非你完全理解后果。
-
-### 11.5 脚本出现 ^M（Windows 换行符）
-
-```bash
-# 在主机（Windows）端修复后推送，或本地临时处理
-sed -i 's/\r$//' scripts/*.sh
-```
-
-根本解决方案：确认 `.gitattributes` 已包含 `*.sh text eol=lf`，然后在主机执行：
-
-```bash
-git add --renormalize .
-git commit -m "修复换行符"
-git push
-```
-
-### 11.6 GitHub 能访问但控制柜不通
-
-```bash
-# 检查有线 IP
-ip -br addr show dev enp3s0
-
-# 检查网线连接
-ip link show enp3s0
-
-# 直接 ping 控制柜
-ping -c 3 192.168.110.214
-```
-
-如果 ping 不通，检查网线是否插好、有线接口是否配置了 `192.168.110.100/24`。
-
-### 11.7 控制柜能通但 GitHub 不通
-
-```bash
-# 检查默认路由
-ip route | head -1
-```
-
-如果默认路由指向有线网口（如 `default via 192.168.110.xxx dev enp3s0`），说明有线配置了网关。移除后默认路由应自动回到 Wi-Fi：
-
-```bash
-sudo ip route del default dev enp3s0
-```
-
-永久修复：编辑 Netplan 配置，确保有线接口不设 `routes` 或 `gateway4`。
+将 `enp3s0` 替换为实际的有线接口名
