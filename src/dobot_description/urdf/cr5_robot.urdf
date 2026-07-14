@@ -1,0 +1,424 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This URDF was automatically created by SolidWorks to URDF Exporter! Originally created by Stephen Brawner (brawner@gmail.com) 
+     Commit Version: 1.6.0-1-g15f4949  Build Version: 1.6.7594.29634
+     For more information, please see http://wiki.ros.org/sw_urdf_exporter -->
+<robot name="cr5_robot">
+  <link name="dummy_link" />
+  <link name="base_link">
+    <inertial>
+      <origin xyz="-8.0961E-06 0.0019103 0.028995" rpy="0 0 0" />
+      <mass value="0.90882" />
+      <inertia
+        ixx="0.0014545"
+        ixy="4.2968E-08"
+        ixz="-1.8199E-07"
+        iyy="0.001345"
+        iyz="-6.243E-06"
+        izz="0.002155" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/base_link.dae" />
+      </geometry>
+      <material
+        name="">
+        <color rgba="0 0 0 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/base_link.dae" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="dummy_joint" type="fixed">
+    <parent link="dummy_link" />
+    <child  link="base_link" />
+  </joint>
+
+
+  <link  name="Link1">
+    <inertial>
+      <origin xyz="-8.7268E-07 -0.0032576 -0.0076748" rpy="0 0 0" />
+      <mass value="1.6123" />
+      <inertia
+        ixx="0.0029122"
+        ixy="5.7387E-09"
+        ixz="1.9945E-08"
+        iyy="0.0028191"
+        iyz="0.00044094"
+        izz="0.0032836" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link1.dae" />
+      </geometry>
+      <material
+        name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link1.dae" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="joint1" type="revolute">
+    <origin xyz="0 0 0.147" rpy="0 0 0" />
+    <parent link="base_link" />
+    <child link="Link1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14" upper="3.14" effort="0" velocity="0" />
+  </joint>
+
+  <link name="Link2">
+    <inertial>
+      <origin xyz="-0.21351 -1.3842E-06 0.14252" rpy="0 0 0" />
+      <mass value="5.5186" />
+      <inertia
+        ixx="0.0085919"
+        ixy="7.5552E-07"
+        ixz="-7.8922E-07"
+        iyy="0.027553"
+        iyz="1.4629E-07"
+        izz="0.028294" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link2.dae" />
+      </geometry>
+      <material
+        name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link2.dae" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="joint2" type="revolute">
+    <origin xyz="0 0 0" rpy="1.5708 1.5708 0" />
+    <parent link="Link1" />
+    <child  link="Link2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14" upper="3.14" effort="0" velocity="0" />
+  </joint>
+
+  <link name="Link3">
+    <inertial>
+      <origin xyz="-0.15231 -1.4079E-07 0.022693" rpy="0 0 0" />
+      <mass value="2.8536" />
+      <inertia
+        ixx="0.0032608"
+        ixy="-3.2147E-10"
+        ixz="0.00012363"
+        iyy="0.0092967"
+        iyz="2.9478E-10"
+        izz="0.0095552" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link3.dae" />
+      </geometry>
+      <material
+        name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0"  rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link3.dae" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="joint3" type="revolute">
+    <origin xyz="-0.427 0 0" rpy="0 0 0" />
+    <parent link="Link2" />
+    <child link="Link3" />
+    <axis  xyz="0 0 1" />
+    <limit lower="-2.86"  upper="2.86"  effort="0" velocity="0" />
+  </joint>
+
+  <link name="Link4">
+    <inertial>
+      <origin xyz="-3.2386E-07 -0.002077 -0.0015548" rpy="0 0 0" />
+      <mass value="0.67058" />
+      <inertia
+        ixx="0.00066939"
+        ixy="4.1975E-10"
+        ixz="-1.0734E-08"
+        iyy="0.00065424"
+        iyz="0.00011081"
+        izz="0.00065365" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link4.dae" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link4.dae" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="joint4" type="revolute">
+    <origin xyz="-0.357 0 0.141" rpy="0 0 -1.5708" />
+    <parent link="Link3" />
+    <child link="Link4" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14" upper="3.14" effort="0" velocity="0" />
+  </joint>
+  <link
+    name="Link5">
+    <inertial>
+      <origin xyz="-3.7738E-07 -0.0045777 -0.0012971" rpy="0 0 0" />
+      <mass value="0.7269" />
+      <inertia
+        ixx="0.00073069"
+        ixy="-5.7806E-09"
+        ixz="6.7132E-09"
+        iyy="0.00071195"
+        iyz="-0.00011926"
+        izz="0.00071391" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link5.dae" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link5.dae" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="joint5" type="revolute">
+    <origin xyz="0 -0.116 0" rpy="1.5708 0 0" />
+    <parent link="Link4" />
+    <child link="Link5" />
+    <axis xyz="0 0 1" />
+    <limit lower="-3.14" upper="3.14" effort="0" velocity="0" />
+  </joint>
+
+  <link name="Link6">
+    <inertial>
+      <origin xyz="5.0777E-11 9.3774E-05 -0.019285" rpy="0 0 0" />
+      <mass value="0.15789" />
+      <inertia
+        ixx="7.8045E-05"
+        ixy="6.1582E-15"
+        ixz="6.2471E-14"
+        iyy="7.9168E-05"
+        iyz="-1.3822E-07"
+        izz="0.00012951" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link6.dae" />
+      </geometry>
+      <material name="">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/Link6.dae" />
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="joint6" type="revolute">
+    <origin xyz="0 0.105 0"  rpy="-1.5708 0 0" />
+    <parent link="Link5" />
+    <child link="Link6" />
+    <axis xyz="0 0 1" />
+    <limit lower="-6.28" upper="6.28" effort="0" velocity="0" />
+  </joint>
+
+<!-- 相机链接定义 -->
+  <link name="camera_link">
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.01 0.01"/>
+      </geometry>
+      <material name="green">
+        <color rgba="0 1 0 0.5"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.01 0.01"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="camera_color_frame"/>
+  <!-- 相机光学坐标系链接 -->
+  <link name="camera_color_optical_frame"/>
+
+  <!-- 从camera_link到camera_color_optical_frame的变换 -->
+  <!-- 注意：这个变换需要根据RealSense相机的实际光学坐标系设置 -->
+  <joint name="camera_color_optical_frame_to_camera_color_frame" type="fixed">
+    <parent link="camera_color_frame"/>
+    <child link="camera_color_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5707963267948968 -0.0 -1.5707963267948968"/>
+  </joint>
+
+  <!-- 从camera_link到camera_color_optical_frame的变换 -->
+  <!-- 注意：这个变换需要根据RealSense相机的实际光学坐标系设置 -->
+  <joint name="camera_color_frame_to_camera_link" type="fixed">
+    <parent link="camera_link"/>
+    <child link="camera_color_frame"/>
+    <origin xyz="-6.4255e-05 -0.059021 -2.7067e-05" rpy="0.0059264918108161944 -0.0030763057985713086 0.003738317204423325"/>
+  </joint>
+
+  <!-- 您提供的从Link6到camera_link的静态变换 -->
+  <joint name="camera_to_hand_joint" type="fixed">
+    <parent link="Link6"/>
+    <child link="camera_link"/>
+    <origin 
+      xyz="-0.05899523084455281 -0.05223503702624686 -0.03956203025894304" 
+      rpy="2.3606669849040993 -1.545402218609799 -0.7937962385300339"/>
+  </joint>
+  
+  <!--  -->
+  <link name="Tool_box1">
+    <inertial>
+      <origin xyz="0 0.045 0.007" rpy="0 0 0" />
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0.045 0.007" rpy="0 0 0" />
+      <geometry>
+        <box size="0.11 0.25 0.014"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0 0 0.8 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0.045 0.007" rpy="0 0 0" />
+      <geometry>
+        <box size="0.11 0.25 0.014"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="Link6_to_Tool_box1" type="fixed">
+    <parent link="Link6"/>
+    <child link="Tool_box1"/>
+    <origin 
+      xyz="0 0 0.001" 
+      rpy="0 0 0"/>
+  </joint>
+
+  <link name="Tool_box2">
+    <inertial>
+      <origin xyz="0 0 0.1025" rpy="0 0 0" />
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
+    </inertial>
+
+    <visual>
+      <origin xyz="0 0 0.1025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.11 0.014 0.205"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0 0 0.8 1"/>
+      </material>
+    </visual>
+
+    <collision>
+      <origin xyz="0 0 0.1025" rpy="0 0 0" />
+      <geometry>
+        <box size="0.11 0.014 0.205"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="Tool_box1_to_Tool_box2" type="fixed">
+    <parent link="Tool_box1"/>
+    <child link="Tool_box2"/>
+    <origin 
+      xyz="0 0.163 0.014" 
+      rpy="0 0 0"/>
+  </joint>
+
+  <link name="Tool_end">
+    <inertial>
+      <origin xyz="0 0 0.005" rpy="0 0 0" />
+      <mass value="0.1"/>
+      <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.005" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.01 0.01"/>
+      </geometry>
+      <material name="red">
+        <color rgba="0.8 0 0 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.005" rpy="0 0 0" />
+      <geometry>
+        <box size="0.01 0.01 0.01"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="Link6_to_Tool_end" type="fixed">
+    <parent link="Link6"/>
+    <child link="Tool_end"/>
+    <origin 
+      xyz="-0.00683 0.150178 0.22462" 
+      rpy="-0.0044 0.04684 -1.631"/>
+  </joint>
+
+
+
+
+
+</robot>

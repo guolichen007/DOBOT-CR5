@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- This launch starts only the A4 demo node. Start the V3 driver and MoveIt first. -->
+  <arg name="config" default="$(find a4_spray_demo)/config/a4_raster.yaml"/>
+  <arg name="execute" default="false"/>
+  <arg name="confirmation" default=""/>
+  <arg name="eef_link" default="Tool_end"/>
+
+  <node pkg="a4_spray_demo"
+        type="a4_raster_demo.py"
+        name="a4_raster_demo"
+        output="screen">
+    <rosparam command="load" file="$(arg config)"/>
+    <param name="execute" value="$(arg execute)"/>
+    <param name="confirmation" value="$(arg confirmation)"/>
+    <param name="eef_link" value="$(arg eef_link)"/>
+  </node>
+</launch>

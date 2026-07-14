@@ -1,0 +1,35 @@
+# ============================================================
+# .gitattributes — CR5 ROS1 catkin workspace
+# ============================================================
+
+* text=auto
+
+# Linux / ROS text files — enforce LF
+*.sh       text eol=lf
+*.bash     text eol=lf
+*.py       text eol=lf
+*.launch   text eol=lf
+*.xml      text eol=lf
+*.yaml     text eol=lf
+*.yml      text eol=lf
+*.urdf     text eol=lf
+*.xacro    text eol=lf
+*.cpp      text eol=lf
+*.c        text eol=lf
+*.h        text eol=lf
+*.hpp      text eol=lf
+CMakeLists.txt text eol=lf
+package.xml    text eol=lf
+
+# Windows scripts — enforce CRLF
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets — do not diff or convert
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.stl  binary
+*.dae  binary
+*.bin  binary

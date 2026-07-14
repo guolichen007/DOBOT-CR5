@@ -1,0 +1,5 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- 启动ArUco检测和规划节点 -->
+    <node name="aruco_detector_planner" pkg="aruco_planning" type="aruco_planner.py" output="screen"/>
+</launch>
