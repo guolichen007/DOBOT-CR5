@@ -6,3 +6,54 @@
 /build/
 /devel/
 /install/
+/log/
+/logs/
+.catkin_tools/
+.catkin_workspace
+catkin_workspace
+src/CMakeLists.txt
+
+# ROS runtime data
+*.bag
+*.bag.active
+*.db3
+*.mcap
+*.pcd
+*.ply
+.ros/
+
+# Large archives and temporary packages
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+*~
+
+# Local credentials and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# SSH staging (local only, never commit)
+.ssh_staging/

@@ -292,4 +292,204 @@ ip -br link
 
 ### 9.2 使用项目脚本配置
 
-将 `enp3s0` 替换为实际的有线接口名
+将 `enp3s0` 替换为实际的有线接口名：
+
+```bash
+cd ~/cr5_ros1_ws
+sudo ./scripts/configure_robot_network.sh enp3s0
+```
+
+### 9.3 验证网络配置
+
+```bash
+./scripts/network_check.sh
+```
+
+该脚本会检查：
+- 有线接口 IP 是否为 `192.168.110.100/24`
+- 是否能 ping 通控制柜 `192.168.110.214`
+- 默认路由是否走 Wi-Fi
+
+### 9.4 重要提醒
+
+- 有线网口**只连接** DOBOT CR5 控制柜，不连接其他网络设备
+- 有线网口**不配置**默认网关和 DNS
+- GitHub 网络流量**必须走 Wi-Fi**
+- **不要**将控制柜网络桥接到互联网
+
+---
+
+## 10. 日常拉取与编译
+
+当 Windows 主机推送了新的提交后，Ubuntu 笔记本需要拉取更新：
+
+```bash
+cd ~/cr5_ros1_ws
+
+# 查看本地是否有未提交的修改
+git status --short
+
+# 拉取远程更新（仅快进模式）
+git pull --ff-only origin main
+
+# 重新编译
+./scripts/build.sh
+```
+
+如果 `git pull` 报错提示有本地冲突，参见第 12.4 节。
+
+---
+
+## 11. 功能分支工作流
+
+当 Windows 主机推送了功能分支（而非直接推送到 main）：
+
+```bash
+cd ~/cr5_ros1_ws
+
+# 获取所有远程分支信息
+git fetch --prune origin
+
+# 查看可用分支
+git branch -a
+
+# 切换到功能分支
+git switch <分支名>
+
+# 拉取更新
+git pull --ff-only
+
+# 编译
+./scripts/build.sh
+```
+
+---
+
+## 12. 常见问题
+
+### 12.1 Permission denied (publickey)
+
+**现象**：`ssh -T git@github-dobot-cr5` 报错 `Permission denied (publickey)`
+
+**排查步骤**：
+
+```bash
+# 检查密钥是否已加入 ssh-agent
+ssh-add -l
+
+# 如果列表中没有本项目的密钥，手动添加
+ssh-add ~/.ssh/id_ed25519_github_dobot_cr5_ubuntu
+
+# 检查 SSH 配置文件
+cat ~/.ssh/config
+# 确认 Host github-dobot-cr5 的 IdentityFile 路径正确
+
+# 确认 GitHub 上已添加对应的公钥
+# 打开 https://github.com/settings/keys 检查
+```
+
+### 12.2 Host key verification failed
+
+**现象**：报错 `Host key verification failed`
+
+**解决**：
+
+```bash
+# 删除旧的 GitHub 主机指纹
+ssh-keygen -R github.com
+
+# 重新连接，确认指纹后输入 yes
+ssh -T git@github-dobot-cr5
+```
+
+### 12.3 Repository not found
+
+**现象**：报错 `Repository not found`
+
+**排查**：
+- 确认 GitHub 账号 `guolichen007` 对仓库有访问权限
+- 运行 `ssh -T git@github-dobot-cr5` 确认 SSH 登录的是正确的账号
+- 确认仓库地址为 `git@github-dobot-cr5:guolichen007/DOBOT-CR5.git`
+
+### 12.4 Your local changes would be overwritten
+
+**现象**：`git pull` 报错 `Your local changes to the following files would be overwritten`
+
+**解决方案一** — 提交本地修改：
+
+```bash
+git status
+git add -A
+git commit -m "保存本地修改"
+git pull --ff-only origin main
+```
+
+**解决方案二** — 暂存后拉取：
+
+```bash
+git stash
+git pull --ff-only origin main
+git stash pop
+```
+
+> 不要使用 `git push --force` 或 `git reset --hard`，除非你完全理解后果。
+
+### 12.5 脚本出现 ^M（Windows 换行符）
+
+**现象**：Shell 脚本执行时报错，或用 `cat -A` 查看时行尾有 `^M`
+
+**临时修复**：
+
+```bash
+sed -i 's/\r$//' scripts/*.sh
+```
+
+**根本解决方案**：确认 `.gitattributes` 中包含 `*.sh text eol=lf`，然后在 Windows 主机端执行：
+
+```bash
+git add --renormalize .
+git commit -m "修复换行符"
+git push
+```
+
+Ubuntu 笔记本重新拉取即可。
+
+### 12.6 GitHub 能访问但控制柜不通
+
+**排查**：
+
+```bash
+# 检查有线接口 IP
+ip -br addr show dev enp3s0
+
+# 检查链路状态
+ip link show enp3s0
+
+# 测试连通性
+ping -c 3 192.168.110.214
+```
+
+如果 ping 不通：检查网线是否插好、有线接口是否配置了 `192.168.110.100/24`。
+
+### 12.7 控制柜能通但 GitHub 不通
+
+**排查**：
+
+```bash
+# 检查默认路由
+ip route | head -1
+```
+
+如果默认路由指向有线网口（如 `default via 192.168.110.xxx dev enp3s0`），说明有线接口配置了网关。
+
+**临时修复**：
+
+```bash
+sudo ip route del default dev enp3s0
+```
+
+**永久修复**：编辑 Netplan 配置文件（通常在 `/etc/netplan/` 下），确保有线接口部分不包含 `routes` 或 `gateway4` 字段。修改后执行：
+
+```bash
+sudo netplan apply
+```
