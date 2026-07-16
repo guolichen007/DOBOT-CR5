@@ -54,60 +54,78 @@ git remote get-url origin
 
 禁止两台机器同时修改同一源码。
 
-## 4. 仓库应新增的文件
+## 4. 笔记本完整执行顺序
 
-```text
-docs/BOOK_SPRAY_LAPTOP_REMOTE_TEST.md
-scripts/laptop/pull_build_book_demo.sh
-scripts/laptop/test_d455_vision_only.sh
-scripts/laptop/plan_book_demo_only.sh
-```
-
-文档保存操作步骤，脚本保存可重复执行的命令。
-
-这些脚本不得：
-
-- 使能机械臂；
-- 调用 `/book_demo/planner/execute_path`；
-- 设置 `/book_demo/confirm_execute`；
-- 使用 `allow_execution:=true`；
-- 控制气源、喷阀或喷漆；
-- 自动覆盖笔记本未提交修改。
-
-## 5. 笔记本 Pull 与编译
+### 4.1 拉取最新代码
 
 ```bash
 cd ~/cr5_ros1_ws
+git status --short --branch
+git switch feature/book-vision-spray-demo-v1
+git pull --ff-only
+```
+
+### 4.2 设置 RealSense 工作空间
+
+```bash
+bash scripts/laptop/setup_realsense_ros1.sh
+```
+
+该脚本会：
+
+1. 检查旧 RealSense 仓库的 HEAD 和版本
+2. 创建 `~/realsense_ros1_ws` 独立工作空间
+3. 创建软链接指向 `~/cr5_ws/src/realsense-ros`
+4. 检查依赖
+5. 编译工作空间
+
+详细说明见 `docs/REALSENSE_ROS1_SETUP.md`。
+
+### 4.3 编译 CR5 书本识别 Demo
+
+```bash
 bash scripts/laptop/pull_build_book_demo.sh
 ```
 
-该脚本应检查工作树、切换功能分支、`git pull --ff-only`、记录 SHA、执行 `catkin_make`、执行 `rospack find` 并保存日志。
+该脚本会：
 
-## 6. D455 纯视觉测试
+1. 检查工作树是否干净
+2. 切换到功能分支
+3. 拉取最新代码
+4. 加载 RealSense 和 CR5 工作空间环境
+5. 执行 catkin_make
+6. 验证 cr5_book_spray_demo 包可用
 
-D455 通过 USB 3.x 直接连接实机笔记本，不用 HUB，优先原装线。
-
-预检：
+### 4.4 D455 预检
 
 ```bash
 bash scripts/laptop/test_d455_vision_only.sh precheck
 ```
 
-USB 最好显示 `5000M`。如果只有 `480M`，停止后续测试并检查接口和线缆。
+检查项目：
 
-启动 RealSense：
+- Git 分支和 SHA
+- D455 USB 设备检测
+- USB 速度（需要 5000M 或更高）
+- Librealsense 可用性
+- ROS 包可用性
+- CR5 控制柜网络（独立检查，不影响 D455 判定）
+
+### 4.5 启动 D455 相机
 
 ```bash
 bash scripts/laptop/test_d455_vision_only.sh camera
 ```
 
-另一个终端检查话题：
+### 4.6 检查相机话题
+
+在另一个终端执行：
 
 ```bash
 bash scripts/laptop/test_d455_vision_only.sh topics
 ```
 
-必须确认：
+必须确认以下话题存在：
 
 ```text
 /camera/color/image_raw
@@ -115,11 +133,17 @@ bash scripts/laptop/test_d455_vision_only.sh topics
 /camera/color/camera_info
 ```
 
-启动书本识别：
+### 4.7 启动书本视觉识别
+
+在另一个终端执行：
 
 ```bash
 bash scripts/laptop/test_d455_vision_only.sh vision
 ```
+
+**重要**：使用 `start_camera:=false`，避免同一 D455 被两个进程打开。
+
+### 4.8 视觉调试
 
 打开调试图：
 
@@ -152,7 +176,7 @@ rosservice call /book_demo/estimator/clear_target '{}'
 plane_rmse ≤ 3～5 mm
 ```
 
-## 7. TF 检查
+### 4.9 TF 检查
 
 ```bash
 rosrun tf tf_echo camera_link camera_color_optical_frame
@@ -167,7 +191,7 @@ base_link → Link6 → camera_link → camera_color_optical_frame
 
 如果不存在，停止目标锁定和路径规划，检查旧标定与 `robot_description`，禁止猜外参。
 
-## 8. MoveIt plan-only
+### 4.10 MoveIt plan-only
 
 只有视觉与 TF 通过后执行：
 
@@ -194,7 +218,28 @@ allow_execution=false
 
 当前文档不包含实体执行命令。
 
-## 9. 测试记录
+## 5. 安全边界
+
+当前阶段禁止：
+
+- `allow_execution:=true`
+- `/book_demo/planner/execute_path`
+- `/book_demo/confirm_execute`
+- `EnableRobot`
+- 机械臂实体运动
+- 气源、喷阀、喷漆
+
+只允许：
+
+- D455 检测
+- 相机话题验证
+- TF 查看
+- 书本识别
+- 目标锁定
+- RViz 可视化
+- MoveIt plan-only
+
+## 6. 测试记录
 
 在笔记本创建：
 
@@ -216,3 +261,17 @@ allow_execution=false
 - 错误、警告与待修改参数。
 
 把结果交给开发主机 Claude。只提交整理后的 Markdown 和小截图，不提交 bag、视频、完整日志、模型、压缩包、build 或 devel。
+
+## 7. 文件清单
+
+仓库中与笔记本测试相关的文件：
+
+```text
+docs/BOOK_SPRAY_LAPTOP_REMOTE_TEST.md          # 本文档
+docs/REALSENSE_ROS1_SETUP.md                    # RealSense 工作空间设置说明
+docs/REALSENSE_ROS1_2_3_2_LOCAL_DIFF_AUDIT.md   # RealSense 本地修改审计
+scripts/laptop/setup_realsense_ros1.sh          # RealSense 工作空间设置脚本
+scripts/laptop/pull_build_book_demo.sh          # 拉取代码并编译
+scripts/laptop/test_d455_vision_only.sh         # D455 视觉测试
+scripts/laptop/plan_book_demo_only.sh           # MoveIt plan-only 测试
+```

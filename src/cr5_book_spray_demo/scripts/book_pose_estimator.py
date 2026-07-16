@@ -24,7 +24,7 @@ import rospy
 import tf2_geometry_msgs
 import tf2_ros
 from cv_bridge import CvBridge, CvBridgeError
-from geometry_msgs.msg import Point, PolygonStamped, PoseStamped, TransformStamped, Vector3Stamped
+from geometry_msgs.msg import Point, Point32, PolygonStamped, PoseStamped, TransformStamped, Vector3Stamped
 from sensor_msgs.msg import CameraInfo, Image
 from std_msgs.msg import Bool, Float32
 from std_srvs.srv import Trigger, TriggerResponse
@@ -441,7 +441,7 @@ class BookPoseEstimator:
             corner_pose.pose.orientation.w = 1.0
             base_corner = tf2_geometry_msgs.do_transform_pose(corner_pose, transform)
             polygon.polygon.points.append(
-                Point(
+                Point32(
                     x=base_corner.pose.position.x,
                     y=base_corner.pose.position.y,
                     z=base_corner.pose.position.z,

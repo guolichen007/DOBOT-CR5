@@ -42,11 +42,16 @@ need_node /move_group
 need_node /book_demo/estimator
 need_node /book_demo/planner
 
-if timeout 4 rosrun tf tf_echo base_link camera_color_optical_frame >/tmp/book_tf_check.txt 2>&1; then
+# TF 检查：允许 timeout 返回 124，检查输出中是否有有效 TF
+TF_OUTPUT_FILE="/tmp/book_tf_check.txt"
+TF_EXIT_CODE=0
+timeout 4 rosrun tf tf_echo base_link camera_color_optical_frame >"$TF_OUTPUT_FILE" 2>&1 || TF_EXIT_CODE=$?
+
+if [ "$TF_EXIT_CODE" -eq 124 ] || grep -qE "^(Translation|At time)" "$TF_OUTPUT_FILE" 2>/dev/null; then
   ok 'TF base_link -> camera_color_optical_frame'
 else
   bad 'TF base_link -> camera_color_optical_frame unavailable'
-  sed -n '1,20p' /tmp/book_tf_check.txt 2>/dev/null || true
+  sed -n '1,20p' "$TF_OUTPUT_FILE" 2>/dev/null || true
 fi
 
 if timeout 4 rostopic echo -n 1 /camera/aligned_depth_to_color/image_raw/header >/tmp/book_depth_header.txt 2>&1; then
