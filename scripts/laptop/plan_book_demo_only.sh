@@ -9,33 +9,41 @@ set -euo pipefail
 WS="${WS:-$HOME/cr5_ros1_ws}"
 REALSENSE_WS="${REALSENSE_WS:-$HOME/realsense_ros1_ws}"
 
+fail() { echo "[ERROR] $*" >&2; exit 1; }
+
 # ============================================================
-# 环境加载函数
+# 环境加载函数（使用 --extend 叠加）
 # ============================================================
 load_ros_environment() {
+    # 1. 加载 ROS 基础环境
+    if [ ! -f "/opt/ros/noetic/setup.bash" ]; then
+        fail "ROS Noetic 未安装"
+    fi
     source /opt/ros/noetic/setup.bash
 
+    # 2. 加载 RealSense 工作空间
     if [ ! -f "$REALSENSE_WS/devel/setup.bash" ]; then
-        echo "[ERROR] RealSense workspace is not built:"
-        echo "        $REALSENSE_WS"
-        echo
-        echo "Run:"
-        echo "  bash $WS/scripts/laptop/setup_realsense_ros1.sh"
-        exit 1
+        fail "RealSense 工作空间未编译: $REALSENSE_WS
+请运行: bash $WS/scripts/laptop/setup_realsense_ros1.sh"
     fi
-
     source "$REALSENSE_WS/devel/setup.bash"
 
-    if [ ! -f "$WS/devel/local_setup.bash" ]; then
-        echo "[ERROR] CR5 workspace is not built:"
-        echo "        $WS"
-        exit 1
+    # 3. 加载 CR5 工作空间（使用 --extend 叠加）
+    if [ ! -f "$WS/devel/setup.bash" ]; then
+        fail "CR5 工作空间未编译: $WS
+请运行: bash $WS/scripts/laptop/pull_build_book_demo.sh"
     fi
-
-    source "$WS/devel/local_setup.bash"
+    source "$WS/devel/setup.bash" --extend
 }
 
+# ============================================================
+# 加载环境
+# ============================================================
 load_ros_environment
+
+# 验证 ROS 包
+rospack find cr5_book_spray_demo &>/dev/null || fail "cr5_book_spray_demo 未找到"
+rospack find realsense2_camera &>/dev/null || fail "realsense2_camera 未找到"
 
 echo "=========================================="
 echo "  PLAN-ONLY MODE"

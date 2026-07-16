@@ -17,29 +17,27 @@ fail() { echo "[ERROR] $*" >&2; exit 1; }
 info() { echo "[INFO] $*"; }
 
 # ============================================================
-# 环境加载函数
+# 环境加载函数（使用 --extend 叠加）
 # ============================================================
 load_ros_environment() {
+    # 1. 加载 ROS 基础环境
+    if [ ! -f "/opt/ros/noetic/setup.bash" ]; then
+        fail "ROS Noetic 未安装"
+    fi
     source /opt/ros/noetic/setup.bash
 
+    # 2. 加载 RealSense 工作空间
     if [ ! -f "$REALSENSE_WS/devel/setup.bash" ]; then
-        echo "[ERROR] RealSense workspace is not built:"
-        echo "        $REALSENSE_WS"
-        echo
-        echo "Run:"
-        echo "  bash $WS/scripts/laptop/setup_realsense_ros1.sh"
-        exit 1
+        fail "RealSense 工作空间未编译: $REALSENSE_WS
+请运行: bash $WS/scripts/laptop/setup_realsense_ros1.sh"
     fi
-
     source "$REALSENSE_WS/devel/setup.bash"
 
-    if [ ! -f "$WS/devel/local_setup.bash" ]; then
-        echo "[ERROR] CR5 workspace is not built:"
-        echo "        $WS"
-        exit 1
+    # 3. 加载 CR5 工作空间（使用 --extend 叠加）
+    if [ ! -f "$WS/devel/setup.bash" ]; then
+        fail "CR5 工作空间未编译: $WS"
     fi
-
-    source "$WS/devel/local_setup.bash"
+    source "$WS/devel/setup.bash" --extend
 }
 
 # ============================================================
@@ -75,23 +73,39 @@ git log -1 --oneline --decorate
 # 3. 编译
 # ============================================================
 info "开始编译..."
-load_ros_environment
-catkin_make 2>&1 | tee "$LOG_FILE"
+source /opt/ros/noetic/setup.bash
+catkin_make -DCMAKE_POLICY_VERSION_MINIMUM=3.5 2>&1 | tee "$LOG_FILE"
 
 if [ "${PIPESTATUS[0]}" -ne 0 ]; then
     fail "编译失败，日志: $LOG_FILE"
 fi
 
-source "$WS/devel/local_setup.bash"
-rospack find cr5_book_spray_demo
+# ============================================================
+# 4. 加载环境并验证
+# ============================================================
+info "加载 ROS 环境..."
+load_ros_environment
+
+echo ""
+echo "--- ROS 包验证 ---"
+rospack find cr5_book_spray_demo || fail "cr5_book_spray_demo 未找到"
+rospack find realsense2_camera || fail "realsense2_camera 未找到"
+
+echo ""
+echo "[INFO] ROS_PACKAGE_PATH:"
+echo "$ROS_PACKAGE_PATH" | tr ':' '\n' | while read -r p; do
+    [ -n "$p" ] && echo "  $p"
+done
 
 # ============================================================
-# 4. 输出结果
+# 5. 输出结果
 # ============================================================
 echo ""
 echo "=========================================="
 echo "  编译完成"
 echo "=========================================="
 echo "Branch: $(git branch --show-current)"
-echo "Commit: $(git rev-parse HEAD)"
+echo "SHA: $(git rev-parse HEAD)"
+echo "CR5 Workspace: $WS"
+echo "RealSense Workspace: $REALSENSE_WS"
 echo "Build log: $LOG_FILE"
