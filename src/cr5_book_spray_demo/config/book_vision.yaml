@@ -1,0 +1,54 @@
+# D455 aligned RGB-D book detector.
+base_frame: base_link
+book_frame: book_detected
+locked_frame: book_locked
+
+color_topic: /camera/color/image_raw
+depth_topic: /camera/aligned_depth_to_color/image_raw
+camera_info_topic: /camera/color/camera_info
+
+# The current book is dark blue on a green conveyor, so excluding the green
+# background is a practical first-stage detector. Switch to edge_rectangle if
+# the belt color or lighting changes significantly.
+detection_mode: background_hsv
+roi_norm: [0.0, 0.0, 1.0, 1.0]
+# OpenCV HSV uses H=0..179. Tune with rqt_image_view/debug_image.
+background_hsv_lower: [30, 35, 20]
+background_hsv_upper: [100, 255, 255]
+
+min_area_px: 12000
+max_area_ratio: 0.60
+min_rectangularity: 0.72
+border_margin_px: 8
+max_border_sides: 1
+expected_aspect: 1.38
+aspect_min: 1.15
+aspect_max: 1.75
+mask_erode_px: 14
+morph_kernel_px: 9
+canny_low: 50
+canny_high: 150
+
+depth_min_m: 0.20
+depth_max_m: 1.80
+sample_stride: 3
+min_plane_points: 350
+plane_threshold_m: 0.004
+min_plane_inlier_ratio: 0.72
+max_plane_rmse_m: 0.004
+
+# IMPORTANT: measure the actual hardcover with a ruler and tighten these ranges.
+length_min_m: 0.20
+length_max_m: 0.34
+width_min_m: 0.14
+width_max_m: 0.26
+
+history_size: 45
+stable_frames: 15
+stable_max_age_s: 1.2
+max_position_std_m: 0.004
+max_orientation_spread_deg: 1.2
+max_size_std_m: 0.006
+
+tf_timeout_s: 0.15
+publish_debug: true

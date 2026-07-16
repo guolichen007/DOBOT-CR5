@@ -57,3 +57,27 @@ Desktop.ini
 
 # SSH staging (local only, never commit)
 .ssh_staging/
+
+# Models and generated inference files
+*.engine
+*.pt
+*.pth
+*.onnx
+*.plan
+
+# Local logs and editors
+cr5_test_logs/
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# Secrets
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+
+# Task prompts (local only)
+CLAUDE_DESKTOP_EXECUTION_PROMPT.md
