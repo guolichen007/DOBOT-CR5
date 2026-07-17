@@ -2,113 +2,110 @@
 set -euo pipefail
 
 # ============================================================
-# start_all.sh - 一键启动所有组件
+# start_all.sh - 启动所有组件
+# 用法: start_all {vision|planning}
 # ============================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-WS="${CR5_WS:-$HOME/cr5_ros1_ws}"
+source "$SCRIPT_DIR/common.sh"
+
+MODE="${1:-}"
 
 echo "=========================================="
-echo "  一键启动所有组件"
+echo "  启动所有组件"
 echo "=========================================="
-echo
-echo "启动顺序:"
-echo "  1. CR5 Driver"
-echo "  2. MoveIt"
-echo "  3. D455 相机"
-echo "  4. 书本识别"
-echo
 
-# 检查是否已有进程运行
-for PROC in dobot_bringup move_group realsense2_camera_node; do
-    if pgrep -f "$PROC" &>/dev/null; then
-        echo "[WARN] $PROC 已在运行"
-        echo "如需重启，请先执行: stop_all"
-        exit 1
-    fi
-done
+# 显示帮助
+show_help() {
+    echo
+    echo "用法: start_all {vision|planning}"
+    echo
+    echo "模式:"
+    echo "  vision    - 纯视觉模式（不启动 MoveIt，不使能机器人）"
+    echo "  planning  - 规划模式（启动 MoveIt，不自动使能）"
+    echo
+    echo "示例:"
+    echo "  start_all vision"
+    echo "  start_all planning"
+    echo
+}
+
+if [ -z "$MODE" ]; then
+    show_help
+    exit 0
+fi
 
 # 加载环境
-source "$SCRIPTS_DEV_DIR/env.sh" 2>/dev/null || true
+load_cr5_environment
 
-# 创建日志目录
-LOG_DIR="$HOME/cr5_test_logs"
-mkdir -p "$LOG_DIR"
-STAMP="$(date +%Y%m%d_%H%M%S)"
+case "$MODE" in
+    vision)
+        echo
+        echo "模式: 纯视觉"
+        echo "启动: Camera + Book Demo"
+        echo "不启动: MoveIt"
+        echo "不使能: 机器人"
+        echo
 
-echo "=========================================="
-echo "  步骤 1/4: 启动 CR5 Driver"
-echo "=========================================="
+        # 调用 start_vision
+        exec "$SCRIPT_DIR/start_vision.sh"
+        ;;
 
-if ! ping -c 1 -W 1 192.168.110.214 &>/dev/null; then
-    echo "[WARN] CR5 控制柜不可达，跳过 Driver 启动"
-    SKIP_DRIVER=true
-else
-    roslaunch dobot_bringup bringup.launch robot_ip:=192.168.110.214 &>"$LOG_DIR/driver_${STAMP}.log" &
-    DRIVER_PID=$!
-    echo "[INFO] CR5 Driver PID: $DRIVER_PID"
-    sleep 3
-fi
+    planning)
+        echo
+        echo "模式: 规划"
+        echo "启动: Driver + MoveIt + Camera"
+        echo "不启动: Book Demo"
+        echo "不自动使能: 机器人"
+        echo
 
-echo
-echo "=========================================="
-echo "  步骤 2/4: 启动 MoveIt"
-echo "=========================================="
+        # 1. 启动 Driver
+        echo "--- 步骤 1/3: 启动 CR5 Driver ---"
+        if rosnode list 2>/dev/null | grep -q "/cr5_robot"; then
+            echo "[INFO] CR5 Driver 已在运行"
+        else
+            "$SCRIPT_DIR/start_driver.sh"
+        fi
 
-if [ "${SKIP_DRIVER:-false}" = true ]; then
-    echo "[WARN] 跳过 MoveIt 启动（Driver 未启动）"
-else
-    roslaunch dobot_moveit moveit.launch &>"$LOG_DIR/moveit_${STAMP}.log" &
-    MOVEIT_PID=$!
-    echo "[INFO] MoveIt PID: $MOVEIT_PID"
-    sleep 3
-fi
+        # 2. 启动 MoveIt
+        echo
+        echo "--- 步骤 2/3: 启动 MoveIt ---"
+        if rosnode list 2>/dev/null | grep -q "/move_group"; then
+            echo "[INFO] MoveIt 已在运行"
+        else
+            "$SCRIPT_DIR/start_moveit.sh"
+        fi
 
-echo
-echo "=========================================="
-echo "  步骤 3/4: 启动 D455 相机"
-echo "=========================================="
+        # 3. 启动相机
+        echo
+        echo "--- 步骤 3/3: 启动 D455 相机 ---"
+        if rosnode list 2>/dev/null | grep -q "/camera/realsense2_camera"; then
+            echo "[INFO] D455 相机已在运行"
+        else
+            "$SCRIPT_DIR/start_camera.sh"
+        fi
 
-if ! lsusb 2>/dev/null | grep -qi "8086:0b5c\|RealSense Depth Camera 455"; then
-    echo "[WARN] D455 USB 设备未检测到，跳过相机启动"
-    SKIP_CAMERA=true
-else
-    roslaunch cr5_book_spray_demo d455_camera.launch &>"$LOG_DIR/camera_${STAMP}.log" &
-    CAMERA_PID=$!
-    echo "[INFO] D455 相机 PID: $CAMERA_PID"
-    sleep 5
-fi
+        echo
+        echo "=========================================="
+        echo "  规划模式启动完成"
+        echo "=========================================="
+        echo
+        echo "下一步:"
+        echo "  robot_status       - 查看机器人状态"
+        echo "  enable_robot_safe  - 安全使能机器人"
+        echo "  start_book_demo    - 启动书本识别"
+        echo
+        echo "重要提示:"
+        echo "  Velocity Scaling = 0.03～0.05"
+        echo "  Accel. Scaling = 0.03～0.05"
+        echo "  Start State = Current"
+        echo "  先 Plan，审核后再 Execute"
+        echo
+        ;;
 
-echo
-echo "=========================================="
-echo "  步骤 4/4: 启动书本识别"
-echo "=========================================="
-
-if [ "${SKIP_CAMERA:-false}" = true ]; then
-    echo "[WARN] 跳过书本识别启动（相机未启动）"
-else
-    # 检查相机话题
-    if rostopic list 2>/dev/null | grep -q "/camera/color/image_raw"; then
-        roslaunch cr5_book_spray_demo vision_only.launch start_camera:=false &>"$LOG_DIR/book_demo_${STAMP}.log" &
-        BOOK_PID=$!
-        echo "[INFO] 书本识别 PID: $BOOK_PID"
-    else
-        echo "[WARN] 相机话题不存在，跳过书本识别启动"
-    fi
-fi
-
-echo
-echo "=========================================="
-echo "  启动完成"
-echo "=========================================="
-echo
-echo "启动的组件:"
-[ -n "${DRIVER_PID:-}" ] && echo "  CR5 Driver: PID $DRIVER_PID"
-[ -n "${MOVEIT_PID:-}" ] && echo "  MoveIt: PID $MOVEIT_PID"
-[ -n "${CAMERA_PID:-}" ] && echo "  D455 相机: PID $CAMERA_PID"
-[ -n "${BOOK_PID:-}" ] && echo "  书本识别: PID $BOOK_PID"
-echo
-echo "日志目录: $LOG_DIR"
-echo
-echo "停止所有: stop_all"
-echo
+    *)
+        echo "[ERROR] 未知模式: $MODE"
+        show_help
+        exit 1
+        ;;
+esac

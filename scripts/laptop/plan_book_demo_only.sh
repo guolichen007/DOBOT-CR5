@@ -6,44 +6,18 @@ set -euo pipefail
 # MoveIt plan-only 测试（禁止实体执行）
 # ============================================================
 
-WS="${WS:-$HOME/cr5_ros1_ws}"
-REALSENSE_WS="${REALSENSE_WS:-$HOME/realsense_ros1_ws}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEV_DIR="$(cd "$SCRIPT_DIR/../dev" && pwd)"
 
-fail() { echo "[ERROR] $*" >&2; exit 1; }
+# 复用 common.sh
+source "$DEV_DIR/common.sh"
 
-# ============================================================
-# 环境加载函数（使用 --extend 叠加）
-# ============================================================
-load_ros_environment() {
-    # 1. 加载 ROS 基础环境
-    if [ ! -f "/opt/ros/noetic/setup.bash" ]; then
-        fail "ROS Noetic 未安装"
-    fi
-    source /opt/ros/noetic/setup.bash
-
-    # 2. 加载 RealSense 工作空间
-    if [ ! -f "$REALSENSE_WS/devel/setup.bash" ]; then
-        fail "RealSense 工作空间未编译: $REALSENSE_WS
-请运行: bash $WS/scripts/laptop/setup_realsense_ros1.sh"
-    fi
-    source "$REALSENSE_WS/devel/setup.bash"
-
-    # 3. 加载 CR5 工作空间（使用 --extend 叠加）
-    if [ ! -f "$WS/devel/setup.bash" ]; then
-        fail "CR5 工作空间未编译: $WS
-请运行: bash $WS/scripts/laptop/pull_build_book_demo.sh"
-    fi
-    source "$WS/devel/setup.bash" --extend
-}
-
-# ============================================================
 # 加载环境
-# ============================================================
-load_ros_environment
+load_cr5_environment
 
 # 验证 ROS 包
-rospack find cr5_book_spray_demo &>/dev/null || fail "cr5_book_spray_demo 未找到"
-rospack find realsense2_camera &>/dev/null || fail "realsense2_camera 未找到"
+verify_ros_package cr5_book_spray_demo
+verify_ros_package realsense2_camera
 
 echo "=========================================="
 echo "  PLAN-ONLY MODE"
@@ -52,7 +26,7 @@ echo "allow_execution=false"
 echo "path_mode=single_stroke"
 echo "orientation_mode=keep_current"
 echo "eef_link=Tool_end"
-echo ""
+echo
 echo "禁止："
 echo "  - execute_path"
 echo "  - confirm_execute"

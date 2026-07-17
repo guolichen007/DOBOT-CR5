@@ -134,6 +134,10 @@ cd ~/cr5_ros1_ws
 
 ## 项目文档
 
+- [CR5 + D455 启动流程与视觉调试指南](docs/CR5_D455_CURRENT_STARTUP_AND_VISION_DEBUG.md) — 当前标准启动流程
+- [开发工具链文档](docs/DEV_TOOLKIT.md) — scripts/dev/ 工具链使用说明
+- [RealSense ROS1 设置](docs/REALSENSE_ROS1_SETUP.md) — D455 相机工作空间配置
+- [笔记本测试流程](docs/BOOK_SPRAY_LAPTOP_REMOTE_TEST.md) — 开发主机与实机笔记本协同测试
 - [实机基础测试指南](docs/REAL_MACHINE_TEST_GUIDE.md) — 从网络检查到首次运动的完整安全测试流程
 - [GitHub SSH 与 Ubuntu 部署指南](docs/GITHUB_SSH_UBUNTU_DEPLOY.md) — 完整的从零配置到日常使用指南
 - [代码传输工作流](docs/CODE_TRANSFER.md) — Windows 主机与 Ubuntu 笔记本之间的版本管理方案
