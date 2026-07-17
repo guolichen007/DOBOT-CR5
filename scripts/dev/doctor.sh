@@ -246,10 +246,10 @@ do_vision() {
         fi
     done
 
-    # 8. TF 检查
+    # 8. TF 检查（使用可靠的单次检查）
     echo
     echo "--- TF 检查 ---"
-    if timeout 3 rosrun tf tf_echo base_link camera_color_optical_frame &>/dev/null; then
+    if wait_for_tf_once base_link camera_color_optical_frame 5; then
         pass "base_link -> camera_color_optical_frame TF 存在"
     else
         warn "base_link -> camera_color_optical_frame TF 不存在"

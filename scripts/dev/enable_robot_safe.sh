@@ -28,21 +28,33 @@ if ! rosservice list 2>/dev/null | grep -q "/dobot_bringup/srv/EnableRobot"; the
     exit 1
 fi
 
-# 3. 检查错误
+# 3. 检查错误状态（fail-closed）
 echo "检查机器人错误状态..."
-ERROR_ID="$(rosservice call /dobot_bringup/srv/TcpDashboard "command: 'GetErrorID()'" 2>/dev/null || echo "")"
+ERROR_ID="$(get_robot_status_field ErrorID)"
+if [ "$ERROR_ID" = "ERROR" ]; then
+    echo "[ERROR] 无法读取错误状态"
+    echo "  请手动检查机器人状态"
+    exit 1
+fi
+
 echo "GetErrorID: $ERROR_ID"
 
-if echo "$ERROR_ID" | grep -qv "0\b"; then
-    echo "[ERROR] 机器人存在错误，请先清除错误"
+# 精确检查错误码是否为 0
+if [ "$ERROR_ID" != "0" ]; then
+    echo "[ERROR] 机器人存在错误 (ErrorID=$ERROR_ID)，请先清除错误"
     exit 1
 fi
 
 # 4. 显示当前状态
 echo
 echo "当前机器人状态:"
-ROBOT_MODE="$(rosservice call /dobot_bringup/srv/TcpDashboard "command: 'RobotMode()'" 2>/dev/null || echo "")"
+ROBOT_MODE="$(get_robot_status_field RobotMode)"
 echo "RobotMode: $ROBOT_MODE"
+
+if [ "$ROBOT_MODE" = "ERROR" ]; then
+    echo "[ERROR] 无法读取 RobotMode"
+    exit 1
+fi
 
 # 5. 安全提示
 echo
@@ -68,7 +80,7 @@ echo "调用 EnableRobot 服务..."
 RESULT="$(rosservice call /dobot_bringup/srv/EnableRobot "args: []" 2>/dev/null || echo "服务调用失败")"
 echo "结果: $RESULT"
 
-# 8. 等待使能完成
+# 8. 等待使能完成（四项全部验证）
 echo
 echo "等待使能完成..."
 TIMEOUT=20
@@ -76,11 +88,14 @@ ELAPSED=0
 SUCCESS=false
 
 while [ "$ELAPSED" -lt "$TIMEOUT" ]; do
-    FEED_INFO="$(rostopic echo -n 1 /dobot_bringup/msg/FeedInfo 2>/dev/null || echo "")"
-    ROBOT_STATUS="$(rostopic echo -n 1 /dobot_bringup/msg/RobotStatus 2>/dev/null || echo "")"
+    ROBOT_MODE="$(get_robot_status_field RobotMode 2>/dev/null || echo "ERROR")"
+    IS_ENABLE="$(get_robot_status_field is_enable 2>/dev/null || echo "ERROR")"
+    ENABLE_STATUS="$(get_robot_status_field EnableStatus 2>/dev/null || echo "ERROR")"
+    ERROR_STATUS="$(get_robot_status_field ErrorStatus 2>/dev/null || echo "ERROR")"
 
-    if echo "$FEED_INFO" | grep -q "EnableStatus: 1" && \
-       echo "$ROBOT_STATUS" | grep -q "is_enable: True"; then
+    # 四项全部验证
+    if [ "$ROBOT_MODE" = "5" ] && [ "$IS_ENABLE" = "True" ] && \
+       [ "$ENABLE_STATUS" = "1" ] && [ "$ERROR_STATUS" = "0" ]; then
         SUCCESS=true
         break
     fi
@@ -95,12 +110,17 @@ if [ "$SUCCESS" = true ]; then
     echo "[SUCCESS] 机器人已使能"
     echo
     echo "验证状态:"
-    ROBOT_MODE="$(rosservice call /dobot_bringup/srv/TcpDashboard "command: 'RobotMode()'" 2>/dev/null || echo "")"
-    echo "RobotMode: $ROBOT_MODE"
-    rostopic echo -n 1 /dobot_bringup/msg/RobotStatus 2>/dev/null | grep -E "is_enable|RobotMode"
-    rostopic echo -n 1 /dobot_bringup/msg/FeedInfo 2>/dev/null | grep -E "EnableStatus|ErrorStatus"
+    echo "  RobotMode: $ROBOT_MODE"
+    echo "  is_enable: $IS_ENABLE"
+    echo "  EnableStatus: $ENABLE_STATUS"
+    echo "  ErrorStatus: $ERROR_STATUS"
 else
     echo "[FAIL] 使能超时 (${TIMEOUT}s)"
+    echo "当前状态:"
+    echo "  RobotMode: $ROBOT_MODE"
+    echo "  is_enable: $IS_ENABLE"
+    echo "  EnableStatus: $ENABLE_STATUS"
+    echo "  ErrorStatus: $ERROR_STATUS"
     echo "请检查机器人状态"
     exit 1
 fi

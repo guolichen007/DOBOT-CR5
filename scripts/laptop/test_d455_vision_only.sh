@@ -306,16 +306,15 @@ do_vision() {
         exit 1
     fi
 
-    # 检查 robot-to-camera TF
+    # 检查 robot-to-camera TF（使用可靠的单次检查）
     echo
     echo "--- TF 检查 ---"
-    if timeout 3 rosrun tf tf_echo base_link camera_color_optical_frame &>/dev/null; then
+    if wait_for_tf_once base_link camera_color_optical_frame 5; then
         echo "[PASS] base_link -> camera_color_optical_frame TF 存在"
     else
         echo "[WARN] robot-to-camera TF unavailable"
-        echo "       允许查看彩色/深度/调试图"
-        echo "       禁止锁定为机器人基座目标"
-        echo "       禁止 MoveIt plan-only"
+        echo "  当前状态: base-frame 目标锁定不可用"
+        echo "  允许: 二维和 camera-frame 视觉"
     fi
 
     echo "启动 vision_only.launch (start_camera:=false)"

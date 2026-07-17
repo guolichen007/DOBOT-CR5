@@ -15,8 +15,8 @@ echo "=========================================="
 echo "  编译 CR5 工作空间"
 echo "=========================================="
 
-# 加载环境
-load_cr5_environment
+# 加载构建环境（不要求 CR5 devel 已存在）
+load_cr5_build_environment
 
 # 显示 Git 信息
 echo
@@ -42,7 +42,7 @@ else
     exit 1
 fi
 
-# 验证包
+# 验证包（此时需要加载完整运行时环境）
 echo
 echo "--- 验证 ROS 包 ---"
 source "$CR5_WS/devel/setup.bash" --extend

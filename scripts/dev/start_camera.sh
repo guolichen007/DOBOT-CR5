@@ -57,8 +57,8 @@ roslaunch cr5_book_spray_demo d455_camera.launch &
 CAMERA_PID=$!
 echo "$CAMERA_PID" > "$RUN_DIR/camera.pid"
 
-# 6. 等待话题就绪
-echo "等待相机话题..."
+# 6. 等待话题 publisher 就绪
+echo "等待相机话题 publisher..."
 for TOPIC in \
     /camera/color/image_raw \
     /camera/color/camera_info \
@@ -67,7 +67,13 @@ for TOPIC in \
     wait_for_topic_publisher "$TOPIC" 30
 done
 
-# 7. 运行话题检查
+# 7. 等待实际数据
+echo
+echo "等待相机数据..."
+wait_for_topic_data /camera/color/image_raw 10
+wait_for_topic_data /camera/aligned_depth_to_color/image_raw 10
+
+# 8. 运行话题检查
 echo
 echo "运行话题一致性检查..."
 if [ -f "$CR5_WS/scripts/laptop/check_d455_topics.py" ]; then
@@ -76,7 +82,7 @@ else
     echo "[INFO] check_d455_topics.py 不存在"
 fi
 
-# 8. 输出频率
+# 9. 输出频率
 echo
 echo "采样频率..."
 for TOPIC in /camera/color/image_raw /camera/aligned_depth_to_color/image_raw; do

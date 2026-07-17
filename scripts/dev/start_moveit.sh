@@ -13,7 +13,7 @@ echo "  启动 MoveIt"
 echo "=========================================="
 
 # 1. 加载环境
-load_ros_environment
+load_cr5_environment
 
 # 2. 验证包
 verify_ros_package dobot_moveit

@@ -52,18 +52,25 @@ else
     echo "[INFO] MoveIt 未运行"
 fi
 
-# 4. 停止 Driver（需要安全检查）
+# 4. 停止 Driver（需要安全检查 - fail-closed）
 echo
 echo "--- 停止 CR5 Driver ---"
 if rosnode list 2>/dev/null | grep -q "/cr5_robot"; then
-    # 检查机器人是否使能
+    # 检查机器人状态（fail-closed）
     echo "检查机器人状态..."
-    FEED_INFO="$(rostopic echo -n 1 /dobot_bringup/msg/FeedInfo 2>/dev/null || echo "")"
-    ROBOT_STATUS="$(rostopic echo -n 1 /dobot_bringup/msg/RobotStatus 2>/dev/null || echo "")"
 
-    ENABLE_STATUS="$(echo "$FEED_INFO" | grep -oP "EnableStatus: \K\d+" || echo "0")"
-    IS_ENABLE="$(echo "$ROBOT_STATUS" | grep -oP "is_enable: \K\w+" || echo "False")"
-    RUN_QUEUED="$(echo "$FEED_INFO" | grep -oP "RunQueuedCmd: \K\d+" || echo "0")"
+    ENABLE_STATUS="$(get_robot_status_field EnableStatus)"
+    IS_ENABLE="$(get_robot_status_field is_enable)"
+    RUN_QUEUED="$(get_robot_status_field RunQueuedCmd)"
+
+    # 检查读取失败
+    if [ "$ENABLE_STATUS" = "ERROR" ] || [ "$IS_ENABLE" = "ERROR" ] || [ "$RUN_QUEUED" = "ERROR" ]; then
+        echo
+        echo "[ERROR] 无法读取机器人状态"
+        echo "  请手动检查机器人状态后再停止 Driver"
+        echo "  状态读取失败时不得停止 Driver"
+        exit 1
+    fi
 
     echo "EnableStatus: $ENABLE_STATUS"
     echo "is_enable: $IS_ENABLE"
