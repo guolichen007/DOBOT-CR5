@@ -116,6 +116,12 @@ class BookPoseEstimator:
         self.debug_pub = rospy.Publisher("~debug_image", Image, queue_size=1)
         self.marker_pub = rospy.Publisher("~markers", MarkerArray, queue_size=1)
 
+        # Camera-frame outputs (always available, independent of base TF).
+        self.camera_pose_pub = rospy.Publisher("~camera_book_pose", PoseStamped, queue_size=1)
+        self.camera_polygon_pub = rospy.Publisher("~camera_book_polygon", PolygonStamped, queue_size=1)
+        self.camera_valid_pub = rospy.Publisher("~camera_frame_valid", Bool, queue_size=1)
+        self.base_valid_pub = rospy.Publisher("~base_frame_valid", Bool, queue_size=1)
+
         # Latched locked outputs.
         self.locked_pose_pub = rospy.Publisher(
             "~locked_pose", PoseStamped, queue_size=1, latch=True
@@ -402,6 +408,7 @@ class BookPoseEstimator:
             )
             return None, mask
 
+        # Camera-frame pose (always available).
         camera_pose = PoseStamped()
         camera_pose.header.stamp = stamp
         camera_pose.header.frame_id = camera_frame
@@ -413,45 +420,77 @@ class BookPoseEstimator:
         camera_pose.pose.orientation.z = float(quat[2])
         camera_pose.pose.orientation.w = float(quat[3])
 
-        transform = self.tf_buffer.lookup_transform(
-            self.base_frame,
-            camera_frame,
-            stamp,
-            rospy.Duration(self.tf_timeout_s),
-        )
-        base_pose = tf2_geometry_msgs.do_transform_pose(camera_pose, transform)
-        base_pose.header.frame_id = self.base_frame
-        base_pose.header.stamp = stamp
-
-        size = Vector3Stamped()
-        size.header = base_pose.header
-        size.vector.x = float(length)
-        size.vector.y = float(width)
-        size.vector.z = 0.0
-
-        polygon = PolygonStamped()
-        polygon.header = base_pose.header
-        # Transform each camera-frame corner to base_link for RViz/debugging.
+        # Camera-frame polygon.
+        camera_polygon = PolygonStamped()
+        camera_polygon.header = camera_pose.header
         for corner in corners3d:
-            corner_pose = PoseStamped()
-            corner_pose.header = camera_pose.header
-            corner_pose.pose.position.x = float(corner[0])
-            corner_pose.pose.position.y = float(corner[1])
-            corner_pose.pose.position.z = float(corner[2])
-            corner_pose.pose.orientation.w = 1.0
-            base_corner = tf2_geometry_msgs.do_transform_pose(corner_pose, transform)
-            polygon.polygon.points.append(
+            camera_polygon.polygon.points.append(
                 Point32(
-                    x=base_corner.pose.position.x,
-                    y=base_corner.pose.position.y,
-                    z=base_corner.pose.position.z,
+                    x=float(corner[0]),
+                    y=float(corner[1]),
+                    z=float(corner[2]),
                 )
             )
 
+        # Camera-frame size.
+        camera_size = Vector3Stamped()
+        camera_size.header = camera_pose.header
+        camera_size.vector.x = float(length)
+        camera_size.vector.y = float(width)
+        camera_size.vector.z = 0.0
+
+        # Try base-frame transform (may fail).
+        base_pose = None
+        base_polygon = None
+        base_size = None
+        base_tf_ok = False
+
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.base_frame,
+                camera_frame,
+                stamp,
+                rospy.Duration(self.tf_timeout_s),
+            )
+            base_pose = tf2_geometry_msgs.do_transform_pose(camera_pose, transform)
+            base_pose.header.frame_id = self.base_frame
+            base_pose.header.stamp = stamp
+
+            base_size = Vector3Stamped()
+            base_size.header = base_pose.header
+            base_size.vector.x = float(length)
+            base_size.vector.y = float(width)
+            base_size.vector.z = 0.0
+
+            base_polygon = PolygonStamped()
+            base_polygon.header = base_pose.header
+            for corner in corners3d:
+                corner_pose = PoseStamped()
+                corner_pose.header = camera_pose.header
+                corner_pose.pose.position.x = float(corner[0])
+                corner_pose.pose.position.y = float(corner[1])
+                corner_pose.pose.position.z = float(corner[2])
+                corner_pose.pose.orientation.w = 1.0
+                base_corner = tf2_geometry_msgs.do_transform_pose(corner_pose, transform)
+                base_polygon.polygon.points.append(
+                    Point32(
+                        x=base_corner.pose.position.x,
+                        y=base_corner.pose.position.y,
+                        z=base_corner.pose.position.z,
+                    )
+                )
+            base_tf_ok = True
+        except Exception as exc:
+            rospy.logwarn_throttle(5.0, "Base TF transform failed: %s", exc)
+
         result = {
-            "pose": base_pose,
-            "size": size,
-            "polygon": polygon,
+            "camera_pose": camera_pose,
+            "camera_polygon": camera_polygon,
+            "camera_size": camera_size,
+            "base_pose": base_pose,
+            "base_polygon": base_polygon,
+            "base_size": base_size,
+            "base_tf_ok": base_tf_ok,
             "rmse": rmse,
             "inlier_ratio": inlier_ratio,
             "box2d": box2d,
@@ -472,12 +511,19 @@ class BookPoseEstimator:
             if stamp == rospy.Time(0):
                 rospy.logwarn_throttle(3.0, "Camera image has zero timestamp; frame rejected")
                 self.valid_pub.publish(Bool(data=False))
+                self.camera_valid_pub.publish(Bool(data=False))
+                self.base_valid_pub.publish(Bool(data=False))
                 return
 
-            result, mask = self.estimate_pose(bgr, depth_m, K, stamp, camera_frame)
+            # Copy debug image BEFORE estimate_pose (so we always have it).
             debug = bgr.copy()
+
+            result, mask = self.estimate_pose(bgr, depth_m, K, stamp, camera_frame)
+
             if result is None:
                 self.valid_pub.publish(Bool(data=False))
+                self.camera_valid_pub.publish(Bool(data=False))
+                self.base_valid_pub.publish(Bool(data=False))
                 if self.publish_debug:
                     small = cv2.resize(mask, (debug.shape[1] // 4, debug.shape[0] // 4))
                     small = cv2.cvtColor(small, cv2.COLOR_GRAY2BGR)
@@ -493,44 +539,76 @@ class BookPoseEstimator:
                     )
                 return
 
-            self.pose_pub.publish(result["pose"])
-            self.size_pub.publish(result["size"])
-            self.polygon_pub.publish(result["polygon"])
-            self.valid_pub.publish(Bool(data=True))
-            self.rmse_pub.publish(Float32(data=float(result["rmse"])))
+            # Always publish camera-frame results.
+            self.camera_pose_pub.publish(result["camera_pose"])
+            self.camera_polygon_pub.publish(result["camera_polygon"])
+            self.camera_valid_pub.publish(Bool(data=True))
 
-            with self.lock:
-                self.history.append(
-                    {
-                        "stamp": rospy.Time.now(),
-                        "pose": result["pose"],
-                        "size": result["size"],
-                    }
-                )
+            # Publish base-frame results only if TF succeeded.
+            base_tf_ok = result["base_tf_ok"]
+            self.base_valid_pub.publish(Bool(data=base_tf_ok))
+            self._last_base_valid = base_tf_ok
+
+            if base_tf_ok:
+                # Use base-frame pose as primary output.
+                self.pose_pub.publish(result["base_pose"])
+                self.size_pub.publish(result["base_size"])
+                self.polygon_pub.publish(result["base_polygon"])
+                self.valid_pub.publish(Bool(data=True))
+                self.rmse_pub.publish(Float32(data=float(result["rmse"])))
+
+                # Only add to lock history when base-frame is available.
+                with self.lock:
+                    self.history.append(
+                        {
+                            "stamp": rospy.Time.now(),
+                            "pose": result["base_pose"],
+                            "size": result["base_size"],
+                        }
+                    )
+            else:
+                # Base TF failed - still publish camera-frame as primary.
+                self.pose_pub.publish(result["camera_pose"])
+                self.size_pub.publish(result["camera_size"])
+                self.polygon_pub.publish(result["camera_polygon"])
+                self.valid_pub.publish(Bool(data=True))
+                self.rmse_pub.publish(Float32(data=float(result["rmse"])))
+                # Do NOT add to lock history when base-frame is unavailable.
 
             if self.publish_debug:
                 box = np.round(result["box2d"]).astype(np.int32)
                 cv2.polylines(debug, [box], True, (0, 255, 0), 3)
+
+                # Determine display size based on TF status.
+                display_size = result["camera_size"]
+                tf_status = "TF: OK" if base_tf_ok else "TF: UNAVAILABLE"
+                tf_color = (0, 255, 0) if base_tf_ok else (0, 165, 255)
+
                 cv2.putText(
                     debug,
-                    "BOOK %.0fx%.0f mm  RMSE %.1f mm"
+                    "BOOK %.0fx%.0f mm  RMSE %.1f mm  %s"
                     % (
-                        result["size"].vector.x * 1000.0,
-                        result["size"].vector.y * 1000.0,
+                        display_size.vector.x * 1000.0,
+                        display_size.vector.y * 1000.0,
                         result["rmse"] * 1000.0,
+                        tf_status,
                     ),
                     (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     0.8,
-                    (0, 255, 0),
+                    tf_color,
                     2,
                 )
-        except (CvBridgeError, ValueError, tf2_ros.TransformException) as exc:
+        except (CvBridgeError, ValueError) as exc:
             rospy.logwarn_throttle(2.0, "Book detection frame rejected: %s", exc)
             self.valid_pub.publish(Bool(data=False))
+            self.camera_valid_pub.publish(Bool(data=False))
+            self.base_valid_pub.publish(Bool(data=False))
         except Exception as exc:  # Keep camera callback alive, but expose unexpected errors.
             rospy.logerr_throttle(2.0, "Unexpected book estimator error: %s", exc)
             self.valid_pub.publish(Bool(data=False))
+            self.camera_valid_pub.publish(Bool(data=False))
+            self.base_valid_pub.publish(Bool(data=False))
         finally:
             if self.publish_debug and debug is not None:
                 try:
@@ -553,6 +631,14 @@ class BookPoseEstimator:
         return math.degrees(2.0 * math.acos(dot))
 
     def handle_lock(self, _request):
+        # Only allow lock when base-frame TF is available.
+        # Check current base_frame_valid state.
+        if not hasattr(self, '_last_base_valid') or not self._last_base_valid:
+            return TriggerResponse(
+                success=False,
+                message="Base-frame TF unavailable. Cannot lock target without base_link -> camera transform.",
+            )
+
         with self.lock:
             if len(self.history) < self.stable_frames:
                 return TriggerResponse(

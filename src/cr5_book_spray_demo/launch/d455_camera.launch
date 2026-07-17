@@ -24,6 +24,9 @@
   <arg name="enable_color" default="true"/>
   <arg name="enable_depth" default="true"/>
 
+  <!-- 禁用 confidence（D455 不支持） -->
+  <arg name="enable_confidence" default="false"/>
+
   <!-- Include 上游 rs_camera.launch -->
   <include file="$(find realsense2_camera)/launch/rs_camera.launch">
     <arg name="serial_no" value="$(arg serial_no)"/>
@@ -33,5 +36,6 @@
     <arg name="enable_pointcloud" value="$(arg enable_pointcloud)"/>
     <arg name="enable_color" value="$(arg enable_color)"/>
     <arg name="enable_depth" value="$(arg enable_depth)"/>
+    <arg name="enable_confidence" value="$(arg enable_confidence)"/>
   </include>
 </launch>

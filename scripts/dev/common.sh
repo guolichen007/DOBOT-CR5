@@ -125,14 +125,32 @@ wait_for_topic_publisher() {
 
     echo -n "等待话题 $topic "
     while [ "$elapsed" -lt "$timeout" ]; do
-        # 检查话题是否存在且有非 None 的 publisher
+        # 检查话题是否存在
+        if ! rostopic list 2>/dev/null | grep -q "^${topic}$"; then
+            echo -n "."
+            sleep "$interval"
+            elapsed=$((elapsed + interval))
+            continue
+        fi
+
+        # 检查是否有真正的 publisher（排除 "Publishers: None" 的情况）
         local info
         info="$(rostopic info "$topic" 2>/dev/null || echo "")"
-        if echo "$info" | grep -q "^Publishers:" && \
-           ! echo "$info" | grep -q "Publishers: None"; then
+
+        # 方式1: 检查是否有非 None 的 Publishers 行
+        if echo "$info" | grep -A1 "^Publishers:" | grep -q "^ \*/\|^ \*"; then
             echo " ✓"
             return 0
         fi
+
+        # 方式2: 检查 publisher 数量（更可靠）
+        local pub_count
+        pub_count="$(echo "$info" | sed -n '/^Publishers:/,/^Subscribers:/p' | grep -c "^ \*" || echo 0)"
+        if [ "$pub_count" -gt 0 ]; then
+            echo " ✓"
+            return 0
+        fi
+
         echo -n "."
         sleep "$interval"
         elapsed=$((elapsed + interval))

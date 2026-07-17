@@ -241,7 +241,7 @@ do_vision() {
     echo "--- 话题频率 ---"
     for TOPIC in /camera/color/image_raw /camera/aligned_depth_to_color/image_raw; do
         if rostopic list 2>/dev/null | grep -q "^${TOPIC}$"; then
-            HZ="$(timeout 5 rostopic hz "$TOPIC" 2>/dev/null | grep "average rate" | awk '{print $3}' || echo "N/A")
+            HZ="$(timeout 5 rostopic hz "$TOPIC" 2>/dev/null | grep "average rate" | awk '{print $3}' || echo "N/A")"
             echo "  $TOPIC: $HZ Hz"
         fi
     done
