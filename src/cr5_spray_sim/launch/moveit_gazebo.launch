@@ -19,7 +19,11 @@
     <rosparam command="load" file="$(find cr5_moveit)/config/kinematics.yaml"/>
   </group>
 
-  <!-- Start Gazebo + spawn CR5 -->
+  <!-- Load MoveIt controller config BEFORE move_group starts -->
+  <rosparam file="$(find cr5_spray_sim)/config/moveit_gazebo_controllers.yaml"
+    command="load" ns="/move_group"/>
+
+  <!-- Start Gazebo + spawn CR5 + controllers -->
   <include file="$(find cr5_spray_sim)/launch/cr5_only_gazebo.launch">
     <arg name="gui" value="$(arg gui)"/>
     <arg name="headless" value="$(arg headless)"/>
@@ -33,8 +37,11 @@
     <arg name="info" value="true"/>
   </include>
 
-  <!-- Override MoveIt controller config for Gazebo -->
-  <rosparam file="$(find cr5_spray_sim)/config/moveit_gazebo_controllers.yaml" command="load"
-    ns="/move_group"/>
+  <!-- Safety check node: verify /use_sim_time and no dobot_bringup before allowing execution -->
+  <node name="execution_safety_check" pkg="cr5_spray_sim"
+    type="execution_safety_check.py" output="screen"
+    if="$(arg execute)">
+    <param name="simulation_confirm" value="GAZEBO_ONLY"/>
+  </node>
 
 </launch>

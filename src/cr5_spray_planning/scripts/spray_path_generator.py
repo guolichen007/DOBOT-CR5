@@ -130,14 +130,211 @@ class SprayPathGenerator:
 
     def _mesh_slice_raster(self, mesh, line_spacing, point_spacing,
                            stand_off, spray_dir):
-        """Mesh slice raster."""
-        bbox = mesh.get_axis_aligned_bounding_box()
-        extent = bbox.get_extent()
-        # Simplified: fallback to planar
+        """Real mesh slice raster: intersect parallel planes with mesh triangles."""
         vertices = np.asarray(mesh.vertices)
-        normals = np.asarray(mesh.vertex_normals)
-        return self._planar_raster(vertices, normals, line_spacing,
-                                   point_spacing, stand_off, spray_dir)
+        triangles = np.asarray(mesh.triangles)
+        mesh.compute_vertex_normals()
+        vertex_normals = np.asarray(mesh.vertex_normals)
+
+        # Build per-triangle normals
+        tri_normals = np.cross(
+            vertices[triangles[:, 1]] - vertices[triangles[:, 0]],
+            vertices[triangles[:, 2]] - vertices[triangles[:, 0]])
+        tri_normals /= np.linalg.norm(tri_normals, axis=1, keepdims=True) + 1e-10
+
+        # Select triangles facing spray direction
+        cos_angles = np.dot(tri_normals, -spray_dir)
+        threshold = np.cos(np.deg2rad(self.config.get("normal_threshold_deg", 60)))
+        selected_tris = cos_angles > threshold
+        if not np.any(selected_tris):
+            raise ValueError("No triangles face spray direction")
+
+        # Build largest connected component of selected triangles
+        if self.config.get("use_largest_component", True):
+            selected_tris = self._largest_component(selected_tris, triangles)
+
+        # Edge margin: shrink selected faces
+        edge_margin = self.config.get("edge_margin", 0.0)
+        if edge_margin > 0:
+            selected_tris = self._apply_edge_margin(
+                selected_tris, triangles, vertices, edge_margin)
+
+        # Get bounding box in projection plane
+        selected_verts = np.unique(triangles[selected_tris].flatten())
+        pts = vertices[selected_verts]
+
+        if abs(spray_dir[0]) < 0.99:
+            u_vec = np.cross(spray_dir, [1, 0, 0])
+        else:
+            u_vec = np.cross(spray_dir, [0, 1, 0])
+        u_vec /= np.linalg.norm(u_vec)
+        v_vec = np.cross(spray_dir, u_vec)
+        v_vec /= np.linalg.norm(v_vec)
+
+        proj_u = np.dot(pts, u_vec)
+        proj_v = np.dot(pts, v_vec)
+
+        # Slice planes perpendicular to v direction (scan lines)
+        v_min, v_max = proj_v.min(), proj_v.max()
+        v_vals = np.arange(v_min, v_max + line_spacing, line_spacing)
+
+        path = []
+        alternate = self.config.get("alternate_direction", True)
+
+        for line_idx, v_val in enumerate(v_vals):
+            # Intersect slicing plane with each selected triangle
+            line_pts = self._slice_plane_triangles(
+                v_val, v_vec, spray_dir, vertices, triangles,
+                selected_tris, vertex_normals)
+
+            if len(line_pts) < 2:
+                continue
+
+            # Sort along u direction
+            line_pts = sorted(line_pts, key=lambda p: np.dot(p["pos"], u_vec))
+
+            # Resample at point_spacing
+            u_min_line = np.dot(line_pts[0]["pos"], u_vec)
+            u_max_line = np.dot(line_pts[-1]["pos"], u_vec)
+            n_pts_line = max(2, int((u_max_line - u_min_line) / point_spacing) + 1)
+
+            if alternate and line_idx % 2 == 1:
+                sample_range = np.linspace(u_max_line, u_min_line, n_pts_line)
+            else:
+                sample_range = np.linspace(u_min_line, u_max_line, n_pts_line)
+
+            for u_val in sample_range:
+                # Find closest slice point
+                dists = [abs(np.dot(p["pos"], u_vec) - u_val) for p in line_pts]
+                closest = line_pts[np.argmin(dists)]
+
+                normal = closest["normal"]
+                z_axis = -normal / np.linalg.norm(normal)
+
+                # Tangent direction
+                direction = (1 if (line_idx % 2 == 0) else -1) * u_vec \
+                    if alternate else u_vec
+
+                y_axis = np.cross(z_axis, direction)
+                ny = np.linalg.norm(y_axis)
+                if ny < 1e-10:
+                    y_axis = np.cross(z_axis, np.array([0, 0, 1]))
+                    ny = np.linalg.norm(y_axis)
+                y_axis /= ny
+
+                x_axis = np.cross(y_axis, z_axis)
+                nx = np.linalg.norm(x_axis)
+                if nx > 1e-10:
+                    x_axis /= nx
+
+                nozzle_pos = closest["pos"] + normal * stand_off
+                path.append({
+                    "position": nozzle_pos.tolist(),
+                    "surface_point": closest["pos"].tolist(),
+                    "normal": (-z_axis).tolist(),
+                    "tangent": direction.tolist(),
+                    "line_id": line_idx,
+                    "segment_id": 0,
+                })
+
+        return path
+
+    def _slice_plane_triangles(self, v_val, v_vec, spray_dir, vertices,
+                                triangles, selected_tris, vertex_normals):
+        """Intersect a plane (v = v_val) with selected triangles. Return list of {pos, norm}."""
+        points = []
+        for tri_idx in np.where(selected_tris)[0]:
+            tri = triangles[tri_idx]
+            p0, p1, p2 = vertices[tri[0]], vertices[tri[1]], vertices[tri[2]]
+            n0, n1, n2 = vertex_normals[tri[0]], vertex_normals[tri[1]], vertex_normals[tri[2]]
+
+            d0, d1, d2 = np.dot(p0, v_vec), np.dot(p1, v_vec), np.dot(p2, v_vec)
+
+            # Find intersections
+            intersections = []
+            for (pa, pb, da, db, na, nb) in [
+                (p0, p1, d0, d1, n0, n1),
+                (p1, p2, d1, d2, n1, n2),
+                (p2, p0, d2, d0, n2, n0),
+            ]:
+                if (da - v_val) * (db - v_val) < 0:
+                    t = (v_val - da) / (db - da + 1e-10)
+                    t = np.clip(t, 0, 1)
+                    pos = pa + t * (pb - pa)
+                    norm = na + t * (nb - na)
+                    norm /= np.linalg.norm(norm) + 1e-10
+                    intersections.append({"pos": pos, "normal": norm})
+
+            points.extend(intersections)
+        return points
+
+    def _largest_component(self, mask, triangles):
+        """Return mask for the largest connected component of triangles."""
+        n = len(mask)
+        adj = {i: set() for i in range(n) if mask[i]}
+        edge_to_tris = {}
+        for i in adj:
+            for j in range(3):
+                e = tuple(sorted([triangles[i][j], triangles[i][(j+1)%3]]))
+                if e in edge_to_tris:
+                    other = edge_to_tris[e]
+                    if other in adj:
+                        adj[i].add(other)
+                        adj[other].add(i)
+                else:
+                    edge_to_tris[e] = i
+
+        visited = set()
+        largest = set()
+        for start in adj:
+            if start in visited:
+                continue
+            comp = set()
+            stack = [start]
+            while stack:
+                node = stack.pop()
+                if node in comp:
+                    continue
+                comp.add(node)
+                stack.extend(adj[node] - comp)
+            visited.update(comp)
+            if len(comp) > len(largest):
+                largest = comp
+
+        result = np.zeros(n, dtype=bool)
+        for i in largest:
+            result[i] = True
+        return result
+
+    def _apply_edge_margin(self, mask, triangles, vertices, margin):
+        """Remove triangles near the edge of the selected region."""
+        edge_verts = set()
+        for i in np.where(mask)[0]:
+            for j in range(3):
+                for k in range(3):
+                    v1, v2 = triangles[i][j], triangles[i][(j+1)%3]
+                    shared = False
+                    for other_i in np.where(mask)[0]:
+                        if other_i == i:
+                            continue
+                        if (v1 in triangles[other_i] and v2 in triangles[other_i]):
+                            shared = True
+                            break
+                    if not shared:
+                        edge_verts.add(v1)
+                        edge_verts.add(v2)
+
+        result = mask.copy()
+        for i in np.where(mask)[0]:
+            for j in range(3):
+                v = triangles[i][j]
+                if v in edge_verts:
+                    p = vertices[v]
+                    for ev in edge_verts:
+                        if np.linalg.norm(p - vertices[ev]) < margin:
+                            result[i] = False
+                            break
+        return result
 
 
 def main():

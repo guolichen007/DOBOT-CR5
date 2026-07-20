@@ -30,5 +30,6 @@ catkin_install_python(PROGRAMS
   scripts/spawn_scene_cameras.py
   scripts/object_yaw_controller.py
   scripts/validate_scene.py
+  scripts/execution_safety_check.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

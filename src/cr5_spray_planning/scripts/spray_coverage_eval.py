@@ -25,43 +25,88 @@ class SprayCoverageEvaluator:
         if not HAS_OPEN3D:
             return None
 
-        spray_radius = self.config.get("spray_radius", 0.03)
-        angle_falloff_factor = self.config.get("angle_falloff_factor", 0.5)
-        distance_falloff = self.config.get("distance_falloff_m", 0.02)
+        spray_cone_half_angle_deg = self.config.get("spray_cone_half_angle_deg", 15.0)
+        stand_off_m = self.config.get("stand_off_m", 0.10)
         speed_m_s = self.config.get("speed_m_s", 0.05)
         dose_per_s = self.config.get("dose_per_s", 1.0)
+        angle_falloff_factor = self.config.get("angle_falloff_factor", 0.5)
+        gaussian_sigma_factor = self.config.get("gaussian_sigma_factor", 0.33)
+
+        cone_half_angle_rad = np.deg2rad(spray_cone_half_angle_deg)
+        # Spray radius at stand-off distance
+        spray_radius = stand_off_m * np.tan(cone_half_angle_rad)
 
         mesh.compute_vertex_normals()
         vertices = np.asarray(mesh.vertices)
         normals = np.asarray(mesh.vertex_normals)
         dose = np.zeros(len(vertices))
 
-        # Accumulate dose along path
+        # Build ray casting scene for occlusion
+        ray_scene = o3d.t.geometry.RaycastingScene()
+        ray_mesh = o3d.t.geometry.TriangleMesh.from_legacy(mesh)
+        ray_scene.add_triangles(ray_mesh)
+
+        # Accumulate dose along trajectory
         for i, wp in enumerate(spray_path):
-            pos = np.array(wp["position"])
-            normal = np.array(wp["normal"])
+            nozzle_pos = np.array(wp["position"])
+            spray_dir_wp = np.array(wp.get("normal", [0, -1, 0]))
+            # Nozzle +Z = -surface_normal → spray direction = -normal (away from surface)
+            spray_direction = -spray_dir_wp / np.linalg.norm(spray_dir_wp)
 
-            # Distance to all vertices
-            dists = np.linalg.norm(vertices - pos, axis=1)
+            # Compute segment time (distance to next waypoint / speed)
+            if i < len(spray_path) - 1:
+                next_pos = np.array(spray_path[i + 1]["position"])
+                segment_len = np.linalg.norm(next_pos - nozzle_pos)
+            else:
+                segment_len = 0.01  # last point, assume small
+            dt = segment_len / max(speed_m_s, 1e-6)
 
-            # Within spray radius
-            in_range = dists < spray_radius
+            # Ray cast from nozzle to mesh vertices to check occlusion
+            for v_idx in range(len(vertices)):
+                v_pos = vertices[v_idx]
+                ray_dir = v_pos - nozzle_pos
+                ray_len = np.linalg.norm(ray_dir)
+                if ray_len < 1e-6:
+                    continue
+                ray_dir /= ray_len
 
-            if not np.any(in_range):
-                continue
+                # Check if ray hits the front face (not back face)
+                cos_to_normal = np.dot(ray_dir, normals[v_idx])
+                if cos_to_normal > 0:
+                    continue  # hitting back face
 
-            # Incidence angle factor
-            spray_dir = np.array(wp.get("normal", [0, -1, 0]))
-            cos_incidence = np.abs(np.dot(normals[in_range], spray_dir))
-            angle_factor = np.clip(cos_incidence, 0, 1) ** angle_falloff_factor
+                # Check occlusion: does anything block the ray?
+                rays = o3d.core.Tensor(
+                    np.array([[nozzle_pos[0], nozzle_pos[1], nozzle_pos[2],
+                               ray_dir[0], ray_dir[1], ray_dir[2]]]),
+                    dtype=o3d.core.Dtype.Float32)
+                ans = ray_scene.cast_rays(rays)
+                hit_dist = ans["t_hit"].numpy()[0, 0]
 
-            # Distance falloff (linear)
-            dist_factor = np.clip(
-                1.0 - dists[in_range] / spray_radius, 0, 1)
+                # If first hit is approximately this vertex, it's visible
+                if abs(hit_dist - ray_len) > 0.01:
+                    continue  # occluded or hit something else
 
-            # Combined dose from this waypoint
-            wp_dose = dose_per_s * angle_factor * dist_factor
-            dose[in_range] += wp_dose
+                # Angular falloff from cone center
+                angle_from_center = np.arccos(np.clip(
+                    np.dot(ray_dir, spray_direction), -1, 1))
+                if angle_from_center > cone_half_angle_rad * 2:
+                    continue  # outside spray cone
+
+                # Gaussian lateral distribution
+                lateral_angle_norm = angle_from_center / max(cone_half_angle_rad, 1e-6)
+                gaussian_weight = np.exp(
+                    -0.5 * (lateral_angle_norm / gaussian_sigma_factor) ** 2)
+
+                # Distance falloff
+                dist_factor = np.clip(1.0 - ray_len / (stand_off_m + spray_radius), 0, 1)
+
+                # Incidence angle falloff
+                cos_incidence = abs(np.dot(-ray_dir, normals[v_idx]))
+                angle_factor = cos_incidence ** angle_falloff_factor
+
+                # Accumulate dose
+                dose[v_idx] += dose_per_s * dt * gaussian_weight * dist_factor * angle_factor
 
         # Compute metrics
         d_threshold = self.config.get("coverage_threshold", 0.5)
@@ -117,13 +162,17 @@ def main():
         sys.exit(1)
 
     config = {
-        "spray_radius": args.spray_radius,
+        "spray_cone_half_angle_deg": 15.0,
+        "stand_off_m": args.stand_off,
         "speed_m_s": args.speed,
         "angle_falloff_factor": 0.5,
-        "distance_falloff_m": 0.02,
+        "gaussian_sigma_factor": 0.33,
         "dose_per_s": 1.0,
         "coverage_threshold": 0.5,
     }
+    # Also update argparser to add stand_off
+    if not hasattr(args, 'stand_off') or args.stand_off is None:
+        args.stand_off = 0.10
 
     mesh = o3d.io.read_triangle_mesh(args.mesh_file)
     with open(args.spray_path_json) as f:
