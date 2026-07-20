@@ -1,0 +1,145 @@
+<?xml version="1.0"?>
+<!--
+  Hanging Object Xacro
+  吊挂工件：固定吊点 + 可控 yaw_joint + object_frame
+  支持 flat_panel, cylinder_part, asymmetric_part 三种工件。
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="hanging_object" params="
+      parent_link:=world
+      object_type:=flat_panel
+      object_name:=spray_object
+      x:=0.65 y:=0.0 z:=0.9
+      yaw_deg:=0
+      wire_length:=0.3
+      wire_diameter:=0.005
+  ">
+    <xacro:property name="yaw_rad" value="${yaw_deg * 3.1415926535897931 / 180.0}"/>
+
+    <material name="${object_name}_color">
+      <color rgba="0.6 0.6 0.7 1"/>
+    </material>
+
+    <!-- Hanging point at gantry crossbeam -->
+    <link name="${object_name}_hanging_point"/>
+    <joint name="${object_name}_hanging_joint" type="fixed">
+      <parent link="${parent_link}"/>
+      <child link="${object_name}_hanging_point"/>
+      <origin xyz="${x} ${y} ${z + wire_length}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Wire (visual only) -->
+    <link name="${object_name}_wire">
+      <visual>
+        <origin xyz="0 0 ${-wire_length/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${wire_diameter/2}" length="${wire_length}"/></geometry>
+        <material name="${object_name}_color"/>
+      </visual>
+      <inertial>
+        <mass value="0.01"/>
+        <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+      </inertial>
+    </link>
+    <joint name="${object_name}_wire_joint" type="fixed">
+      <parent link="${object_name}_hanging_point"/>
+      <child link="${object_name}_wire"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Yaw joint -->
+    <joint name="${object_name}_yaw_joint" type="revolute">
+      <parent link="${object_name}_wire"/>
+      <child link="${object_name}_yaw_link"/>
+      <origin xyz="0 0 ${-wire_length}" rpy="0 0 0"/>
+      <axis xyz="0 0 1"/>
+      <limit lower="-3.14" upper="3.14" effort="1.0" velocity="0.5"/>
+      <dynamics damping="0.5" friction="0.1"/>
+    </joint>
+    <link name="${object_name}_yaw_link">
+      <inertial>
+        <mass value="0.1"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+      </inertial>
+    </link>
+
+    <!-- Object frame -->
+    <link name="${object_name}_frame"/>
+    <joint name="${object_name}_frame_joint" type="fixed">
+      <parent link="${object_name}_yaw_link"/>
+      <child link="${object_name}_frame"/>
+      <origin xyz="0 0 0" rpy="0 0 ${yaw_rad}"/>
+    </joint>
+
+    <!-- Object body based on type -->
+    <xacro:if value="${object_type == 'flat_panel'}">
+      <link name="${object_name}_body">
+        <visual>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.30 0.02 0.30"/></geometry>
+          <material name="${object_name}_color"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0" rpy="0 0 0"/>
+          <geometry><box size="0.30 0.02 0.30"/></geometry>
+        </collision>
+        <inertial>
+          <mass value="0.5"/>
+          <inertia ixx="0.005" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.005"/>
+        </inertial>
+      </link>
+    </xacro:if>
+
+    <xacro:if value="${object_type == 'cylinder_part'}">
+      <link name="${object_name}_body">
+        <visual>
+          <origin xyz="0 0 0.175" rpy="0 0 0"/>
+          <geometry><cylinder radius="0.10" length="0.35"/></geometry>
+          <material name="${object_name}_color"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0.175" rpy="0 0 0"/>
+          <geometry><cylinder radius="0.10" length="0.35"/></geometry>
+        </collision>
+        <inertial>
+          <mass value="1.0"/>
+          <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.005"/>
+          <origin xyz="0 0 0.175" rpy="0 0 0"/>
+        </inertial>
+      </link>
+    </xacro:if>
+
+    <xacro:if value="${object_type == 'asymmetric_part'}">
+      <link name="${object_name}_body">
+        <visual>
+          <origin xyz="0 0 0.1" rpy="0 0 0"/>
+          <!-- Placeholder mesh; replace with actual model -->
+          <geometry><box size="0.25 0.20 0.20"/></geometry>
+          <material name="${object_name}_color"/>
+        </visual>
+        <collision>
+          <origin xyz="0 0 0.1" rpy="0 0 0"/>
+          <geometry><box size="0.25 0.20 0.20"/></geometry>
+        </collision>
+        <inertial>
+          <mass value="0.8"/>
+          <inertia ixx="0.005" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.005"/>
+          <origin xyz="0 0 0.1" rpy="0 0 0"/>
+        </inertial>
+      </link>
+    </xacro:if>
+
+    <joint name="${object_name}_body_joint" type="fixed">
+      <parent link="${object_name}_frame"/>
+      <child link="${object_name}_body"/>
+    </joint>
+
+    <gazebo>
+      <plugin name="${object_name}_yaw_controller" filename="libgazebo_ros_control.so">
+        <robotNamespace>/${object_name}</robotNamespace>
+      </plugin>
+    </gazebo>
+
+  </xacro:macro>
+
+</robot>

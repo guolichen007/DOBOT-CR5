@@ -1,0 +1,77 @@
+# Ideal Camera Layout (算法质量优先)
+# 固定相机围绕 object_frame，每台相机独立命名空间和 TF frame
+# 所有相机使用 D455-like 参数化模型
+
+cameras:
+  - name: "fixed_front_high"
+    parent: "world"
+    position: {x: 0.95, y: 0.0, z: 1.3}
+    orientation: {r: 0.0, p: -0.3, y: 3.1416}  # 朝向物体中心
+    color_width: 640
+    color_height: 480
+    color_fps: 10
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 10
+    enabled: true
+
+  - name: "fixed_left"
+    parent: "world"
+    position: {x: 0.65, y: -0.7, z: 1.2}
+    orientation: {r: 0.0, p: 0.0, y: 1.5708}  # 从左侧朝向物体
+    color_width: 640
+    color_height: 480
+    color_fps: 10
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 10
+    enabled: true
+
+  - name: "fixed_right"
+    parent: "world"
+    position: {x: 0.65, y: 0.7, z: 1.2}
+    orientation: {r: 0.0, p: 0.0, y: -1.5708}  # 从右侧朝向物体
+    color_width: 640
+    color_height: 480
+    color_fps: 10
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 10
+    enabled: true
+
+  - name: "fixed_rear"
+    parent: "world"
+    position: {x: 0.35, y: 0.0, z: 1.3}
+    orientation: {r: 0.0, p: -0.3, y: 0.0}  # 从后方朝向物体
+    color_width: 640
+    color_height: 480
+    color_fps: 10
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 10
+    enabled: true
+
+  - name: "fixed_top"
+    parent: "world"
+    position: {x: 0.65, y: 0.0, z: 1.6}
+    orientation: {r: 0.0, p: -1.5708, y: 0.0}  # 从上方俯视
+    color_width: 640
+    color_height: 480
+    color_fps: 10
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 10
+    enabled: true
+
+  - name: "wrist_camera"
+    parent: "wrist_d455_mount"
+    position: {x: 0.0, y: 0.0, z: 0.0}
+    orientation: {r: 0.0, p: 0.0, y: 0.0}
+    color_width: 640
+    color_height: 480
+    color_fps: 10
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 10
+    enabled: true
+    is_wrist: true

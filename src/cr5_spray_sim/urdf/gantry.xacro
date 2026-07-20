@@ -1,0 +1,149 @@
+<?xml version="1.0"?>
+<!--
+  Gantry Frame Xacro
+  门式框架：横梁、立柱、底脚。使用 primitive box/cylinder，带碰撞体。
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="gantry" params="
+      parent_link:=world
+      name:=gantry
+      width:=1.6
+      height:=1.9
+      crossbeam_height:=1.8
+      beam_thickness:=0.05
+      x:=0.70 y:=0.0 z:=0.0
+  ">
+    <material name="${name}_gray">
+      <color rgba="0.5 0.5 0.5 1"/>
+    </material>
+
+    <joint name="${name}_base_joint" type="fixed">
+      <parent link="${parent_link}"/>
+      <child link="${name}_frame"/>
+      <origin xyz="${x} ${y} ${z}" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${name}_frame">
+      <inertial>
+        <mass value="50.0"/>
+        <inertia ixx="10.0" ixy="0" ixz="0" iyy="10.0" iyz="0" izz="10.0"/>
+        <origin xyz="0 0 ${height/2}" rpy="0 0 0"/>
+      </inertial>
+    </link>
+
+    <!-- Left pillar -->
+    <link name="${name}_left_pillar">
+      <visual>
+        <origin xyz="0 0 ${height/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${beam_thickness}" length="${height}"/></geometry>
+        <material name="${name}_gray"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${height/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${beam_thickness}" length="${height}"/></geometry>
+      </collision>
+      <inertial>
+        <mass value="10.0"/>
+        <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.01"/>
+        <origin xyz="0 0 ${height/2}" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <joint name="${name}_left_pillar_joint" type="fixed">
+      <parent link="${name}_frame"/>
+      <child link="${name}_left_pillar"/>
+      <origin xyz="0 ${-width/2} 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Right pillar -->
+    <link name="${name}_right_pillar">
+      <visual>
+        <origin xyz="0 0 ${height/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${beam_thickness}" length="${height}"/></geometry>
+        <material name="${name}_gray"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 ${height/2}" rpy="0 0 0"/>
+        <geometry><cylinder radius="${beam_thickness}" length="${height}"/></geometry>
+      </collision>
+      <inertial>
+        <mass value="10.0"/>
+        <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.01"/>
+        <origin xyz="0 0 ${height/2}" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <joint name="${name}_right_pillar_joint" type="fixed">
+      <parent link="${name}_frame"/>
+      <child link="${name}_right_pillar"/>
+      <origin xyz="0 ${width/2} 0" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Cross beam -->
+    <link name="${name}_crossbeam">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><box size="${width} ${beam_thickness} ${beam_thickness}"/></geometry>
+        <material name="${name}_gray"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry><box size="${width} ${beam_thickness} ${beam_thickness}"/></geometry>
+      </collision>
+      <inertial>
+        <mass value="5.0"/>
+        <inertia ixx="0.1" ixy="0" ixz="0" iyy="0.1" iyz="0" izz="0.01"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </inertial>
+    </link>
+    <joint name="${name}_crossbeam_joint" type="fixed">
+      <parent link="${name}_frame"/>
+      <child link="${name}_crossbeam"/>
+      <origin xyz="0 0 ${crossbeam_height}" rpy="0 0 0"/>
+    </joint>
+
+    <!-- Base feet -->
+    <link name="${name}_base_left">
+      <visual>
+        <geometry><box size="0.1 0.1 0.02"/></geometry>
+        <material name="${name}_gray"/>
+      </visual>
+      <collision>
+        <geometry><box size="0.1 0.1 0.02"/></geometry>
+      </collision>
+      <inertial>
+        <mass value="1.0"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+      </inertial>
+    </link>
+    <joint name="${name}_base_left_joint" type="fixed">
+      <parent link="${name}_frame"/>
+      <child link="${name}_base_left"/>
+      <origin xyz="0 ${-width/2} 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${name}_base_right">
+      <visual>
+        <geometry><box size="0.1 0.1 0.02"/></geometry>
+        <material name="${name}_gray"/>
+      </visual>
+      <collision>
+        <geometry><box size="0.1 0.1 0.02"/></geometry>
+      </collision>
+      <inertial>
+        <mass value="1.0"/>
+        <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+      </inertial>
+    </link>
+    <joint name="${name}_base_right_joint" type="fixed">
+      <parent link="${name}_frame"/>
+      <child link="${name}_base_right"/>
+      <origin xyz="0 ${width/2} 0" rpy="0 0 0"/>
+    </joint>
+
+    <gazebo reference="${name}_frame">
+      <self_collide>0</self_collide>
+      <static>true</static>
+    </gazebo>
+  </xacro:macro>
+
+</robot>

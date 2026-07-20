@@ -1,0 +1,28 @@
+# Realistic Camera Layout (实机约束保留)
+# 仅保留 top_camera 和 wrist_camera
+
+cameras:
+  - name: "top_camera"
+    parent: "world"
+    position: {x: 0.65, y: 0.0, z: 1.6}
+    orientation: {r: 0.0, p: -1.5708, y: 0.0}
+    color_width: 640
+    color_height: 480
+    color_fps: 10
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 10
+    enabled: true
+
+  - name: "wrist_camera"
+    parent: "wrist_d455_mount"
+    position: {x: 0.0, y: 0.0, z: 0.0}
+    orientation: {r: 0.0, p: 0.0, y: 0.0}
+    color_width: 640
+    color_height: 480
+    color_fps: 10
+    depth_width: 640
+    depth_height: 480
+    depth_fps: 10
+    enabled: true
+    is_wrist: true

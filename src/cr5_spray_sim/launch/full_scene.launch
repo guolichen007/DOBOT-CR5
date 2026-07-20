@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- Full Scene: CR5 + Gantry + Object + Cameras -->
+  <arg name="gui" default="false"/>
+  <arg name="headless" default="false"/>
+  <arg name="paused" default="false"/>
+  <arg name="object_type" default="flat_panel" doc="flat_panel|cylinder_part|asymmetric_part"/>
+  <arg name="object_yaw_deg" default="0"/>
+  <arg name="camera_layout" default="ideal" doc="ideal|realistic"/>
+
+  <!-- Load CR5 robot description -->
+  <param name="robot_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/cr5_sim.urdf.xacro"/>
+
+  <!-- Start Gazebo -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="$(arg headless)"/>
+  </include>
+
+  <!-- Spawn CR5 -->
+  <node name="spawn_cr5" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param robot_description -model cr5_robot -x 0 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- Load CR5 controllers -->
+  <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
+
+  <node name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
+    args="joint_state_controller arm_controller"
+    respawn="false" output="screen"/>
+
+  <!-- Robot state publisher -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+    respawn="false" output="screen">
+    <param name="publish_frequency" value="30.0"/>
+  </node>
+
+  <!-- Gantry model -->
+  <node name="spawn_gantry" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param gantry_description -model gantry -x 0 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- Object model -->
+  <node name="spawn_object" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param object_description -model spray_object -x 0 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+</launch>
