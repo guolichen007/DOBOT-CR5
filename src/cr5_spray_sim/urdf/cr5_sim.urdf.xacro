@@ -1,0 +1,279 @@
+<?xml version="1.0"?>
+<!--
+  DOBOT CR5 Simulation Xacro Overlay
+  这是仿真专用模型。不修改实机 cr5_robot.urdf。
+  几何参数来自实机 URDF；effort/velocity/damping/friction 为仿真配置值。
+  License: BSD
+-->
+<robot name="cr5_robot" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:property name="M_PI" value="3.1415926535897931"/>
+
+  <!-- ===== Sim-specific parameters (YAML-configurable) ===== -->
+  <xacro:arg name="sim_effort" default="10.0"/>
+  <xacro:arg name="sim_velocity" default="1.5"/>
+  <xacro:arg name="sim_damping" default="0.5"/>
+  <xacro:arg name="sim_friction" default="0.1"/>
+
+  <xacro:property name="effort_val" value="$(arg sim_effort)"/>
+  <xacro:property name="velocity_val" value="$(arg sim_velocity)"/>
+  <xacro:property name="damping_val" value="$(arg sim_damping)"/>
+  <xacro:property name="friction_val" value="$(arg sim_friction)"/>
+
+  <!-- ===== Links (geometry from dobot_description) ===== -->
+  <link name="dummy_link"/>
+
+  <link name="base_link">
+    <inertial>
+      <origin xyz="-8.0961E-06 0.0019103 0.028995" rpy="0 0 0"/>
+      <mass value="0.90882"/>
+      <inertia ixx="0.0014545" ixy="4.2968E-08" ixz="-1.8199E-07" iyy="0.001345" iyz="-6.243E-06" izz="0.002155"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/base_link.dae"/>
+      </geometry>
+      <material name=""><color rgba="0 0 0 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://dobot_description/meshes/cr5/base_link.dae"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="dummy_joint" type="fixed">
+    <parent link="dummy_link"/>
+    <child link="base_link"/>
+  </joint>
+
+  <!-- Link1 -->
+  <link name="Link1">
+    <inertial><origin xyz="-8.7268E-07 -0.0032576 -0.0076748" rpy="0 0 0"/>
+      <mass value="1.6123"/>
+      <inertia ixx="0.0029122" ixy="5.7387E-09" ixz="1.9945E-08" iyy="0.0028191" iyz="0.00044094" izz="0.0032836"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link1.dae"/></geometry>
+      <material name=""><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link1.dae"/></geometry>
+    </collision>
+  </link>
+
+  <joint name="joint1" type="revolute">
+    <origin xyz="0 0 0.147" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="Link1"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="${effort_val}" velocity="${velocity_val}"/>
+    <dynamics damping="${damping_val}" friction="${friction_val}"/>
+  </joint>
+
+  <!-- Link2 -->
+  <link name="Link2">
+    <inertial><origin xyz="-0.21351 -1.3842E-06 0.14252" rpy="0 0 0"/>
+      <mass value="5.5186"/>
+      <inertia ixx="0.0085919" ixy="7.5552E-07" ixz="-7.8922E-07" iyy="0.027553" iyz="1.4629E-07" izz="0.028294"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link2.dae"/></geometry>
+      <material name=""><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link2.dae"/></geometry>
+    </collision>
+  </link>
+
+  <joint name="joint2" type="revolute">
+    <origin xyz="0 0 0" rpy="1.5708 1.5708 0"/>
+    <parent link="Link1"/>
+    <child link="Link2"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="${effort_val}" velocity="${velocity_val}"/>
+    <dynamics damping="${damping_val}" friction="${friction_val}"/>
+  </joint>
+
+  <!-- Link3 -->
+  <link name="Link3">
+    <inertial><origin xyz="-0.15231 -1.4079E-07 0.022693" rpy="0 0 0"/>
+      <mass value="2.8536"/>
+      <inertia ixx="0.0032608" ixy="-3.2147E-10" ixz="0.00012363" iyy="0.0092967" iyz="2.9478E-10" izz="0.0095552"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link3.dae"/></geometry>
+      <material name=""><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link3.dae"/></geometry>
+    </collision>
+  </link>
+
+  <joint name="joint3" type="revolute">
+    <origin xyz="-0.427 0 0" rpy="0 0 0"/>
+    <parent link="Link2"/>
+    <child link="Link3"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-2.86" upper="2.86" effort="${effort_val}" velocity="${velocity_val}"/>
+    <dynamics damping="${damping_val}" friction="${friction_val}"/>
+  </joint>
+
+  <!-- Link4 -->
+  <link name="Link4">
+    <inertial><origin xyz="-3.2386E-07 -0.002077 -0.0015548" rpy="0 0 0"/>
+      <mass value="0.67058"/>
+      <inertia ixx="0.00066939" ixy="4.1975E-10" ixz="-1.0734E-08" iyy="0.00065424" iyz="0.00011081" izz="0.00065365"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link4.dae"/></geometry>
+      <material name=""><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link4.dae"/></geometry>
+    </collision>
+  </link>
+
+  <joint name="joint4" type="revolute">
+    <origin xyz="-0.357 0 0.141" rpy="0 0 -1.5708"/>
+    <parent link="Link3"/>
+    <child link="Link4"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="${effort_val}" velocity="${velocity_val}"/>
+    <dynamics damping="${damping_val}" friction="${friction_val}"/>
+  </joint>
+
+  <!-- Link5 -->
+  <link name="Link5">
+    <inertial><origin xyz="-3.7738E-07 -0.0045777 -0.0012971" rpy="0 0 0"/>
+      <mass value="0.7269"/>
+      <inertia ixx="0.00073069" ixy="-5.7806E-09" ixz="6.7132E-09" iyy="0.00071195" iyz="-0.00011926" izz="0.00071391"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link5.dae"/></geometry>
+      <material name=""><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link5.dae"/></geometry>
+    </collision>
+  </link>
+
+  <joint name="joint5" type="revolute">
+    <origin xyz="0 -0.116 0" rpy="1.5708 0 0"/>
+    <parent link="Link4"/>
+    <child link="Link5"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14" upper="3.14" effort="${effort_val}" velocity="${velocity_val}"/>
+    <dynamics damping="${damping_val}" friction="${friction_val}"/>
+  </joint>
+
+  <!-- Link6 -->
+  <link name="Link6">
+    <inertial><origin xyz="5.0777E-11 9.3774E-05 -0.019285" rpy="0 0 0"/>
+      <mass value="0.15789"/>
+      <inertia ixx="7.8045E-05" ixy="6.1582E-15" ixz="6.2471E-14" iyy="7.9168E-05" iyz="-1.3822E-07" izz="0.00012951"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link6.dae"/></geometry>
+      <material name=""><color rgba="1 1 1 1"/></material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><mesh filename="package://dobot_description/meshes/cr5/Link6.dae"/></geometry>
+    </collision>
+  </link>
+
+  <joint name="joint6" type="revolute">
+    <origin xyz="0 0.105 0" rpy="-1.5708 0 0"/>
+    <parent link="Link5"/>
+    <child link="Link6"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.28" upper="6.28" effort="${effort_val}" velocity="${velocity_val}"/>
+    <dynamics damping="${damping_val}" friction="${friction_val}"/>
+  </joint>
+
+  <!-- ===== Spray Tool Frames (sim overlay) ===== -->
+  <!-- spray_tool_mount: attaches to Link6 flange -->
+  <link name="spray_tool_mount">
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <joint name="spray_tool_mount_joint" type="fixed">
+    <parent link="Link6"/>
+    <child link="spray_tool_mount"/>
+    <origin xyz="-0.00683 0.150178 0.22462" rpy="-0.0044 0.04684 -1.631"/>
+  </joint>
+
+  <!-- spray_nozzle_frame: +Z points from nozzle toward surface -->
+  <link name="spray_nozzle_frame"/>
+  <joint name="spray_nozzle_joint" type="fixed">
+    <parent link="spray_tool_mount"/>
+    <child link="spray_nozzle_frame"/>
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+  </joint>
+
+  <!-- wrist_d455_mount: wrist camera mount on Link6 -->
+  <link name="wrist_d455_mount"/>
+  <joint name="wrist_d455_mount_joint" type="fixed">
+    <parent link="Link6"/>
+    <child link="wrist_d455_mount"/>
+    <origin xyz="-0.059 -0.052 -0.040" rpy="2.361 -1.545 -0.794"/>
+  </joint>
+
+  <!-- ===== Transmissions (PositionJointInterface for sim) ===== -->
+  <transmission name="trans_joint1">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint1"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface></joint>
+    <actuator name="joint1_motor"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface><mechanicalReduction>1</mechanicalReduction></actuator>
+  </transmission>
+  <transmission name="trans_joint2">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint2"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface></joint>
+    <actuator name="joint2_motor"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface><mechanicalReduction>1</mechanicalReduction></actuator>
+  </transmission>
+  <transmission name="trans_joint3">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint3"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface></joint>
+    <actuator name="joint3_motor"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface><mechanicalReduction>1</mechanicalReduction></actuator>
+  </transmission>
+  <transmission name="trans_joint4">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint4"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface></joint>
+    <actuator name="joint4_motor"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface><mechanicalReduction>1</mechanicalReduction></actuator>
+  </transmission>
+  <transmission name="trans_joint5">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint5"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface></joint>
+    <actuator name="joint5_motor"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface><mechanicalReduction>1</mechanicalReduction></actuator>
+  </transmission>
+  <transmission name="trans_joint6">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="joint6"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface></joint>
+    <actuator name="joint6_motor"><hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface><mechanicalReduction>1</mechanicalReduction></actuator>
+  </transmission>
+
+  <!-- ===== Gazebo ros_control plugin ===== -->
+  <gazebo>
+    <plugin name="gazebo_ros_control" filename="libgazebo_ros_control.so">
+      <robotNamespace>/</robotNamespace>
+      <robotSimType>gazebo_ros_control/DefaultRobotHWSim</robotSimType>
+    </plugin>
+  </gazebo>
+
+</robot>

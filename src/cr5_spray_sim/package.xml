@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>cr5_spray_sim</name>
+  <version>0.1.0</version>
+  <description>DOBOT CR5 spray painting Gazebo simulation package</description>
+  <maintainer email="guolichen007@gmail.com">guolichen007</maintainer>
+  <license>BSD</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>gazebo_ros</depend>
+  <depend>gazebo_ros_control</depend>
+  <depend>roscpp</depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2_ros</depend>
+  <depend>joint_state_controller</depend>
+  <depend>joint_trajectory_controller</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>controller_manager</depend>
+  <depend>xacro</depend>
+  <depend>dobot_description</depend>
+  <depend>cr5_moveit</depend>
+  <depend>realsense_gazebo_description</depend>
+  <depend>realsense_gazebo_plugin</depend>
+
+  <export>
+  </export>
+</package>

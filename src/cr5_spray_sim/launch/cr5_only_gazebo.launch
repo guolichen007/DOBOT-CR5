@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- CR5-Only Gazebo Simulation -->
+  <arg name="gui" default="false" doc="Start Gazebo GUI"/>
+  <arg name="headless" default="false" doc="Run headless"/>
+  <arg name="paused" default="false" doc="Start paused"/>
+  <arg name="sim_effort" default="10.0" doc="Joint effort limit (sim)"/>
+  <arg name="sim_velocity" default="1.5" doc="Joint velocity limit (sim)"/>
+  <arg name="sim_damping" default="0.5" doc="Joint damping"/>
+  <arg name="sim_friction" default="0.1" doc="Joint friction"/>
+
+  <!-- Process xacro -->
+  <param name="robot_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/cr5_sim.urdf.xacro
+             sim_effort:=$(arg sim_effort)
+             sim_velocity:=$(arg sim_velocity)
+             sim_damping:=$(arg sim_damping)
+             sim_friction:=$(arg sim_friction)"/>
+
+  <!-- Start Gazebo -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="$(arg headless)"/>
+  </include>
+
+  <!-- Spawn CR5 -->
+  <node name="spawn_cr5" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param robot_description -model cr5_robot -x 0 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- Load controllers -->
+  <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
+
+  <!-- Spawn controllers -->
+  <node name="controller_spawner" pkg="controller_manager" type="spawner"
+    args="joint_state_controller arm_controller"
+    respawn="false" output="screen"/>
+
+  <!-- Robot state publisher -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+    respawn="false" output="screen">
+    <param name="publish_frequency" value="30.0"/>
+  </node>
+</launch>
