@@ -8,16 +8,34 @@
   <arg name="object_yaw_deg" default="0"/>
   <arg name="camera_layout" default="ideal" doc="ideal|realistic"/>
 
-  <!-- Load CR5 robot description -->
+  <!-- Determine camera layout YAML -->
+  <arg name="camera_layout_file"
+       value="$(find cr5_spray_sim)/config/camera_layout_$(arg camera_layout).yaml"/>
+
+  <!-- ===== Generate Descriptions ===== -->
+
+  <!-- CR5 robot description -->
   <param name="robot_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/cr5_sim.urdf.xacro"/>
 
-  <!-- Start Gazebo -->
+  <!-- Gantry description: standalone URDF from xacro -->
+  <param name="gantry_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/gantry_standalone.urdf.xacro"/>
+
+  <!-- Object description: standalone URDF from xacro -->
+  <param name="object_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/object_standalone.urdf.xacro
+             object_type:=$(arg object_type)
+             object_yaw_deg:=$(arg object_yaw_deg)"/>
+
+  <!-- ===== Start Gazebo ===== -->
   <include file="$(find gazebo_ros)/launch/empty_world.launch">
     <arg name="paused" value="$(arg paused)"/>
     <arg name="gui" value="$(arg gui)"/>
     <arg name="headless" value="$(arg headless)"/>
   </include>
+
+  <!-- ===== Spawn Models ===== -->
 
   <!-- Spawn CR5 -->
   <node name="spawn_cr5" pkg="gazebo_ros" type="spawn_model"
@@ -37,14 +55,24 @@
     <param name="publish_frequency" value="30.0"/>
   </node>
 
-  <!-- Gantry model -->
+  <!-- Spawn gantry -->
   <node name="spawn_gantry" pkg="gazebo_ros" type="spawn_model"
     args="-urdf -param gantry_description -model gantry -x 0 -y 0 -z 0"
     respawn="false" output="screen"/>
 
-  <!-- Object model -->
+  <!-- Spawn object -->
   <node name="spawn_object" pkg="gazebo_ros" type="spawn_model"
     args="-urdf -param object_description -model spray_object -x 0 -y 0 -z 0"
     respawn="false" output="screen"/>
+
+  <!-- Object yaw controller -->
+  <node name="object_yaw_controller" pkg="cr5_spray_sim"
+    type="object_yaw_controller.py" output="screen"/>
+
+  <!-- Spawn cameras from layout YAML -->
+  <node name="camera_spawner" pkg="cr5_spray_sim"
+    type="spawn_scene_cameras.py" output="screen">
+    <param name="camera_layout" value="$(arg camera_layout_file)"/>
+  </node>
 
 </launch>

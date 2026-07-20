@@ -24,3 +24,11 @@ install(DIRECTORY worlds
 install(DIRECTORY rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+
+# Python scripts
+catkin_install_python(PROGRAMS
+  scripts/spawn_scene_cameras.py
+  scripts/object_yaw_controller.py
+  scripts/validate_scene.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)

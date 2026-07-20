@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<!--
+  Full Scene Xacro: CR5 + Gantry + Object + Multi-Camera Rig
+  由 full_scene.launch 调用。不硬编码相机数量。
+-->
+<robot name="cr5_spray_scene" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find cr5_spray_sim)/urdf/gantry.xacro"/>
+  <xacro:include filename="$(find cr5_spray_sim)/urdf/hanging_object.xacro"/>
+  <xacro:include filename="$(find realsense_gazebo_description)/urdf/_d455_like.urdf.xacro"/>
+
+  <!-- World link -->
+  <link name="world"/>
+
+  <!-- Gantry -->
+  <xacro:arg name="gantry_width" default="1.6"/>
+  <xacro:arg name="gantry_height" default="1.9"/>
+  <xacro:arg name="gantry_x" default="0.70"/>
+  <xacro:gantry parent_link="world"
+    width="$(arg gantry_width)" height="$(arg gantry_height)"
+    x="$(arg gantry_x)"/>
+
+  <!-- Hanging Object -->
+  <xacro:arg name="object_type" default="flat_panel"/>
+  <xacro:arg name="object_x" default="0.65"/>
+  <xacro:arg name="object_y" default="0.0"/>
+  <xacro:arg name="object_z" default="0.9"/>
+  <xacro:arg name="object_yaw_deg" default="0"/>
+  <xacro:hanging_object parent_link="world"
+    object_type="$(arg object_type)"
+    x="$(arg object_x)" y="$(arg object_y)" z="$(arg object_z)"
+    yaw_deg="$(arg object_yaw_deg)"/>
+
+  <!-- Fixed cameras (from camera layout parameter) -->
+  <!-- Each camera is defined by a structured arg that encodes name,x,y,z,r,p,y -->
+  <xacro:property name="camera_list" value="$(arg camera_list)"/>
+
+  <!-- Default no-camera case (camera_list set by launch) -->
+</robot>
