@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<!--
+  Standalone URDF for D455-like RGB-D Simulator
+  用于单相机 smoke test
+-->
+<robot name="d455_like_test" xmlns:xacro="http://ros.org/wiki/xacro">
+  <link name="base_link"/>
+
+  <!-- Include D455-like macro -->
+  <xacro:include filename="$(find realsense_gazebo_description)/urdf/_d455_like.urdf.xacro"/>
+
+  <xacro:sensor_d455_like parent="base_link" name="test_camera" topics_ns="test_camera"
+      color_width="640" color_height="480" color_fps="10"
+      depth_width="640" depth_height="480" depth_fps="10"
+      enable_pointcloud="false"
+      visualize="false">
+    <origin xyz="0.0 0.0 0.5" rpy="0.0 0.0 0.0"/>
+  </xacro:sensor_d455_like>
+
+  <!-- Dummy links to match plugin's frame_id convention:
+       plugin publishes frame_id = prefix + "color"/"depth"/...
+       These links allow TF lookups to succeed -->
+  <joint name="test_cameracolor_joint" type="fixed">
+    <parent link="test_camera_color_optical_frame"/>
+    <child link="test_cameracolor"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="test_cameracolor"/>
+
+  <joint name="test_cameradepth_joint" type="fixed">
+    <parent link="test_camera_depth_optical_frame"/>
+    <child link="test_cameradepth"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="test_cameradepth"/>
+
+</robot>

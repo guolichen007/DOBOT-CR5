@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<!--
+  Standalone URDF for Intel RealSense D435 camera only
+-->
+<robot name="realsense_d435" xmlns:xacro="http://ros.org/wiki/xacro">
+  <link name="base_link"/>
+
+  <!-- Include D435 macro definition -->
+  <xacro:include filename="$(find realsense_gazebo_description)/urdf/_d435.urdf.xacro"/>
+
+  <!-- Instantiate D435 camera with default settings -->
+  <xacro:sensor_d435 parent="base_link" name="D435_camera" topics_ns="D435_camera"
+                     enable_pointCloud="true"
+                     visualize="true">
+    <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
+  </xacro:sensor_d435>
+
+  <!-- Add frame to match plugin's frame_id naming convention -->
+  <joint name="D435_cameracolor_joint" type="fixed">
+    <parent link="D435_camera_color_optical_frame"/>
+    <child link="D435_cameracolor"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+  <link name="D435_cameracolor"/>
+
+</robot>

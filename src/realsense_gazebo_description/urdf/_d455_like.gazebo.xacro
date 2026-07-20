@@ -1,0 +1,161 @@
+<?xml version="1.0"?>
+<!--
+  D455-like RGB-D Simulator Gazebo xacro
+  这不是真实 D455 物理模型，而是基于通用 RGB-D 插件的参数化近似模拟器。
+  License: Apache 2.0
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="gazebo_d455_like" params="
+      reference_link
+      camera_name:=camera
+      topics_ns:=camera
+
+      depth_optical_frame
+      color_optical_frame
+      infrared1_optical_frame
+      infrared2_optical_frame
+
+      color_width:=640
+      color_height:=480
+      color_fps:=10
+      color_hfov_deg:=69.4
+      color_noise_mean:=0.0
+      color_noise_stddev:=0.007
+
+      depth_width:=640
+      depth_height:=480
+      depth_fps:=10
+      depth_hfov_deg:=69.4
+      depth_near:=0.15
+      depth_far:=10.0
+      depth_noise_mean:=0.0
+      depth_noise_stddev:=0.005
+
+      infra_width:=320
+      infra_height:=240
+      infra_fps:=10
+
+      align_depth:=false
+      enable_pointcloud:=false
+      visualize:=false
+  ">
+    <xacro:property name="deg_to_rad" value="0.01745329251994329577"/>
+
+    <gazebo reference="${reference_link}">
+      <self_collide>0</self_collide>
+      <enable_wind>0</enable_wind>
+      <kinematic>0</kinematic>
+      <mu2>1</mu2>
+      <fdir1>0 0 0</fdir1>
+      <kp>1e+13</kp>
+      <kd>1</kd>
+
+      <!-- Color camera sensor -->
+      <sensor name="${camera_name}color" type="camera">
+        <camera name="${camera_name}">
+          <horizontal_fov>${color_hfov_deg * deg_to_rad}</horizontal_fov>
+          <image>
+            <width>${color_width}</width>
+            <height>${color_height}</height>
+            <format>RGB_INT8</format>
+          </image>
+          <clip>
+            <near>${depth_near}</near>
+            <far>${depth_far}</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>${color_noise_mean}</mean>
+            <stddev>${color_noise_stddev}</stddev>
+          </noise>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>${color_fps}</update_rate>
+        <visualize>${visualize}</visualize>
+      </sensor>
+
+      <!-- Depth camera sensor -->
+      <sensor name="${camera_name}depth" type="depth">
+        <camera name="${camera_name}">
+          <horizontal_fov>${depth_hfov_deg * deg_to_rad}</horizontal_fov>
+          <image>
+            <width>${depth_width}</width>
+            <height>${depth_height}</height>
+            <format>R_FLOAT32</format>
+          </image>
+          <clip>
+            <near>${depth_near}</near>
+            <far>${depth_far}</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>${depth_noise_mean}</mean>
+            <stddev>${depth_noise_stddev}</stddev>
+          </noise>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>${depth_fps}</update_rate>
+        <visualize>${visualize}</visualize>
+      </sensor>
+
+      <!-- IR1 sensor (required by plugin, minimal config) -->
+      <sensor name="${camera_name}ired1" type="camera">
+        <camera name="${camera_name}">
+          <horizontal_fov>${85.2 * deg_to_rad}</horizontal_fov>
+          <image>
+            <width>${infra_width}</width>
+            <height>${infra_height}</height>
+            <format>L_INT8</format>
+          </image>
+          <clip>
+            <near>${depth_near}</near>
+            <far>${depth_far}</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.05</stddev>
+          </noise>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>${infra_fps}</update_rate>
+        <visualize>false</visualize>
+      </sensor>
+
+      <!-- IR2 sensor (required by plugin, minimal config) -->
+      <sensor name="${camera_name}ired2" type="camera">
+        <camera name="${camera_name}">
+          <horizontal_fov>${85.2 * deg_to_rad}</horizontal_fov>
+          <image>
+            <width>${infra_width}</width>
+            <height>${infra_height}</height>
+            <format>L_INT8</format>
+          </image>
+          <clip>
+            <near>${depth_near}</near>
+            <far>${depth_far}</far>
+          </clip>
+          <noise>
+            <type>gaussian</type>
+            <mean>0.0</mean>
+            <stddev>0.05</stddev>
+          </noise>
+        </camera>
+        <always_on>1</always_on>
+        <update_rate>${infra_fps}</update_rate>
+        <visualize>false</visualize>
+      </sensor>
+
+    </gazebo>
+
+    <!-- RealSense ROS bridge plugin (at model level, no reference) -->
+    <gazebo>
+      <plugin name="${camera_name}" filename="librealsense_gazebo_plugin.so">
+        <prefix>${camera_name}</prefix>
+        <topics_ns>${topics_ns}</topics_ns>
+      </plugin>
+    </gazebo>
+
+  </xacro:macro>
+</robot>
