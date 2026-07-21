@@ -1,0 +1,103 @@
+<?xml version="1.0"?>
+<!--
+  V3.3.1 Spray Gun Visuals Macro: 仅输出 <visual> 元素，无独立 link。
+
+  与 V3.3 的关键区别:
+  - 不创建 spray_gun_assembly 独立 link（V3.3 的零质量/零惯量 link 在 Gazebo 中不可靠）
+  - 所有 visual 直接放入父 link (Link6)，属于同一 Gazebo 刚体
+  - 只保留 spray_nozzle_frame 作为 TF 参考 (在 cr5_sim.urdf.xacro 中定义)
+
+  用法 (在 Link6 的 <link> 元素内调用):
+    <xacro:spray_gun_v331_visuals prefix="spray"/>
+
+  坐标 (相对 Link6 原点):
+  - 适配板中心: z=0.010 (厚 0.020, 背面贴合法兰面 z=0)
+  - 枪体中心:   z=0.0475 (box 0.075 高)
+  - 喷嘴中心:   z=0.105 (cylinder 0.040 长)
+  - nozzle_frame: z=0.125 (喷嘴出口, 在父 xacro 中定义)
+
+  +Z = 喷射方向 (背离 Link6, 指向工件)
+-->
+<robot xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:macro name="spray_gun_v331_visuals" params="prefix := spray">
+
+    <!-- ===== (1) 法兰适配板: 圆柱, 金属灰 ===== -->
+    <visual name="${prefix}_adapter">
+      <origin xyz="0 0 0.010" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.025" length="0.020"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.50 0.50 0.52 1"/>
+      </material>
+    </visual>
+
+    <!-- ===== (2) 枪体主块: box, 深色 ===== -->
+    <visual name="${prefix}_body_main">
+      <origin xyz="0 0 0.0475" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.050 0.038 0.075"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.18 0.20 0.25 1"/>
+      </material>
+    </visual>
+
+    <!-- ===== (2b) 阀块: 偏置在枪体 +Y 侧, 金属灰 ===== -->
+    <visual name="${prefix}_valve">
+      <origin xyz="0 0.030 0.060" rpy="0 0 0"/>
+      <geometry>
+        <box size="0.030 0.044 0.030"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.50 0.50 0.52 1"/>
+      </material>
+    </visual>
+
+    <!-- ===== (2c) 涂料接口短管: +Y 方向, 橙色 ===== -->
+    <visual name="${prefix}_paint_port">
+      <origin xyz="0 0.052 0.060" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.005" length="0.018"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.92 0.45 0.08 1"/>
+      </material>
+    </visual>
+
+    <!-- ===== (2d) 空气接口短管: -Y 方向, 蓝色 ===== -->
+    <visual name="${prefix}_air_port">
+      <origin xyz="0 -0.040 0.065" rpy="1.5708 0 0"/>
+      <geometry>
+        <cylinder radius="0.004" length="0.014"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.10 0.35 0.75 1"/>
+      </material>
+    </visual>
+
+    <!-- ===== (3) 喷嘴: 细长圆柱, 银色 ===== -->
+    <visual name="${prefix}_nozzle">
+      <origin xyz="0 0 0.105" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.008" length="0.040"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.65 0.63 0.60 1"/>
+      </material>
+    </visual>
+
+    <!-- ===== (debug) 喷嘴轴指示器: 绿色细圆柱, +Z 方向 ===== -->
+    <visual name="${prefix}_nozzle_axis_debug">
+      <origin xyz="0 0 0.135" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.003" length="0.040"/>
+      </geometry>
+      <material name="">
+        <color rgba="0.0 0.9 0.0 0.6"/>
+      </material>
+    </visual>
+
+  </xacro:macro>
+</robot>

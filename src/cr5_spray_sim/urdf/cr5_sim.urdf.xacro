@@ -16,6 +16,11 @@
   <xacro:arg name="sim_friction" default="0.1"/>
   <xacro:arg name="enable_spray_tool" default="true"/>
 
+  <!-- V3.3.1: 喷枪 visual macro (需在 Link6 之前 include) -->
+  <xacro:if value="$(arg enable_spray_tool)">
+    <xacro:include filename="$(find cr5_spray_sim)/urdf/spray_gun_v331_visuals.xacro"/>
+  </xacro:if>
+
   <xacro:property name="effort_val" value="$(arg sim_effort)"/>
   <xacro:property name="velocity_val" value="$(arg sim_velocity)"/>
   <xacro:property name="damping_val" value="$(arg sim_damping)"/>
@@ -200,6 +205,11 @@
       <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry><mesh filename="package://dobot_description/meshes/cr5/Link6.dae"/></geometry>
     </collision>
+
+    <!-- V3.3.1: 喷枪 visual 直接并入 Link6 (同一 Gazebo 刚体, 不会漂移或消失) -->
+    <xacro:if value="$(arg enable_spray_tool)">
+      <xacro:spray_gun_v331_visuals prefix="spray"/>
+    </xacro:if>
   </link>
 
   <joint name="joint6" type="revolute">
@@ -211,32 +221,20 @@
     <dynamics damping="${damping_val}" friction="${friction_val}"/>
   </joint>
 
-  <!-- ===== Spray Tool V3.3 (visual-only, controlled by enable_spray_tool) ===== -->
+  <!-- ===== Spray Tool V3.3.1 ===== -->
   <!--
-    安装位置: Link6 法兰面 (Link6 原点)，非旧 Tool_end。
-    适配板厚 0.020m，背面贴合法兰面 → mount_xyz.z = 0.010。
-    详见 config/spray_tool_mount_v33.yaml。
-
-    第一阶段: visual-only (零附加质量，无 collision)。
-    后续阶段可逐步加入 collision 和 payload mass。
+    喷枪 visual 已直接并入 Link6 (同 Gazebo 刚体)。
+    此处只保留 spray_nozzle_frame 作为 TF 参考系。
+    安装位置: Link6 法兰原点。nozzle_frame 在喷嘴出口 z=0.125m。
   -->
-  <xacro:if value="$(arg enable_spray_tool)">
-    <xacro:include filename="$(find cr5_spray_sim)/urdf/spray_gun_v33.xacro"/>
-    <xacro:spray_gun_v33 parent="Link6"
-        mount_xyz="0 0 0.010"
-        mount_rpy="0 0 0"
-        prefix="spray"/>
-  </xacro:if>
-
-  <!-- 无喷枪时的 fallback: 保留空 nozzle_frame 供 TF 查询 -->
-  <xacro:unless value="$(arg enable_spray_tool)">
-    <link name="spray_nozzle_frame"/>
-    <joint name="spray_nozzle_frame_fallback" type="fixed">
-      <parent link="Link6"/>
-      <child link="spray_nozzle_frame"/>
-      <origin xyz="0 0 0.125" rpy="0 0 0"/>
-    </joint>
-  </xacro:unless>
+  <!-- spray_nozzle_frame: +Z = 喷射方向 (TF 查询用) -->
+  <link name="spray_nozzle_frame"/>
+  <joint name="spray_nozzle_frame_joint" type="fixed">
+    <parent link="Link6"/>
+    <child link="spray_nozzle_frame"/>
+    <!-- 喷嘴总长: 适配板半厚(0.010) + 枪体(0.075) + 喷嘴(0.040) = 0.125 -->
+    <origin xyz="0 0 0.125" rpy="0 0 0"/>
+  </joint>
 
   <!-- wrist_d455_mount: wrist camera mount on Link6 -->
   <link name="wrist_d455_mount"/>
