@@ -1,0 +1,142 @@
+<?xml version="1.0"?>
+<!--
+  CR5 Spray Demo V3.3: 稳定喷枪 + 表面上色
+  从 V3.1 稳定基线重建，修复 V3.2.1 的 TF/安装/启动器问题。
+
+  关键修复:
+  - TF: world→dummy_link (非 world→base_link，避免双父节点冲突)
+  - 喷枪: 从 Link6 法兰原点安装 (非旧 Tool_end)
+  - 第一阶段 visual-only (零附加质量，无 collision)
+  - state latched + 周期重发
+  - 启动器硬失败门
+
+  必须通过 run_scene_v33_spray.sh 启动。
+-->
+<launch>
+  <arg name="gui" default="false"/>
+  <arg name="headless" default="false"/>
+  <arg name="paused" default="false"/>
+  <arg name="object_type" default="motor_housing_cylinder"
+       doc="motor_housing_cylinder|rectangular_housing"/>
+  <arg name="camera_profile" default="vm" doc="vm|quality"/>
+  <arg name="enable_spray_tool" default="true" doc="Include spray gun on CR5 flange"/>
+  <arg name="enable_spray_sim" default="true" doc="Run spray control + paint patch nodes"/>
+  <arg name="enable_paint_patches" default="true" doc="Generate surface paint patches in Gazebo"/>
+
+  <!-- ===== Load Configs ===== -->
+
+  <!-- Spray simulator params from YAML -->
+  <rosparam file="$(find cr5_spray_sim)/config/spray_sim_v33.yaml" command="load" ns="spray_simulator_v33"/>
+
+  <!-- ===== Generate Descriptions ===== -->
+
+  <!-- CR5 with spray gun (enable_spray_tool controls xacro conditional) -->
+  <param name="robot_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/cr5_sim.urdf.xacro
+             enable_spray_tool:=$(arg enable_spray_tool)"/>
+
+  <!-- Simple Goalpost Frame V3.1 -->
+  <param name="goalpost_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/simple_goalpost_frame_v31.xacro"/>
+
+  <!-- Simple Hanging Workpiece V3.1 -->
+  <param name="hanging_workpiece_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/simple_hanging_workpiece_v31.xacro
+             object_type:=$(arg object_type)"/>
+
+  <!-- Camera Pedestals -->
+  <param name="pedestal_fl_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro"/>
+  <param name="pedestal_fr_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro"/>
+  <param name="camera_profile" value="$(arg camera_profile)"/>
+
+  <!-- ===== Start Gazebo with Industrial World ===== -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="$(arg headless)"/>
+    <arg name="world_name" value="$(find cr5_spray_sim)/worlds/cr5_industrial_spray_cell.world"/>
+  </include>
+
+  <!-- ===== Spawn Models ===== -->
+
+  <!-- CR5 -->
+  <node name="spawn_cr5" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param robot_description -model cr5_robot -x 0 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- CR5 controllers -->
+  <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
+  <node name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
+    args="joint_state_controller arm_controller"
+    respawn="false" output="screen"/>
+
+  <!-- Robot state publisher -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+    respawn="false" output="screen">
+    <param name="publish_frequency" value="30.0"/>
+    <remap from="robot_description" to="robot_description"/>
+  </node>
+
+  <!-- Simple Goalpost Frame -->
+  <node name="spawn_goalpost" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param goalpost_description -model simple_goalpost_frame -x 0.68 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- Simple Hanging Workpiece -->
+  <node name="spawn_hanging_workpiece" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param hanging_workpiece_description -model simple_hanging_workpiece -x 0.56 -y 0 -z 0.98"
+    respawn="false" output="screen"/>
+
+  <!-- Camera Pedestals -->
+  <node name="spawn_pedestal_fl" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param pedestal_fl_description -model pedestal_fl -x -0.28 -y -0.68 -z 0"
+    respawn="false" output="screen"/>
+  <node name="spawn_pedestal_fr" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param pedestal_fr_description -model pedestal_fr -x -0.28 -y 0.68 -z 0"
+    respawn="false" output="screen"/>
+  <node name="spawn_pedestal_rear" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param pedestal_fl_description -model pedestal_rear -x 1.36 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- Three cameras -->
+  <node name="spawn_cameras_v31" pkg="cr5_spray_sim"
+    type="spawn_cameras_v31.py" output="screen">
+    <param name="camera_profile" value="$(arg camera_profile)"/>
+  </node>
+
+  <!-- Object yaw -->
+  <node name="object_yaw_v31" pkg="cr5_spray_sim"
+    type="object_yaw_v31.py" output="screen"/>
+
+  <!-- Object TF -->
+  <node name="object_pose_tf_v31" pkg="cr5_spray_sim"
+    type="object_pose_tf_v31.py" output="screen"/>
+
+  <!-- ===== TF Bridge: world → dummy_link (V3.3 修复) ===== -->
+  <!--
+    正确 TF 树:
+      world → dummy_link → base_link → ... → Link6 → spray_nozzle_frame
+      world → object_frame
+
+    不得使用 world→base_link，会导致 base_link 有两个父节点 (dummy_link 和 world)。
+    CR5 spawn 在原点，所以 world→dummy_link 为 identity。
+  -->
+  <node name="world_to_dummy_link_tf" pkg="tf2_ros" type="static_transform_publisher"
+    args="0 0 0 0 0 0 1 world dummy_link"
+    respawn="false" output="screen"/>
+
+  <!-- ===== Spray Control (V3.3) ===== -->
+  <node if="$(arg enable_spray_sim)" name="spray_simulator_v33"
+    pkg="cr5_spray_sim" type="spray_simulator_v33.py" output="screen" required="true">
+    <param name="object_type" value="$(arg object_type)"/>
+  </node>
+
+  <!-- ===== Paint Patch Manager (V3.3) ===== -->
+  <node if="$(arg enable_paint_patches)" name="paint_patch_manager_v33"
+    pkg="cr5_spray_sim" type="paint_patch_manager_v33.py" output="screen" required="false">
+    <param name="object_type" value="$(arg object_type)"/>
+  </node>
+
+</launch>
