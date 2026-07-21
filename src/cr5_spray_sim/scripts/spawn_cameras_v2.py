@@ -30,14 +30,16 @@ def load_scene_config():
         return yaml.safe_load(f)
 
 
-def compute_look_at(cam_pos, target_pos):
+def compute_look_at(cam_pos, target_pos, roll_offset_deg=0.0):
     """Compute RPY for Gazebo camera so optical +Z points to target."""
     script = os.path.join(os.path.dirname(__file__), "compute_look_at.py")
     cmd = [sys.executable, script,
            "--cam-x", str(cam_pos[0]), "--cam-y", str(cam_pos[1]),
            "--cam-z", str(cam_pos[2]),
            "--target-x", str(target_pos[0]), "--target-y", str(target_pos[1]),
-           "--target-z", str(target_pos[2]), "--yaml"]
+           "--target-z", str(target_pos[2]),
+           "--roll-offset-deg", str(roll_offset_deg),
+           "--yaml"]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
     if r.returncode != 0:
         return None
@@ -45,23 +47,33 @@ def compute_look_at(cam_pos, target_pos):
 
 
 def make_camera_xacro(name, profile, scene_config):
-    """Generate D455-like camera URDF with optical frame chain."""
+    """Generate D455-like camera URDF with optical frame chain.
+
+    Camera link convention:
+      +X → optical +Z (forward, toward target)  — lens faces +X
+      +Y → optical +X (image right)              — long edge, horizontal
+      +Z → optical +Y (image down)               — short edge, vertical
+
+    Visual body: horizontal bar (0.09 m wide), lens on +X face.
+    """
     p = profile
-    # Add visible body and optical axis arrow
     return f'''<?xml version="1.0"?>
 <robot name="{name}" xmlns:xacro="http://ros.org/wiki/xacro">
-  <material name="{name}_body"><color rgba="0.3 0.3 0.3 1"/></material>
-  <material name="{name}_lens"><color rgba="0.1 0.1 0.1 1"/></material>
-  <material name="{name}_axis"><color rgba="1 0 0 1"/></material>
+  <material name="{name}_body"><color rgba="0.25 0.25 0.25 1"/></material>
+  <material name="{name}_lens"><color rgba="0.05 0.05 0.05 1"/></material>
+  <material name="{name}_axis"><color rgba="1 0.15 0.15 1"/></material>
+  <material name="{name}_up_mark"><color rgba="0.15 0.7 0.15 1"/></material>
 
   <link name="{name}_link">
     <inertial><mass value="0.05"/><inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial>
-    <!-- Camera body box -->
-    <visual name="body"><origin xyz="0 -0.01 0" rpy="0 0 0"/><geometry><box size="0.025 0.025 0.09"/></geometry><material name="{name}_body"/></visual>
-    <!-- Lens face -->
-    <visual name="lens"><origin xyz="0 0 0.045" rpy="0 0 0"/><geometry><cylinder radius="0.012" length="0.005"/></geometry><material name="{name}_lens"/></visual>
-    <!-- Optical axis arrow (red, 10cm, +Z in optical frame = Gazebo camera forward) -->
-    <visual name="axis"><origin xyz="0 0 0.07" rpy="0 0 0"/><geometry><cylinder radius="0.002" length="0.06"/></geometry><material name="{name}_axis"/></visual>
+    <!-- Camera body: horizontal bar [thin X=depth, long Y=width, thin Z=height] -->
+    <visual name="body"><origin xyz="0 0 0" rpy="0 0 0"/><geometry><box size="0.03 0.09 0.025"/></geometry><material name="{name}_body"/></visual>
+    <!-- Lens on +X face (forward toward target) -->
+    <visual name="lens"><origin xyz="0.015 0 0" rpy="0 1.5708 0"/><geometry><cylinder radius="0.010" length="0.004"/></geometry><material name="{name}_lens"/></visual>
+    <!-- Optical axis arrow (red, pointing +X = forward) -->
+    <visual name="axis"><origin xyz="0.025 0 0" rpy="0 1.5708 0"/><geometry><cylinder radius="0.002" length="0.05"/></geometry><material name="{name}_axis"/></visual>
+    <!-- Small green dot on +Z face = "top" of camera body -->
+    <visual name="up_dot"><origin xyz="0 0 0.013" rpy="0 0 0"/><geometry><cylinder radius="0.004" length="0.003"/></geometry><material name="{name}_up_mark"/></visual>
   </link>
 
   <link name="{name}_color_optical_frame"/>
@@ -149,15 +161,17 @@ class CameraSpawnerV2:
         for cam in cam_cfg:
             name = cam["name"]
             pos = [cam["position"]["x"], cam["position"]["y"], cam["position"]["z"]]
-            self.spawn_one(name, pos, tgt)
+            roll_off = cam.get("roll_offset_deg", 0.0)
+            self.spawn_one(name, pos, tgt, roll_offset_deg=roll_off)
 
-    def spawn_one(self, name, pos, tgt):
-        rpy_data = compute_look_at(pos, tgt)
+    def spawn_one(self, name, pos, tgt, roll_offset_deg=0.0):
+        rpy_data = compute_look_at(pos, tgt, roll_offset_deg=roll_offset_deg)
         if not rpy_data:
             rospy.logerr("look-at failed for %s", name); return
 
         roll, pitch, yaw = rpy_data["roll"], rpy_data["pitch"], rpy_data["yaw"]
         err = rpy_data["optical_z_angle_error_deg"]
+        up_err = rpy_data.get("image_up_vs_world_up_deg", 999)
         if err > 0.5:
             rospy.logerr("%s: look-at error %.4f deg > 0.5!", name, err); return
 
@@ -179,8 +193,11 @@ class CameraSpawnerV2:
         try:
             resp = self.spawn(name, model_xml, "", pose, "world")
             if resp.success:
-                rospy.loginfo("Spawned %s: dist=%.2fm err=%.4f deg rpy=(%.3f,%.3f,%.3f)",
-                              name, rpy_data["distance_m"], err, roll, pitch, yaw)
+                rospy.loginfo(
+                    "Spawned %s: dist=%.2fm look-err=%.4f° up-err=%.1f° "
+                    "rpy=(%.3f,%.3f,%.3f) roll_off=%.1f°",
+                    name, rpy_data["distance_m"], err, up_err,
+                    roll, pitch, yaw, roll_offset_deg)
             else:
                 rospy.logerr("Spawn %s failed: %s", name, resp.status_message)
         except Exception as e:

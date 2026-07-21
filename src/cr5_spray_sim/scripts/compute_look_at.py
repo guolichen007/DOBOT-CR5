@@ -16,10 +16,19 @@ import numpy as np
 import yaml
 
 
-def compute_look_at(cam_pos, target_pos):
+def compute_look_at(cam_pos, target_pos, roll_offset_deg=0.0):
     """
-    Compute RPY for Gazebo camera to look at target.
-    Returns (roll, pitch, yaw) in radians.
+    Compute RPY for Gazebo camera to look at target with stable horizon.
+
+    Strategy (prevents upside-down images):
+    1. optical +Z = direction to target (fixed)
+    2. optical +Y (image down) = project world -Z onto plane ⟂ optical_z
+       → ensures image "down" generally points world-down
+    3. optical +X (image right) = cross(opt_y, opt_z)  — right-handed
+    4. Apply optional roll_offset_deg around optical axis for fine-tuning.
+
+    Returns dict with roll, pitch, yaw (rad), distance_m,
+    optical_z_angle_error_deg, image_up_vs_world_up_deg.
     """
     cam = np.array(cam_pos, dtype=float)
     tgt = np.array(target_pos, dtype=float)
@@ -31,37 +40,55 @@ def compute_look_at(cam_pos, target_pos):
         raise ValueError("Camera at same position as target")
     direction /= dist
 
-    # ROS optical frame: +Z forward (toward target)
+    # ── ROS optical frame axes ──
+    # +Z forward (toward target)
     optical_z = direction
 
-    # ROS optical frame: +X right
-    # Use world +Z (up) to derive right vector
-    world_up = np.array([0, 0, 1])
-    optical_x = np.cross(world_up, optical_z)
-    nx = np.linalg.norm(optical_x)
+    # +Y down in image — we want this to point generally world-down
+    world_down = np.array([0.0, 0.0, -1.0])
+    # Project world_down onto plane perpendicular to optical_z
+    optical_y = world_down - np.dot(world_down, optical_z) * optical_z
+    ny = np.linalg.norm(optical_y)
 
+    if ny < 1e-6:
+        # Camera looking straight down/up: optical_z ∥ world Z
+        # Fall back: use world +Y (forward) as image-down reference
+        optical_y = np.array([0.0, -1.0, 0.0])  # south = down in image
+        ny = 1.0
+    optical_y /= ny
+
+    # +X right in image — complete right-handed frame
+    optical_x = np.cross(optical_y, optical_z)
+    nx = np.linalg.norm(optical_x)
     if nx < 1e-6:
-        # Vertical look: optical_z is parallel to world_up
-        # Use world +Y as alternative reference
-        world_y = np.array([0, 1, 0])
-        optical_x = np.cross(optical_z, world_y)
+        # Degenerate: force orthogonal
+        optical_x = np.cross(optical_z, np.array([0.0, 1.0, 0.0]))
         nx = np.linalg.norm(optical_x)
     optical_x /= nx
 
-    # ROS optical frame: +Y down
+    # Re-orthogonalize: ensure optical_y ⟂ optical_z and ⟂ optical_x
     optical_y = np.cross(optical_z, optical_x)
+    optical_y /= np.linalg.norm(optical_y)
 
-    # Build rotation matrix: columns are optical frame axes in world coords
+    # ── Optional roll around optical axis ──
+    if abs(roll_offset_deg) > 1e-9:
+        roll_rad = math.radians(roll_offset_deg)
+        cr, sr = math.cos(roll_rad), math.sin(roll_rad)
+        ox = optical_x * cr + optical_y * sr
+        oy = -optical_x * sr + optical_y * cr
+        optical_x = ox
+        optical_y = oy
+
+    # Build rotation matrix: columns = optical frame axes in world coords
     R_optical_in_world = np.column_stack([optical_x, optical_y, optical_z])
 
-    # Gazebo camera pose = R_optical * R_correction
-    # where R_correction converts from Gazebo camera frame to ROS optical frame
-    # Gazebo camera: +X right, +Y up, +Z backward
-    # ROS optical: +X right, +Y down, +Z forward
-    # R_correction = R_optical_in_gazebo
-    #   = rot_x(-PI/2) * rot_z(-PI/2)
+    # ── Gazebo camera ↔ ROS optical correction ──
+    # Gazebo default camera: +X right, +Y up, +Z backward (looks -Z)
+    # ROS optical:           +X right, +Y down, +Z forward
+    # R_corr maps Gazebo-cam axes → ROS-optical axes:
+    #   rot_x(-π/2) · rot_z(-π/2)
     roll_corr = -math.pi / 2
-    pitch_corr = 0
+    pitch_corr = 0.0
     yaw_corr = -math.pi / 2
 
     R_corr = R_from_rpy(roll_corr, pitch_corr, yaw_corr)
@@ -70,11 +97,20 @@ def compute_look_at(cam_pos, target_pos):
     # Extract RPY from Gazebo rotation
     rpy = rpy_from_R(R_gazebo)
 
-    # Compute optical +Z vs target direction angle error
-    optical_z_actual = R_gazebo @ R_corr @ np.array([0, 0, 1])
+    # ── Quality metrics ──
+    # Optical +Z vs target direction error
+    optical_z_actual = R_gazebo @ R_corr @ np.array([0.0, 0.0, 1.0])
     cos_err = np.dot(optical_z_actual, direction)
-    cos_err = np.clip(cos_err, -1, 1)
+    cos_err = np.clip(cos_err, -1.0, 1.0)
     angle_err_deg = math.degrees(math.acos(cos_err))
+
+    # Image "up" vs world "up" deviation
+    # Image up = -optical_y (optical +Y is down, so -Y is up)
+    image_up = -R_optical_in_world[:, 1]  # second column = optical_y
+    world_up = np.array([0.0, 0.0, 1.0])
+    cos_up = np.dot(image_up, world_up)
+    cos_up = np.clip(cos_up, -1.0, 1.0)
+    image_up_err_deg = math.degrees(math.acos(cos_up))
 
     return {
         "roll": float(rpy[0]),
@@ -82,6 +118,7 @@ def compute_look_at(cam_pos, target_pos):
         "yaw": float(rpy[2]),
         "distance_m": float(dist),
         "optical_z_angle_error_deg": float(angle_err_deg),
+        "image_up_vs_world_up_deg": float(image_up_err_deg),
     }
 
 
@@ -124,13 +161,16 @@ if __name__ == "__main__":
     parser.add_argument("--target-x", type=float, default=0.72)
     parser.add_argument("--target-y", type=float, default=0.0)
     parser.add_argument("--target-z", type=float, default=0.88)
+    parser.add_argument("--roll-offset-deg", type=float, default=0.0,
+                        help="Optional roll around optical axis (degrees)")
     parser.add_argument("--yaml", action="store_true",
                         help="Output as YAML")
     args = parser.parse_args()
 
     result = compute_look_at(
         [args.cam_x, args.cam_y, args.cam_z],
-        [args.target_x, args.target_y, args.target_z])
+        [args.target_x, args.target_y, args.target_z],
+        roll_offset_deg=args.roll_offset_deg)
 
     if args.yaml:
         print(yaml.dump(result, default_flow_style=False))
