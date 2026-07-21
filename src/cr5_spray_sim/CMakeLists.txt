@@ -37,5 +37,20 @@ catkin_install_python(PROGRAMS
   scripts/compute_look_at.py
   scripts/scene_v2_preflight.py
   scripts/object_pose_tf_v2.py
+  # V3.1
+  scripts/spawn_cameras_v31.py
+  scripts/object_yaw_v31.py
+  scripts/object_pose_tf_v31.py
+  # V3.3
+  scripts/spray_simulator_v33.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+# Shell launchers and tools
+install(PROGRAMS
+  scripts/run_scene_v2.sh
+  scripts/run_scene_v31_simple.sh
+  scripts/run_scene_v33_spray.sh
+  scripts/use_spray_session_v33.sh
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
