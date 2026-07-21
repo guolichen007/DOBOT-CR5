@@ -13,14 +13,14 @@ ISOLATED=false
 PROFILE="vm"
 OBJECT="block_combo_part"
 
-for arg in "$@"; do
-    case $arg in
-        --gui) GUI=true ;;
-        --headless) HEADLESS=true ;;
-        --isolated) ISOLATED=true ;;
-        --profile) shift; PROFILE="$1"; shift; continue ;;
-        --object) shift; OBJECT="$1"; shift; continue ;;
-        *) ;;
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --gui) GUI=true; shift ;;
+        --headless) HEADLESS=true; shift ;;
+        --isolated) ISOLATED=true; shift ;;
+        --profile) PROFILE="$2"; shift 2 ;;
+        --object) OBJECT="$2"; shift 2 ;;
+        *) shift ;;
     esac
 done
 
@@ -58,10 +58,14 @@ source "$WORKSPACE/devel/setup.bash"
 
 # Preflight
 echo "=== Preflight ==="
-python3 "$SCRIPT_DIR/scene_v2_preflight.py" || {
-    echo "Preflight failed. Aborting."
-    exit 1
-}
+if $ISOLATED; then
+    echo "Isolated mode: skipping preflight (random ports, no conflict possible)"
+else
+    python3 "$SCRIPT_DIR/scene_v2_preflight.py" || {
+        echo "Preflight failed. Aborting."
+        exit 1
+    }
+fi
 
 # Launch args
 LAUNCH_ARGS="gui:=${GUI} headless:=${HEADLESS} camera_profile:=${PROFILE} object_type:=${OBJECT}"
