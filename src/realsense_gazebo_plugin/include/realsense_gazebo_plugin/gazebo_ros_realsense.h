@@ -47,6 +47,9 @@ namespace gazebo
 
     /// \brief ROS image messages
     protected: sensor_msgs::Image image_msg_, depth_msg_;
+
+    /// \brief Custom frame names from SDF (for optical frame support)
+    protected: std::string colorFrameName, depthFrameName, ir1FrameName, ir2FrameName;
   };
 }
 #endif /* _GAZEBO_ROS_REALSENSE_PLUGIN_ */

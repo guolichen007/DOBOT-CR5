@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-V2 Camera Spawner: 3 static D455-like cameras with look-at poses.
-Each camera is a static Gazebo model; pose applied only once via spawn.
+V2 Camera Spawner: reads scene_v2.yaml, spawns static cameras with look-at poses.
 """
 import os
 import sys
@@ -9,217 +8,183 @@ import yaml
 import rospy
 import subprocess
 import tempfile
+import numpy as np
 from geometry_msgs.msg import Pose, Point, Quaternion
 from tf.transformations import quaternion_from_euler
 from gazebo_msgs.srv import SpawnModel
 
-# Camera positions from scene_v2.yaml
-CAMERAS = [
-    {"name": "cam_front_left",  "x": 0.34, "y": -0.58, "z": 1.22},
-    {"name": "cam_front_right", "x": 0.34, "y":  0.58, "z": 1.22},
-    {"name": "cam_rear",        "x": 1.28, "y":  0.00, "z": 1.12},
-]
-TARGET = {"x": 0.72, "y": 0.0, "z": 0.88}
 
-VM_PROFILE = {"color_width": 424, "color_height": 240, "depth_width": 424,
-              "depth_height": 240, "fps": 5}
-QUALITY_PROFILE = {"color_width": 640, "color_height": 480, "depth_width": 640,
-                   "depth_height": 480, "fps": 10}
+def load_scene_config():
+    """Load scene_v2.yaml from cr5_spray_sim config."""
+    config_path = rospy.get_param("~scene_config", "")
+    if not config_path:
+        try:
+            import rospkg
+            config_path = os.path.join(
+                rospkg.RosPack().get_path("cr5_spray_sim"),
+                "config", "scene_v2.yaml")
+        except Exception:
+            config_path = os.path.join(
+                os.path.dirname(__file__), "..", "config", "scene_v2.yaml")
+    with open(config_path) as f:
+        return yaml.safe_load(f)
 
 
 def compute_look_at(cam_pos, target_pos):
-    """Compute RPY so optical +Z points to target. Uses compute_look_at module."""
+    """Compute RPY for Gazebo camera so optical +Z points to target."""
     script = os.path.join(os.path.dirname(__file__), "compute_look_at.py")
-    cmd = [
-        sys.executable, script,
-        "--cam-x", str(cam_pos[0]),
-        "--cam-y", str(cam_pos[1]),
-        "--cam-z", str(cam_pos[2]),
-        "--target-x", str(target_pos[0]),
-        "--target-y", str(target_pos[1]),
-        "--target-z", str(target_pos[2]),
-        "--yaml",
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-    if result.returncode != 0:
-        rospy.logerr("look-at failed: %s", result.stderr)
+    cmd = [sys.executable, script,
+           "--cam-x", str(cam_pos[0]), "--cam-y", str(cam_pos[1]),
+           "--cam-z", str(cam_pos[2]),
+           "--target-x", str(target_pos[0]), "--target-y", str(target_pos[1]),
+           "--target-z", str(target_pos[2]), "--yaml"]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    if r.returncode != 0:
         return None
-    return yaml.safe_load(result.stdout)
+    return yaml.safe_load(r.stdout)
 
 
-class CameraSpawnerV2:
-    def __init__(self):
-        rospy.init_node("spawn_cameras_v2")
-        profile_name = rospy.get_param("~camera_profile", "vm")
-        self.profile = VM_PROFILE if profile_name == "vm" else QUALITY_PROFILE
-        rospy.loginfo("Camera profile: %s (%dx%d@%dHz)",
-                      profile_name, self.profile["color_width"],
-                      self.profile["color_height"], self.profile["fps"])
-
-        rospy.wait_for_service("/gazebo/spawn_urdf_model", timeout=30.0)
-        self.spawn = rospy.ServiceProxy("/gazebo/spawn_urdf_model", SpawnModel)
-
-        self.spawn_all()
-
-    def spawn_all(self):
-        for cam in CAMERAS:
-            self.spawn_one(cam)
-
-    def spawn_one(self, cam):
-        name = cam["name"]
-        pos = [cam["x"], cam["y"], cam["z"]]
-        tgt = [TARGET["x"], TARGET["y"], TARGET["z"]]
-
-        rpy_data = compute_look_at(pos, tgt)
-        if rpy_data is None:
-            rospy.logerr("Skipping %s: look-at failed", name)
-            return
-
-        roll, pitch, yaw = rpy_data["roll"], rpy_data["pitch"], rpy_data["yaw"]
-        rospy.loginfo("%s: dist=%.2fm, angle_err=%.4f deg, rpy=(%.3f,%.3f,%.3f)",
-                      name, rpy_data["distance_m"],
-                      rpy_data["optical_z_angle_error_deg"],
-                      roll, pitch, yaw)
-
-        # Generate camera xacro: sensor origin=0, static model
-        xacro = self._make_camera_xacro(name)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".xacro", delete=False) as f:
-            f.write(xacro)
-            xacro_file = f.name
-
-        try:
-            result = subprocess.run(
-                ["xacro", xacro_file],
-                capture_output=True, text=True, timeout=10,
-                env={**os.environ,
-                     "ROS_PACKAGE_PATH": os.environ.get("ROS_PACKAGE_PATH", "")})
-            if result.returncode != 0:
-                rospy.logerr("xacro failed for %s: %s", name, result.stderr)
-                return
-            model_xml = result.stdout
-        finally:
-            os.unlink(xacro_file)
-
-        # Pose
-        q = quaternion_from_euler(roll, pitch, yaw)
-        pose = Pose(position=Point(x=cam["x"], y=cam["y"], z=cam["z"]),
-                    orientation=Quaternion(x=q[0], y=q[1], z=q[2], w=q[3]))
-
-        try:
-            resp = self.spawn(name, model_xml, "", pose, "world")
-            if resp.success:
-                rospy.loginfo("Spawned: %s", name)
-            else:
-                rospy.logerr("Spawn failed for %s: %s", name, resp.status_message)
-        except Exception as e:
-            rospy.logerr("Spawn error for %s: %s", name, e)
-
-    def _make_camera_xacro(self, name):
-        p = self.profile
-        return f'''<?xml version="1.0"?>
+def make_camera_xacro(name, profile, scene_config):
+    """Generate D455-like camera URDF with optical frame chain."""
+    p = profile
+    # Add visible body and optical axis arrow
+    return f'''<?xml version="1.0"?>
 <robot name="{name}" xmlns:xacro="http://ros.org/wiki/xacro">
-  <xacro:include filename="$(find realsense_gazebo_description)/urdf/_d455_like.urdf.xacro"/>
-  <xacro:include filename="$(find realsense_gazebo_description)/urdf/_d455_like.gazebo.xacro"/>
+  <material name="{name}_body"><color rgba="0.3 0.3 0.3 1"/></material>
+  <material name="{name}_lens"><color rgba="0.1 0.1 0.1 1"/></material>
+  <material name="{name}_axis"><color rgba="1 0 0 1"/></material>
 
-  <!-- Sensor origin = 0 (pose from spawn_model only) -->
   <link name="{name}_link">
-    <inertial>
-      <mass value="0.05"/>
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
-    </inertial>
+    <inertial><mass value="0.05"/><inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/></inertial>
+    <!-- Camera body box -->
+    <visual name="body"><origin xyz="0 -0.01 0" rpy="0 0 0"/><geometry><box size="0.025 0.025 0.09"/></geometry><material name="{name}_body"/></visual>
+    <!-- Lens face -->
+    <visual name="lens"><origin xyz="0 0 0.045" rpy="0 0 0"/><geometry><cylinder radius="0.012" length="0.005"/></geometry><material name="{name}_lens"/></visual>
+    <!-- Optical axis arrow (red, 10cm, +Z in optical frame = Gazebo camera forward) -->
+    <visual name="axis"><origin xyz="0 0 0.07" rpy="0 0 0"/><geometry><cylinder radius="0.002" length="0.06"/></geometry><material name="{name}_axis"/></visual>
   </link>
-
-  <!-- Optical frame chain -->
-  <link name="{name}_color_frame"/>
-  <joint name="{name}_color_joint" type="fixed">
-    <parent link="{name}_link"/>
-    <child link="{name}_color_frame"/>
-  </joint>
 
   <link name="{name}_color_optical_frame"/>
   <joint name="{name}_color_optical_joint" type="fixed">
-    <parent link="{name}_color_frame"/>
-    <child link="{name}_color_optical_frame"/>
+    <parent link="{name}_link"/><child link="{name}_color_optical_frame"/>
     <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
   </joint>
 
   <link name="{name}_depth_optical_frame"/>
   <joint name="{name}_depth_optical_joint" type="fixed">
-    <parent link="{name}_color_frame"/>
-    <child link="{name}_depth_optical_frame"/>
+    <parent link="{name}_link"/><child link="{name}_depth_optical_frame"/>
     <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
   </joint>
 
-  <!-- Gazebo sensors (color + depth + IR required by plugin) -->
   <gazebo reference="{name}_link">
     <self_collide>0</self_collide>
     <sensor name="{name}color" type="camera">
-      <camera name="{name}">
-        <horizontal_fov>1.2112585</horizontal_fov>
-        <image>
-          <width>{p["color_width"]}</width>
-          <height>{p["color_height"]}</height>
-          <format>RGB_INT8</format>
-        </image>
+      <camera name="{name}"><horizontal_fov>1.2112585</horizontal_fov>
+        <image><width>{p["color_width"]}</width><height>{p["color_height"]}</height><format>RGB_INT8</format></image>
         <clip><near>0.15</near><far>10.0</far></clip>
         <noise><type>gaussian</type><mean>0.0</mean><stddev>0.007</stddev></noise>
-      </camera>
-      <always_on>1</always_on>
-      <update_rate>{p["fps"]}</update_rate>
-      <visualize>false</visualize>
+      </camera><always_on>1</always_on><update_rate>{p["fps"]}</update_rate><visualize>false</visualize>
     </sensor>
-
     <sensor name="{name}depth" type="depth">
-      <camera name="{name}">
-        <horizontal_fov>1.2112585</horizontal_fov>
-        <image>
-          <width>{p["depth_width"]}</width>
-          <height>{p["depth_height"]}</height>
-          <format>R_FLOAT32</format>
-        </image>
+      <camera name="{name}"><horizontal_fov>1.2112585</horizontal_fov>
+        <image><width>{p["depth_width"]}</width><height>{p["depth_height"]}</height><format>R_FLOAT32</format></image>
         <clip><near>0.15</near><far>10.0</far></clip>
         <noise><type>gaussian</type><mean>0.0</mean><stddev>0.005</stddev></noise>
-      </camera>
-      <always_on>1</always_on>
-      <update_rate>{p["fps"]}</update_rate>
-      <visualize>false</visualize>
+      </camera><always_on>1</always_on><update_rate>{p["fps"]}</update_rate><visualize>false</visualize>
     </sensor>
-
     <sensor name="{name}ired1" type="camera">
-      <camera name="{name}">
-        <horizontal_fov>1.48702</horizontal_fov>
+      <camera name="{name}"><horizontal_fov>1.48702</horizontal_fov>
         <image><width>160</width><height>120</height><format>L_INT8</format></image>
         <clip><near>0.15</near><far>10.0</far></clip>
-      </camera>
-      <always_on>1</always_on>
-      <update_rate>2</update_rate>
-      <visualize>false</visualize>
+      </camera><always_on>1</always_on><update_rate>2</update_rate><visualize>false</visualize>
     </sensor>
-
     <sensor name="{name}ired2" type="camera">
-      <camera name="{name}">
-        <horizontal_fov>1.48702</horizontal_fov>
+      <camera name="{name}"><horizontal_fov>1.48702</horizontal_fov>
         <image><width>160</width><height>120</height><format>L_INT8</format></image>
         <clip><near>0.15</near><far>10.0</far></clip>
-      </camera>
-      <always_on>1</always_on>
-      <update_rate>2</update_rate>
-      <visualize>false</visualize>
+      </camera><always_on>1</always_on><update_rate>2</update_rate><visualize>false</visualize>
     </sensor>
   </gazebo>
 
-  <!-- Plugin at model level -->
   <gazebo>
     <plugin name="{name}" filename="librealsense_gazebo_plugin.so">
       <prefix>{name}</prefix>
+      <colorFrameName>{name}_color_optical_frame</colorFrameName>
+      <depthFrameName>{name}_depth_optical_frame</depthFrameName>
     </plugin>
   </gazebo>
 
-  <!-- Static: no gravity -->
-  <gazebo>
-    <static>true</static>
-  </gazebo>
+  <gazebo><static>true</static></gazebo>
 </robot>'''
+
+
+class CameraSpawnerV2:
+    def __init__(self):
+        rospy.init_node("spawn_cameras_v2")
+        self.scene = load_scene_config()
+
+        profile_name = rospy.get_param("~camera_profile", "vm")
+        profiles = self.scene.get("cameras_v2", {})
+        self.profile = profiles.get(
+            "vm_profile" if profile_name == "vm" else "quality_profile",
+            {"color_width": 424, "color_height": 240, "depth_width": 424,
+             "depth_height": 240, "fps": 5})
+
+        cam_cfg = profiles.get("cameras", [])
+        if not cam_cfg:
+            rospy.logerr("No cameras in scene_v2.yaml!")
+            return
+
+        self.target = profiles.get("target", {"x": 0.72, "y": 0, "z": 0.88})
+        tgt = [self.target["x"], self.target["y"], self.target["z"]]
+
+        rospy.wait_for_service("/gazebo/spawn_urdf_model", timeout=30)
+        self.spawn = rospy.ServiceProxy("/gazebo/spawn_urdf_model", SpawnModel)
+
+        rospy.loginfo("Camera profile: %s (%dx%d@%dHz), %d cameras",
+                      profile_name, self.profile["color_width"],
+                      self.profile["color_height"], self.profile["fps"],
+                      len(cam_cfg))
+
+        for cam in cam_cfg:
+            name = cam["name"]
+            pos = [cam["position"]["x"], cam["position"]["y"], cam["position"]["z"]]
+            self.spawn_one(name, pos, tgt)
+
+    def spawn_one(self, name, pos, tgt):
+        rpy_data = compute_look_at(pos, tgt)
+        if not rpy_data:
+            rospy.logerr("look-at failed for %s", name); return
+
+        roll, pitch, yaw = rpy_data["roll"], rpy_data["pitch"], rpy_data["yaw"]
+        err = rpy_data["optical_z_angle_error_deg"]
+        if err > 0.5:
+            rospy.logerr("%s: look-at error %.4f deg > 0.5!", name, err); return
+
+        xacro = make_camera_xacro(name, self.profile, self.scene)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".xacro", delete=False) as f:
+            f.write(xacro); xf = f.name
+        try:
+            r = subprocess.run(["xacro", xf], capture_output=True, text=True, timeout=10,
+                               env={**os.environ})
+            if r.returncode != 0:
+                rospy.logerr("xacro failed for %s: %s", name, r.stderr); return
+            model_xml = r.stdout
+        finally:
+            os.unlink(xf)
+
+        q = quaternion_from_euler(roll, pitch, yaw)
+        pose = Pose(position=Point(x=pos[0], y=pos[1], z=pos[2]),
+                    orientation=Quaternion(x=q[0], y=q[1], z=q[2], w=q[3]))
+        try:
+            resp = self.spawn(name, model_xml, "", pose, "world")
+            if resp.success:
+                rospy.loginfo("Spawned %s: dist=%.2fm err=%.4f deg rpy=(%.3f,%.3f,%.3f)",
+                              name, rpy_data["distance_m"], err, roll, pitch, yaw)
+            else:
+                rospy.logerr("Spawn %s failed: %s", name, resp.status_message)
+        except Exception as e:
+            rospy.logerr("Spawn %s error: %s", name, e)
 
 
 if __name__ == "__main__":

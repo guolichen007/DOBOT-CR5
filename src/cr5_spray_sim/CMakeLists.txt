@@ -35,5 +35,7 @@ catkin_install_python(PROGRAMS
   scripts/object_yaw_v2.py
   scripts/scene_tf_v2.py
   scripts/compute_look_at.py
+  scripts/scene_v2_preflight.py
+  scripts/object_pose_tf_v2.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

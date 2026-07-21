@@ -32,6 +32,27 @@ void GazeboRosRealsense::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
   }
   ROS_INFO("Realsense Gazebo ROS plugin loading.");
 
+  // Read custom frame names from SDF (for optical frame support)
+  if (_sdf->HasElement("colorFrameName"))
+    this->colorFrameName = _sdf->Get<std::string>("colorFrameName");
+  else
+    this->colorFrameName = prefix + COLOR_CAMERA_NAME;
+
+  if (_sdf->HasElement("depthFrameName"))
+    this->depthFrameName = _sdf->Get<std::string>("depthFrameName");
+  else
+    this->depthFrameName = prefix + COLOR_CAMERA_NAME;
+
+  if (_sdf->HasElement("ir1FrameName"))
+    this->ir1FrameName = _sdf->Get<std::string>("ir1FrameName");
+  else
+    this->ir1FrameName = prefix + IRED1_CAMERA_NAME;
+
+  if (_sdf->HasElement("ir2FrameName"))
+    this->ir2FrameName = _sdf->Get<std::string>("ir2FrameName");
+  else
+    this->ir2FrameName = prefix + IRED2_CAMERA_NAME;
+
   RealSensePlugin::Load(_model, _sdf);
 
   this->rosnode_ = new ros::NodeHandle(this->GetHandle());
@@ -67,7 +88,15 @@ void GazeboRosRealsense::OnNewFrame(const rendering::CameraPtr cam,
   const auto image_pub = camera_publishers.at(camera_id);
 
   // copy data into image
-  this->image_msg_.header.frame_id = prefix+camera_id;
+  // Use custom frame name from SDF (optical frame support)
+  if (camera_id == COLOR_CAMERA_NAME)
+    this->image_msg_.header.frame_id = this->colorFrameName;
+  else if (camera_id == IRED1_CAMERA_NAME)
+    this->image_msg_.header.frame_id = this->ir1FrameName;
+  else if (camera_id == IRED2_CAMERA_NAME)
+    this->image_msg_.header.frame_id = this->ir2FrameName;
+  else
+    this->image_msg_.header.frame_id = prefix + camera_id;
   this->image_msg_.header.stamp.sec = current_time.sec;
   this->image_msg_.header.stamp.nsec = current_time.nsec;
 
@@ -109,7 +138,7 @@ void GazeboRosRealsense::OnNewDepthFrame()
   RealSensePlugin::OnNewDepthFrame();
 
   // copy data into image
-  this->depth_msg_.header.frame_id = prefix+COLOR_CAMERA_NAME;
+  this->depth_msg_.header.frame_id = this->depthFrameName;
   this->depth_msg_.header.stamp.sec = current_time.sec;
   this->depth_msg_.header.stamp.nsec = current_time.nsec;
 

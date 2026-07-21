@@ -1,156 +1,137 @@
 <?xml version="1.0"?>
 <!--
-  Gantry V2: Four-post static frame, monolithic model
-  所有 visual/collision 在一个 link 中用 box 原语构建。
-  不加载 gazebo_ros_control。
+  Gantry V2: Monolithic static frame, local coords only.
+  World position applied by spawn_model pose.
+  Root link origin = bottom center of gantry frame.
+  Four pillars: ±Y = ±width/2, front/rear X = ±depth/2 from center.
 -->
 <robot name="gantry_v2" xmlns:xacro="http://ros.org/wiki/xacro">
 
-  <xacro:arg name="center_x" default="0.78"/>
   <xacro:arg name="width_y" default="1.45"/>
   <xacro:arg name="depth_x" default="0.75"/>
   <xacro:arg name="height" default="1.75"/>
   <xacro:arg name="beam" default="0.04"/>
 
-  <xacro:property name="cx" value="$(arg center_x)"/>
   <xacro:property name="wy" value="$(arg width_y)"/>
   <xacro:property name="dx" value="$(arg depth_x)"/>
   <xacro:property name="h" value="$(arg height)"/>
   <xacro:property name="b" value="$(arg beam)"/>
 
-  <xacro:property name="front_x" value="${cx - dx/2}"/>
-  <xacro:property name="rear_x" value="${cx + dx/2}"/>
-  <xacro:property name="left_y" value="${-wy/2}"/>
-  <xacro:property name="right_y" value="${wy/2}"/>
-
-  <material name="gantry_v2_gray">
+  <material name="gantry_gray">
     <color rgba="0.55 0.55 0.55 1"/>
   </material>
 
-  <!-- Single link containing all geometry -->
+  <!-- Root link: origin at bottom center of gantry frame -->
   <link name="gantry_v2_base">
     <inertial>
       <mass value="100.0"/>
       <inertia ixx="50.0" ixy="0" ixz="0" iyy="50.0" iyz="0" izz="50.0"/>
-      <origin xyz="${cx} 0 ${h/2}" rpy="0 0 0"/>
+      <origin xyz="0 0 ${h/2}" rpy="0 0 0"/>
     </inertial>
 
-    <!-- Four vertical pillars -->
     <!-- Front-left pillar -->
     <visual name="pillar_fl">
-      <origin xyz="${front_x} ${left_y} ${h/2}" rpy="0 0 0"/>
+      <origin xyz="${-dx/2} ${-wy/2} ${h/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${b} ${h}"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <material name="gantry_gray"/>
     </visual>
     <collision name="pillar_fl_col">
-      <origin xyz="${front_x} ${left_y} ${h/2}" rpy="0 0 0"/>
+      <origin xyz="${-dx/2} ${-wy/2} ${h/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${b} ${h}"/></geometry>
     </collision>
 
     <!-- Front-right pillar -->
     <visual name="pillar_fr">
-      <origin xyz="${front_x} ${right_y} ${h/2}" rpy="0 0 0"/>
+      <origin xyz="${-dx/2} ${wy/2} ${h/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${b} ${h}"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <material name="gantry_gray"/>
     </visual>
     <collision name="pillar_fr_col">
-      <origin xyz="${front_x} ${right_y} ${h/2}" rpy="0 0 0"/>
+      <origin xyz="${-dx/2} ${wy/2} ${h/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${b} ${h}"/></geometry>
     </collision>
 
     <!-- Rear-left pillar -->
     <visual name="pillar_rl">
-      <origin xyz="${rear_x} ${left_y} ${h/2}" rpy="0 0 0"/>
+      <origin xyz="${dx/2} ${-wy/2} ${h/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${b} ${h}"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <material name="gantry_gray"/>
     </visual>
     <collision name="pillar_rl_col">
-      <origin xyz="${rear_x} ${left_y} ${h/2}" rpy="0 0 0"/>
+      <origin xyz="${dx/2} ${-wy/2} ${h/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${b} ${h}"/></geometry>
     </collision>
 
     <!-- Rear-right pillar -->
     <visual name="pillar_rr">
-      <origin xyz="${rear_x} ${right_y} ${h/2}" rpy="0 0 0"/>
+      <origin xyz="${dx/2} ${wy/2} ${h/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${b} ${h}"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <material name="gantry_gray"/>
     </visual>
     <collision name="pillar_rr_col">
-      <origin xyz="${rear_x} ${right_y} ${h/2}" rpy="0 0 0"/>
+      <origin xyz="${dx/2} ${wy/2} ${h/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${b} ${h}"/></geometry>
     </collision>
 
-    <!-- Top beams: 4 sides forming closed rectangle -->
-    <!-- Front top beam (X direction, between front posts) -->
+    <!-- Top beams: 4 sides -->
     <visual name="beam_front">
-      <origin xyz="${cx} ${left_y} ${h - b/2}" rpy="0 0 0"/>
+      <origin xyz="${-dx/2} 0 ${h - b/2}" rpy="0 0 0"/>
       <geometry><box size="${dx} ${b} ${b}"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <material name="gantry_gray"/>
     </visual>
     <collision name="beam_front_col">
-      <origin xyz="${cx} ${left_y} ${h - b/2}" rpy="0 0 0"/>
+      <origin xyz="${-dx/2} 0 ${h - b/2}" rpy="0 0 0"/>
       <geometry><box size="${dx} ${b} ${b}"/></geometry>
     </collision>
 
-    <!-- Rear top beam -->
     <visual name="beam_rear">
-      <origin xyz="${cx} ${right_y} ${h - b/2}" rpy="0 0 0"/>
+      <origin xyz="${dx/2} 0 ${h - b/2}" rpy="0 0 0"/>
       <geometry><box size="${dx} ${b} ${b}"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <material name="gantry_gray"/>
     </visual>
     <collision name="beam_rear_col">
-      <origin xyz="${cx} ${right_y} ${h - b/2}" rpy="0 0 0"/>
+      <origin xyz="${dx/2} 0 ${h - b/2}" rpy="0 0 0"/>
       <geometry><box size="${dx} ${b} ${b}"/></geometry>
     </collision>
 
-    <!-- Left top beam (Y direction) -->
     <visual name="beam_left">
-      <origin xyz="${front_x} 0 ${h - b/2}" rpy="0 0 0"/>
+      <origin xyz="0 ${-wy/2} ${h - b/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${wy} ${b}"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <material name="gantry_gray"/>
     </visual>
     <collision name="beam_left_col">
-      <origin xyz="${front_x} 0 ${h - b/2}" rpy="0 0 0"/>
+      <origin xyz="0 ${-wy/2} ${h - b/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${wy} ${b}"/></geometry>
     </collision>
 
-    <!-- Right top beam -->
     <visual name="beam_right">
-      <origin xyz="${rear_x} 0 ${h - b/2}" rpy="0 0 0"/>
+      <origin xyz="0 ${wy/2} ${h - b/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${wy} ${b}"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <material name="gantry_gray"/>
     </visual>
     <collision name="beam_right_col">
-      <origin xyz="${rear_x} 0 ${h - b/2}" rpy="0 0 0"/>
+      <origin xyz="0 ${wy/2} ${h - b/2}" rpy="0 0 0"/>
       <geometry><box size="${b} ${wy} ${b}"/></geometry>
     </collision>
 
-    <!-- Base plates (feet) for each pillar -->
+    <!-- Base plates -->
     <visual name="foot_fl">
-      <origin xyz="${front_x} ${left_y} 0.01" rpy="0 0 0"/>
-      <geometry><box size="0.25 0.15 0.02"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <origin xyz="${-dx/2} ${-wy/2} 0.01" rpy="0 0 0"/>
+      <geometry><box size="0.25 0.15 0.02"/></geometry><material name="gantry_gray"/>
     </visual>
     <visual name="foot_fr">
-      <origin xyz="${front_x} ${right_y} 0.01" rpy="0 0 0"/>
-      <geometry><box size="0.25 0.15 0.02"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <origin xyz="${-dx/2} ${wy/2} 0.01" rpy="0 0 0"/>
+      <geometry><box size="0.25 0.15 0.02"/></geometry><material name="gantry_gray"/>
     </visual>
     <visual name="foot_rl">
-      <origin xyz="${rear_x} ${left_y} 0.01" rpy="0 0 0"/>
-      <geometry><box size="0.25 0.15 0.02"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <origin xyz="${dx/2} ${-wy/2} 0.01" rpy="0 0 0"/>
+      <geometry><box size="0.25 0.15 0.02"/></geometry><material name="gantry_gray"/>
     </visual>
     <visual name="foot_rr">
-      <origin xyz="${rear_x} ${right_y} 0.01" rpy="0 0 0"/>
-      <geometry><box size="0.25 0.15 0.02"/></geometry>
-      <material name="gantry_v2_gray"/>
+      <origin xyz="${dx/2} ${wy/2} 0.01" rpy="0 0 0"/>
+      <geometry><box size="0.25 0.15 0.02"/></geometry><material name="gantry_gray"/>
     </visual>
   </link>
 
-  <!-- Static: not affected by gravity -->
-  <gazebo>
-    <static>true</static>
-  </gazebo>
-
+  <gazebo><static>true</static></gazebo>
 </robot>

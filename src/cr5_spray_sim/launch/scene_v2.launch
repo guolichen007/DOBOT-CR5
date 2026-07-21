@@ -52,14 +52,14 @@
     <remap from="robot_description" to="robot_description"/>
   </node>
 
-  <!-- Gantry V2 -->
+  <!-- Gantry V2: spawn at world position from scene_v2.yaml -->
   <node name="spawn_gantry_v2" pkg="gazebo_ros" type="spawn_model"
-    args="-urdf -param gantry_v2_description -model gantry_v2 -x 0 -y 0 -z 0"
+    args="-urdf -param gantry_v2_description -model gantry_v2 -x 0.78 -y 0 -z 0"
     respawn="false" output="screen"/>
 
-  <!-- Object V2 -->
+  <!-- Object V2: spawn at world position from scene_v2.yaml -->
   <node name="spawn_object_v2" pkg="gazebo_ros" type="spawn_model"
-    args="-urdf -param object_v2_description -model spray_object -x 0 -y 0 -z 0"
+    args="-urdf -param object_v2_description -model spray_object -x 0.72 -y 0 -z 0.88"
     respawn="false" output="screen"/>
 
   <!-- Three static cameras with look-at -->
@@ -72,8 +72,8 @@
   <node name="object_yaw_v2" pkg="cr5_spray_sim"
     type="object_yaw_v2.py" output="screen"/>
 
-  <!-- Static TF publisher for gantry, object, cameras -->
-  <node name="scene_tf_broadcaster" pkg="cr5_spray_sim"
-    type="scene_tf_v2.py" output="screen"/>
+  <!-- Dynamic object TF (follows yaw changes) -->
+  <node name="object_pose_tf" pkg="cr5_spray_sim"
+    type="object_pose_tf_v2.py" output="screen"/>
 
 </launch>
