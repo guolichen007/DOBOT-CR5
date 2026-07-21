@@ -4,7 +4,7 @@
   <arg name="gui" default="false"/>
   <arg name="headless" default="false"/>
   <arg name="paused" default="false"/>
-  <arg name="object_type" default="flat_panel" doc="flat_panel|cylinder_part|asymmetric_part_v2"/>
+  <arg name="object_type" default="block_combo_part" doc="block_combo_part|flat_panel|cylinder_part|asymmetric_part_v2"/>
   <arg name="camera_profile" default="vm" doc="vm|quality"/>
 
   <!-- ===== Generate Descriptions ===== -->

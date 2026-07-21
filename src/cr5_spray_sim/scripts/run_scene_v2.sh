@@ -1,6 +1,6 @@
 #!/bin/bash
 # CR5 Spray V2 Scene Launcher (isolated)
-# Usage: run_scene_v2.sh [--gui] [--headless] [--isolated] [--profile vm|quality] [--object flat_panel|cylinder_part|asymmetric_part_v2]
+# Usage: run_scene_v2.sh [--gui] [--headless] [--isolated] [--profile vm|quality] [--object block_combo_part|flat_panel|cylinder_part|asymmetric_part_v2]
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -11,7 +11,7 @@ GUI=false
 HEADLESS=false
 ISOLATED=false
 PROFILE="vm"
-OBJECT="flat_panel"
+OBJECT="block_combo_part"
 
 for arg in "$@"; do
     case $arg in

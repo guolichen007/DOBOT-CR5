@@ -1,5 +1,5 @@
-# CR5 Spray Demo V2 Scene Configuration
-# 单一配置源，所有尺寸在这里定义
+# CR5 Spray Demo V2.2 Scene Configuration
+# 单一配置源，所有尺寸/位置/颜色在这里定义
 
 cr5_base:
   position: {x: 0.0, y: 0.0, z: 0.0}
@@ -10,34 +10,72 @@ gantry_v2:
   depth_x: 0.75        # 前后立柱间距
   height: 1.75         # 框架总高
   beam_size: 0.04      # 型材截面边长
-  post_front_x: 0.43   # 前立柱 X
-  post_rear_x: 1.18    # 后立柱 X
-  post_left_y: -0.725  # 左立柱 Y
-  post_right_y: 0.725  # 右立柱 Y
+  post_front_x: 0.43   # 前立柱 X (= center_x - depth_x/2)
+  post_rear_x: 1.18    # 后立柱 X (= center_x + depth_x/2)
+  post_left_y: -0.725  # 左立柱 Y (= -width_y/2)
+  post_right_y: 0.725  # 右立柱 Y (= +width_y/2)
   base_plate: {x: 0.25, y: 0.15, z: 0.02}  # 地脚板
+  # 颜色 (低饱和浅灰)
+  color_frame: [0.52, 0.52, 0.52, 1.0]
+  color_suspension: [0.25, 0.25, 0.28, 1.0]
 
 object_v2:
+  # 工件中心 (悬挂在门架中心下方)
   position: {x: 0.72, y: 0.0, z: 0.88}
-  # 工件类型: flat_panel | cylinder_part | asymmetric_part_v2
+  # 默认类型: block_combo_part (大块+小块组合)
+  default_type: block_combo_part
+  # 大块主体
+  big_block:
+    size: [0.28, 0.18, 0.30]       # X, Y, Z
+    color: [0.10, 0.35, 0.75, 1.0]  # 中高饱和蓝
+    label: "主体 (蓝色)"
+  # 小块附块
+  small_block:
+    size: [0.10, 0.08, 0.10]        # X, Y, Z
+    offset: [0.09, 0.07, 0.32]      # 相对 object_frame 的位置 (右前上角)
+    color: [0.92, 0.45, 0.08, 1.0]  # 橙色
+    label: "附块 (橙色)"
+  # 吊绳
+  wire_color: [0.18, 0.18, 0.20, 1.0]  # 深灰
 
 cameras_v2:
-  target: {x: 0.72, y: 0.0, z: 0.88}
+  # 三台相机看向工件几何中心
+  target: {x: 0.72, y: 0.0, z: 0.92}
+
+  # VM profile: 低分辨率快速刷新
   vm_profile:
     color_width: 424
     color_height: 240
     depth_width: 424
     depth_height: 240
     fps: 5
+
+  # Quality profile: 标准分辨率
   quality_profile:
     color_width: 640
     color_height: 480
     depth_width: 640
     depth_height: 480
     fps: 10
+
   cameras:
+    # 前左相机 (front-left, 约45°俯角)
     - name: cam_front_left
-      position: {x: 0.34, y: -0.58, z: 1.22}
+      position: {x: 0.36, y: -0.56, z: 1.18}
+      roll_offset_deg: 0.0
+      keep_horizon: true
+      description: "前方左侧，看向工件正面偏左"
+
+    # 前右相机 (front-right, 与左对称)
     - name: cam_front_right
-      position: {x: 0.34, y: 0.58, z: 1.22}
+      position: {x: 0.36, y: 0.56, z: 1.18}
+      roll_offset_deg: 0.0
+      keep_horizon: true
+      description: "前方右侧，看向工件正面偏右"
+
+    # 后相机 (rear, 从后方看工件背面)
     - name: cam_rear
-      position: {x: 1.28, y: 0.0, z: 1.12}
+      position: {x: 1.22, y: 0.0, z: 1.10}
+      roll_offset_deg: 0.0
+      keep_horizon: true
+      description: "正后方，看向工件背面"
