@@ -128,15 +128,11 @@
     respawn="false" output="screen"/>
 
   <!-- ===== Spray Control (V3.3) ===== -->
+  <!-- 包含: 喷涂开关、命中检测、状态机、paint patch 累积、RViz Marker 发布 -->
   <node if="$(arg enable_spray_sim)" name="spray_simulator_v33"
     pkg="cr5_spray_sim" type="spray_simulator_v33.py" output="screen" required="true">
     <param name="object_type" value="$(arg object_type)"/>
-  </node>
-
-  <!-- ===== Paint Patch Manager (V3.3) ===== -->
-  <node if="$(arg enable_paint_patches)" name="paint_patch_manager_v33"
-    pkg="cr5_spray_sim" type="paint_patch_manager_v33.py" output="screen" required="false">
-    <param name="object_type" value="$(arg object_type)"/>
+    <param name="enable_paint_patches" value="$(arg enable_paint_patches)"/>
   </node>
 
 </launch>

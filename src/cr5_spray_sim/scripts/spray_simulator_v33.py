@@ -155,6 +155,9 @@ class SpraySimulatorV33:
         self.paint_color = paint_color
         self.patch_seq = 0
 
+        # Paint patch toggle
+        self.enable_paint_patches = rospy.get_param("~enable_paint_patches", True)
+
         # Rosbags / result saving
         self.result_dir = rospy.get_param("~result_dir",
                                           os.path.expanduser("~/cr5_spray_results"))
@@ -562,9 +565,10 @@ class SpraySimulatorV33:
 
         self._publish_marker_spraying(now, hit_pt_world, normal_world)
 
-        # V3.3: 累积 paint patch
-        self._add_patch(hit_pt_world, normal_world)
-        self._publish_patches(now)
+        # V3.3: 累积 paint patch (可选)
+        if self.enable_paint_patches:
+            self._add_patch(hit_pt_world, normal_world)
+            self._publish_patches(now)
 
     def _check_auto_off(self, now, lost=False):
         if lost:
