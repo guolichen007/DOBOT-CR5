@@ -1,0 +1,9 @@
+bbox_m:
+  x: 0.04
+  y: 0.42
+  z: 0.32
+description: Flat panel with edge folds and corner boss for basic spray validation
+features:
+- edge_folds
+- corner_boss
+name: cabinet_door_panel

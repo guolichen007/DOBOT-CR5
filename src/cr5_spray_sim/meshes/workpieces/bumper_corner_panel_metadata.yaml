@@ -1,0 +1,11 @@
+bbox_m:
+  x: 0.16
+  y: 0.42
+  z: 0.3
+description: Corner panel with high curvature variation, simulating bumper corner
+  for advanced spray validation
+features:
+- high_curvature
+- corner_geometry
+- deep_sidewall
+name: bumper_corner_panel
