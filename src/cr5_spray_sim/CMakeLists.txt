@@ -43,6 +43,9 @@ catkin_install_python(PROGRAMS
   scripts/object_pose_tf_v31.py
   # V3.3
   scripts/spray_simulator_v33.py
+  # V3.3.1
+  scripts/check_tf_once_v331.py
+  scripts/check_scene_v331.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
