@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<!--
+  Workpiece V3: Mesh-based industrial spray targets.
+  Types:
+    automotive_fender_panel  — parametric curved panel (DEFAULT)
+    cabinet_door_panel       — flat panel with edge folds
+    bumper_corner_panel      — corner piece with high curvature
+    geometry_debug_part      — legacy two-block debug target
+
+  Meshes loaded from package://cr5_spray_sim/meshes/workpieces/
+-->
+<robot name="spray_workpiece" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="object_type" default="automotive_fender_panel"/>
+  <xacro:property name="type" value="$(arg object_type)"/>
+  <xacro:property name="mesh_dir" value="package://cr5_spray_sim/meshes/workpieces"/>
+
+  <!-- Color palette -->
+  <material name="wp_body_blue">
+    <color rgba="0.10 0.35 0.75 1"/>
+  </material>
+  <material name="wp_accent_orange">
+    <color rgba="0.92 0.45 0.08 1"/>
+  </material>
+
+  <!-- Object frame at geometric center -->
+  <link name="object_frame"/>
+
+  <!-- ===== Mesh-based workpiece body ===== -->
+  <link name="object_body">
+    <inertial>
+      <mass value="0.8"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.005"/>
+    </inertial>
+
+    <visual name="wp_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="${mesh_dir}/${type}_visual.stl" scale="1 1 1"/>
+      </geometry>
+      <material name="wp_body_blue"/>
+    </visual>
+
+    <collision name="wp_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="${mesh_dir}/${type}_collision.stl" scale="1 1 1"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="object_frame_to_body" type="fixed">
+    <parent link="object_frame"/>
+    <child link="object_body"/>
+  </joint>
+
+  <gazebo><static>true</static></gazebo>
+</robot>

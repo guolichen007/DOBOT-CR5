@@ -1,0 +1,68 @@
+<?xml version="1.0"?>
+<!--
+  Camera Pedestal V3: Independent stand for front-left and front-right cameras.
+  Structure:
+    Base plate → vertical post → horizontal arm → camera mount
+
+  The rear camera mounts directly to the U-cell rear cross-beam.
+-->
+<robot name="camera_pedestal" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="pedestal_height" default="1.15"/>
+  <xacro:arg name="arm_length" default="0.10"/>    <!-- horizontal reach -->
+  <xacro:arg name="post_size" default="0.04"/>
+
+  <xacro:property name="ph" value="$(arg pedestal_height)"/>
+  <xacro:property name="al" value="$(arg arm_length)"/>
+  <xacro:property name="ps" value="$(arg post_size)"/>
+
+  <material name="pedestal_gray">
+    <color rgba="0.40 0.40 0.42 1"/>
+  </material>
+
+  <link name="pedestal_base">
+    <inertial>
+      <mass value="15.0"/>
+      <inertia ixx="1.0" ixy="0" ixz="0" iyy="1.0" iyz="0" izz="1.0"/>
+      <origin xyz="0 0 ${ph/2}" rpy="0 0 0"/>
+    </inertial>
+
+    <!-- Vertical post -->
+    <visual name="post">
+      <origin xyz="0 0 ${ph/2}" rpy="0 0 0"/>
+      <geometry><box size="${ps} ${ps} ${ph}"/></geometry>
+      <material name="pedestal_gray"/>
+    </visual>
+    <collision name="post_col">
+      <origin xyz="0 0 ${ph/2}" rpy="0 0 0"/>
+      <geometry><box size="${ps} ${ps} ${ph}"/></geometry>
+    </collision>
+
+    <!-- Horizontal arm (extends in +X direction toward workspace) -->
+    <visual name="arm">
+      <origin xyz="${al/2} 0 ${ph - ps/2}" rpy="0 0 0"/>
+      <geometry><box size="${al} ${ps*0.8} ${ps*0.8}"/></geometry>
+      <material name="pedestal_gray"/>
+    </visual>
+    <collision name="arm_col">
+      <origin xyz="${al/2} 0 ${ph - ps/2}" rpy="0 0 0"/>
+      <geometry><box size="${al} ${ps*0.8} ${ps*0.8}"/></geometry>
+    </collision>
+
+    <!-- Camera mounting bracket at arm tip -->
+    <visual name="camera_bracket">
+      <origin xyz="${al} 0 ${ph - ps/2}" rpy="0 0 0"/>
+      <geometry><box size="${ps} ${ps*1.5} ${ps*1.5}"/></geometry>
+      <material name="pedestal_gray"/>
+    </visual>
+
+    <!-- Base plate -->
+    <visual name="foot">
+      <origin xyz="0 0 0.015" rpy="0 0 0"/>
+      <geometry><box size="0.18 0.15 0.03"/></geometry>
+      <material name="pedestal_gray"/>
+    </visual>
+  </link>
+
+  <gazebo><static>true</static></gazebo>
+</robot>

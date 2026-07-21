@@ -1,0 +1,127 @@
+# CR5 Industrial Spray Cell V3 Configuration
+# U-cell frame, rotary hanger, 3-camera visibility ring, mesh workpieces
+
+cr5_base:
+  position: {x: 0.0, y: 0.0, z: 0.0}
+
+# ── U-Cell Frame ──
+u_cell:
+  # Rear beam center at (1.00, 0, 0), ground level
+  spawn_position: {x: 1.00, y: 0.0, z: 0.0}
+  rear_x: 1.00
+  post_y: 0.68        # ± from center
+  frame_height: 1.72
+  cantilever_length: 0.40   # forward from rear beam
+  beam_size: 0.05
+  color_frame: [0.48, 0.48, 0.50, 1.0]
+  color_cantilever: [0.30, 0.30, 0.33, 1.0]
+
+# ── Rotary Hanger ──
+rotary_hanger:
+  # Mounted at cantilever tip: X = rear_x - cantilever_length = 0.60
+  spawn_position: {x: 0.60, y: 0.0, z: 1.68}
+  rotor_length: 0.25
+  grip_z_offset: -0.28  # from mount to grip center
+  # Default yaw angles for testing: 0, 90, 180, 270 (degrees)
+  test_yaws: [0, 90, 180, 270]
+
+# ── Workpiece ──
+workpiece:
+  # Optimized position (from optimize_cell_layout.py)
+  # Initial estimate, will be refined by MoveIt search
+  position: {x: 0.60, y: 0.0, z: 0.94}
+  default_type: automotive_fender_panel
+  types:
+    - automotive_fender_panel   # DEFAULT: curved panel
+    - cabinet_door_panel         # flat with edge folds
+    - bumper_corner_panel        # corner piece
+    - geometry_debug_part        # legacy debug
+  colors:
+    body: [0.10, 0.35, 0.75, 1.0]     # blue
+    accent: [0.92, 0.45, 0.08, 1.0]   # orange
+
+# ── Three-Camera Visibility Ring ──
+camera_rig:
+  target_frame: object_frame
+  radius: 0.98         # distance to object center
+  cameras:
+    - name: cam_front_left
+      azimuth_deg: 232       # world yaw angle from object
+      elevation_deg: 18      # upward from horizontal
+      roll_offset_deg: 0.0
+      pedestal: front_left   # uses camera_pedestal_front_left
+      pedestal_position: {x: 0.15, y: -0.78, z: 0.0}
+      description: "前左侧相机，支架位于通道左侧"
+
+    - name: cam_front_right
+      azimuth_deg: 128
+      elevation_deg: 18
+      roll_offset_deg: 0.0
+      pedestal: front_right
+      pedestal_position: {x: 0.15, y: 0.78, z: 0.0}
+      description: "前右侧相机，支架位于通道右侧"
+
+    - name: cam_rear
+      azimuth_deg: 0
+      elevation_deg: 15
+      roll_offset_deg: 0.0
+      pedestal: rear_bracket  # attached to U-cell rear beam
+      pedestal_position: {x: 1.00, y: 0.0, z: 1.58}
+      description: "后侧相机，固定在后横梁中央"
+
+  # Image quality requirements
+  image_requirements:
+    object_horizontal_pct: [25, 55]     # object width in image
+    object_vertical_pct: [35, 60]       # object height in image
+    object_center_offset_pct: [0, 15]   # distance from image center
+    frame_occlusion_pct: [0, 8]         # frame occlusion
+
+  # Visibility requirements
+  visibility_requirements:
+    min_one_camera_pct: 90              # ≥90% seen by ≥1 camera
+    min_two_camera_pct: 60              # 60-75% seen by ≥2 cameras
+    max_two_camera_pct: 75
+    overlap_adjacent_pct: [25, 50]      # adjacent view overlap
+
+  # Camera profiles
+  vm_profile:
+    color_width: 424
+    color_height: 240
+    depth_width: 424
+    depth_height: 240
+    fps: 5
+  quality_profile:
+    color_width: 640
+    color_height: 480
+    depth_width: 640
+    depth_height: 480
+    fps: 10
+
+# ── Camera Pedestals ──
+camera_pedestals:
+  front_left:
+    spawn_position: {x: 0.15, y: -0.78, z: 0.0}
+    pedestal_height: 1.15
+    arm_length: 0.10
+  front_right:
+    spawn_position: {x: 0.15, y: 0.78, z: 0.0}
+    pedestal_height: 1.15
+    arm_length: 0.10
+
+# ── MoveIt Optimization ──
+moveit_optimization:
+  search:
+    object_x: [0.50, 0.70]       # search range
+    object_z: [0.82, 1.05]
+    object_y: [-0.05, 0.05]
+    step: 0.025
+  spray_points:
+    grid_rows: 9
+    grid_cols: 7
+    standoff: 0.15              # spray distance
+    edge_margin: 0.020          # inset from edge
+  requirements:
+    ik_success_rate: 0.95       # ≥95%
+    min_clearance: 0.10         # ≥10cm
+    joint_margin_deg: 10        # ≥10° from joint limits
+  output: config/scene_v3_optimized.yaml
