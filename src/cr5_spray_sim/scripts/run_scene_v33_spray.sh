@@ -216,10 +216,12 @@ LAUNCH_ARGS="${LAUNCH_ARGS} gui:=${GUI} headless:=${HEADLESS}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_spray_tool:=true"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_spray_sim:=${ENABLE_SPRAY_SIM}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_paint_patches:=${ENABLE_PAINT_PATCHES}"
+# V3.3.2: paused start, controllers managed by initialize_cr5_pose_v332
+LAUNCH_ARGS="${LAUNCH_ARGS} start_paused:=true start_controllers:=false"
 
 echo ""
 echo "=============================================="
-echo "  CR5 Spray Demo V3.3.1"
+echo "  CR5 Spray Demo V3.3.2"
 echo "  Session:  ${SESSION_ID}"
 echo "  Object:   ${OBJECT}"
 echo "  GUI: ${GUI}  Headless: ${HEADLESS}  Isolated: ${ISOLATED}"
@@ -260,7 +262,82 @@ while ! rosservice list 2>/dev/null | grep -q '/gazebo/'; do
 done
 echo "  Gazebo ready ($(($(date +%s) - WAIT_START))s)"
 
-# ===== 等待 Spray 服务 =====
+# ===== V3.3.2: CR5 确定性初始姿态初始化 (bash, 无 Python subprocess) =====
+echo ""
+echo "--- CR5 Initial Pose Init ---"
+
+# 1. Pause physics (already paused, double-check)
+rosservice call /gazebo/pause_physics 2>/dev/null || true
+sleep 0.5
+
+# 2. Set joints to upright zero
+echo "  Setting joints to upright_zero..."
+rosservice call /gazebo/set_model_configuration \
+  "model_name: 'cr5_robot'
+urdf_param_name: 'robot_description'
+joint_names: ['joint1','joint2','joint3','joint4','joint5','joint6']
+joint_positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]" 2>/dev/null
+sleep 1
+
+# 3. Wait for controllers to be running
+echo "  Waiting for controllers..."
+WAIT_START=$(date +%s)
+while ! rosservice list 2>/dev/null | grep -q '/controller_manager/list_controllers'; do
+  sleep 1
+  if [[ $(($(date +%s) - WAIT_START)) -gt 30 ]]; then
+    echo "FATAL: controller_manager not available" >&2; exit 1
+  fi
+done
+
+# 4. Verify joint_states
+echo "  Verifying joint_states..."
+WAIT_START=$(date +%s)
+JOINTS_OK=false
+while [[ $(($(date +%s) - WAIT_START)) -lt 30 ]]; do
+  JS=$(rostopic echo -n1 /joint_states 2>/dev/null | grep -E "name:|position:" | head -4)
+  if echo "$JS" | grep -q "joint1"; then
+    JOINTS_OK=true; break
+  fi
+  sleep 1
+done
+if [[ "$JOINTS_OK" == "false" ]]; then
+  echo "FATAL: no joint_states after 30s" >&2; exit 1
+fi
+echo "  Joint states: $JS"
+
+# 5. Verify Link6 height (still paused)
+sleep 2
+echo "  Verifying Link6 height..."
+LINK6_Z=$(rosrun tf tf_echo world Link6 2>/dev/null | grep -m1 "Translation" | grep -oP '[-]?\d+\.\d+' | tail -1 || echo "0")
+echo "  Link6.z = $LINK6_Z"
+if [[ -z "$LINK6_Z" ]] || [[ "$LINK6_Z" == "0" ]]; then
+  echo "FATAL: Cannot determine Link6 height" >&2; exit 1
+fi
+LINK6_Z_NUM=$(echo "$LINK6_Z" | awk '{print ($1<0)?-$1:$1}')
+# Check if Link6.z is below folding threshold (0.30m)
+if [[ $(echo "$LINK6_Z < 0.30" | bc -l 2>/dev/null || echo 1) -eq 1 ]]; then
+  echo "FATAL: CR5_ARM_FOLDED_BELOW_WORKSPACE (Link6.z=$LINK6_Z)" >&2; exit 1
+fi
+
+# 6. Unpause physics
+echo "  Unpausing physics..."
+rosservice call /gazebo/unpause_physics 2>/dev/null || true
+sleep 3
+
+# 7. Monitor for 5 seconds
+echo "  Monitoring stability (5s)..."
+for i in $(seq 1 5); do
+  sleep 1
+  LINK6_Z=$(rosrun tf tf_echo world Link6 2>/dev/null | grep -m1 "Translation" | grep -oP '[-]?\d+\.\d+' | tail -1 || echo "0")
+  if [[ $(echo "$LINK6_Z < 0.80" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
+    echo "FATAL: Link6 dropped to z=$LINK6_Z during monitoring" >&2; exit 1
+  fi
+done
+echo "  Link6.z after 5s = $LINK6_Z"
+
+echo "  CR5_INITIAL_POSE_READY"
+
+# ===== V3.3.2: 等待 Spray 服务 =====
 if [[ "$ENABLE_SPRAY_SIM" == "true" ]]; then
   echo ""
   echo "--- Waiting for /spray_demo/set_spray ---"
@@ -298,7 +375,7 @@ echo "  TF check PASS"
 echo ""
 echo "--- Scene Health Check ---"
 sleep 8  # 让物理稳定
-"${PKG_DIR}/scripts/check_scene_v331.py" 2>&1 || {
+"${PKG_DIR}/scripts/check_scene_v332.py" 2>&1 || {
   echo "FATAL: Scene health check failed" >&2
   exit 1
 }

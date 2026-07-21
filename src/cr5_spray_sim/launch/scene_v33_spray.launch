@@ -15,7 +15,8 @@
 <launch>
   <arg name="gui" default="false"/>
   <arg name="headless" default="false"/>
-  <arg name="paused" default="false"/>
+  <arg name="paused" default="true" doc="V3.3.2: 默认暂停启动，wrapper 初始化后 unpause"/>
+  <arg name="start_controllers" default="false" doc="V3.3.2: wrapper 通过 initialize_cr5_pose_v332 启动"/>
   <arg name="object_type" default="motor_housing_cylinder"
        doc="motor_housing_cylinder|rectangular_housing"/>
   <arg name="camera_profile" default="vm" doc="vm|quality"/>
@@ -66,7 +67,7 @@
     args="-urdf -param robot_description -model cr5_robot -x 0 -y 0 -z 0"
     respawn="false" output="screen"/>
 
-  <!-- CR5 controllers -->
+  <!-- CR5 controllers (V3.3.2: paused 启动, spawner 在物理暂停时加载) -->
   <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
   <node name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
     args="joint_state_controller arm_controller"
