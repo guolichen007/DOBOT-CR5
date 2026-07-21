@@ -1,0 +1,40 @@
+# CR5 Spray Gun Mount Configuration V3.3
+
+## 安装基准
+
+V3.3 修正了 V3.2.1 中使用旧 `Link6→Tool_end` 坐标的错误。
+喷枪直接从 Link6 法兰面安装。
+
+## 坐标系
+
+```
+Link6 (法兰原点)
+→ spray_gun_assembly (所有 visual, mass=0)
+→ spray_nozzle_frame (+Z = 喷射方向, TF frame)
+```
+
+## 安装位置
+
+| 参数 | V3.2.1 (错误) | V3.3 (修正) | 说明 |
+|------|-------------|-----------|------|
+| mount_xyz.x | -0.00683 | 0 | 旧 Tool_end 偏移量已移除 |
+| mount_xyz.y | 0.150178 | 0 | 旧 Tool_end 偏移量已移除 |
+| mount_xyz.z | 0.23462 | 0.010 | 适配板半厚，背面贴合法兰面 |
+| mount_rpy | -0.0044 0.04684 -1.631 | 0 0 0 | 待 GUI 验证后微调 |
+
+## 法兰间隙
+
+适配板厚 0.020m，中心在 z=0.010，背面在 z=0，与 Link6 法兰面齐平。
+理论间隙 = 0 mm。
+
+## 第一阶段载荷
+
+- 附加质量: 0 kg (visual only)
+- Collision: 无
+- 后续阶段再逐步添加
+
+## 参考
+
+- 实机 URDF: `dobot_description/urdf/cr5_robot.urdf`
+- Link6 → Tool_box1: `xyz="0 0 0.001" rpy="0 0 0"`
+- 旧 Tool_end: `xyz="-0.00683 0.150178 0.22462" rpy="-0.0044 0.04684 -1.631"`

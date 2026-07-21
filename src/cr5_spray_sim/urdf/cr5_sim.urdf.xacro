@@ -14,6 +14,7 @@
   <xacro:arg name="sim_velocity" default="1.5"/>
   <xacro:arg name="sim_damping" default="0.5"/>
   <xacro:arg name="sim_friction" default="0.1"/>
+  <xacro:arg name="enable_spray_tool" default="true"/>
 
   <xacro:property name="effort_val" value="$(arg sim_effort)"/>
   <xacro:property name="velocity_val" value="$(arg sim_velocity)"/>
@@ -210,28 +211,32 @@
     <dynamics damping="${damping_val}" friction="${friction_val}"/>
   </joint>
 
-  <!-- ===== Spray Tool Frames (sim overlay) ===== -->
-  <!-- spray_tool_mount: attaches to Link6 flange -->
-  <link name="spray_tool_mount">
-    <inertial>
-      <mass value="0.05"/>
-      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-    </inertial>
-  </link>
-  <joint name="spray_tool_mount_joint" type="fixed">
-    <parent link="Link6"/>
-    <child link="spray_tool_mount"/>
-    <origin xyz="-0.00683 0.150178 0.22462" rpy="-0.0044 0.04684 -1.631"/>
-  </joint>
+  <!-- ===== Spray Tool V3.3 (visual-only, controlled by enable_spray_tool) ===== -->
+  <!--
+    安装位置: Link6 法兰面 (Link6 原点)，非旧 Tool_end。
+    适配板厚 0.020m，背面贴合法兰面 → mount_xyz.z = 0.010。
+    详见 config/spray_tool_mount_v33.yaml。
 
-  <!-- spray_nozzle_frame: +Z points from nozzle toward surface -->
-  <link name="spray_nozzle_frame"/>
-  <joint name="spray_nozzle_joint" type="fixed">
-    <parent link="spray_tool_mount"/>
-    <child link="spray_nozzle_frame"/>
-    <origin xyz="0 0 0.05" rpy="0 0 0"/>
-  </joint>
+    第一阶段: visual-only (零附加质量，无 collision)。
+    后续阶段可逐步加入 collision 和 payload mass。
+  -->
+  <xacro:if value="$(arg enable_spray_tool)">
+    <xacro:include filename="$(find cr5_spray_sim)/urdf/spray_gun_v33.xacro"/>
+    <xacro:spray_gun_v33 parent="Link6"
+        mount_xyz="0 0 0.010"
+        mount_rpy="0 0 0"
+        prefix="spray"/>
+  </xacro:if>
+
+  <!-- 无喷枪时的 fallback: 保留空 nozzle_frame 供 TF 查询 -->
+  <xacro:unless value="$(arg enable_spray_tool)">
+    <link name="spray_nozzle_frame"/>
+    <joint name="spray_nozzle_frame_fallback" type="fixed">
+      <parent link="Link6"/>
+      <child link="spray_nozzle_frame"/>
+      <origin xyz="0 0 0.125" rpy="0 0 0"/>
+    </joint>
+  </xacro:unless>
 
   <!-- wrist_d455_mount: wrist camera mount on Link6 -->
   <link name="wrist_d455_mount"/>
