@@ -46,6 +46,9 @@ catkin_install_python(PROGRAMS
   # V3.3.1
   scripts/check_tf_once_v331.py
   scripts/check_scene_v331.py
+  # V3.3.2
+  scripts/initialize_cr5_pose_v332.py
+  scripts/check_scene_v332.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
