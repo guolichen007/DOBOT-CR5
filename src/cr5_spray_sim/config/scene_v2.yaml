@@ -1,0 +1,43 @@
+# CR5 Spray Demo V2 Scene Configuration
+# 单一配置源，所有尺寸在这里定义
+
+cr5_base:
+  position: {x: 0.0, y: 0.0, z: 0.0}
+
+gantry_v2:
+  center_x: 0.78
+  width_y: 1.45       # 左右立柱间距
+  depth_x: 0.75        # 前后立柱间距
+  height: 1.75         # 框架总高
+  beam_size: 0.04      # 型材截面边长
+  post_front_x: 0.43   # 前立柱 X
+  post_rear_x: 1.18    # 后立柱 X
+  post_left_y: -0.725  # 左立柱 Y
+  post_right_y: 0.725  # 右立柱 Y
+  base_plate: {x: 0.25, y: 0.15, z: 0.02}  # 地脚板
+
+object_v2:
+  position: {x: 0.72, y: 0.0, z: 0.88}
+  # 工件类型: flat_panel | cylinder_part | asymmetric_part_v2
+
+cameras_v2:
+  target: {x: 0.72, y: 0.0, z: 0.88}
+  vm_profile:
+    color_width: 424
+    color_height: 240
+    depth_width: 424
+    depth_height: 240
+    fps: 5
+  quality_profile:
+    color_width: 640
+    color_height: 480
+    depth_width: 640
+    depth_height: 480
+    fps: 10
+  cameras:
+    - name: cam_front_left
+      position: {x: 0.34, y: -0.58, z: 1.22}
+    - name: cam_front_right
+      position: {x: 0.34, y: 0.58, z: 1.22}
+    - name: cam_rear
+      position: {x: 1.28, y: 0.0, z: 1.12}

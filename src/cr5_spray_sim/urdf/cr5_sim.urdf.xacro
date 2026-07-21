@@ -23,6 +23,11 @@
   <!-- ===== Links (geometry from dobot_description) ===== -->
   <link name="dummy_link"/>
 
+  <!-- Gazebo: anchor base_link to stay fixed while joints move -->
+  <gazebo reference="dummy_link">
+    <kinematic>true</kinematic>
+  </gazebo>
+
   <link name="base_link">
     <inertial>
       <origin xyz="-8.0961E-06 0.0019103 0.028995" rpy="0 0 0"/>
