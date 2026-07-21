@@ -70,7 +70,7 @@
   <!-- CR5 controllers (V3.3.2: paused 启动, spawner 在物理暂停时加载) -->
   <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
   <node name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
-    args="joint_state_controller arm_controller"
+    args="--stopped joint_state_controller arm_controller"
     respawn="false" output="screen"/>
 
   <!-- Robot state publisher -->
