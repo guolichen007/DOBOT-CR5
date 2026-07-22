@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
-# ===========================================================================
-# CR5 Spray Demo V3.3.5 Launcher
+# ============================================================================
+# CR5 Spray Demo V3.3.6 — 最小稳定运行版启动器
+# ============================================================================
 #
-# 修复 V3.3.4 控制器生命周期误判 (initialized vs stopped)
-# 默认 stable 无重力模式, 移除运行时 SetLinkProperties 风险
-# 分步启动控制器, 启动前模型快照, 失败取证
+# 四阶段简化启动:
+#   Phase A: 单实例检查 + 参数解析
+#   Phase B: 启动 unpaused 场景 (gravity=false, controllers 直接启动)
+#   Phase C: 等待模型 + 控制器就绪
+#   Phase D: 验证姿态 + 运行时信号
+#
+# GUI 模式: 检查失败 → DEGRADED，Gazebo 保持打开，不自动退出。
+# --strict / headless: 检查失败 → exit 1 + cleanup.
 #
 # 用法:
-#   bash run_scene_v33_spray.sh [--gui] [--headless] [--isolated]
-#     [--object motor_housing_cylinder]
-#     [--profile vm]
-#     [--physics-mode stable|gravity]
-#     [--no-spray-sim] [--verbose]
-# ===========================================================================
+#   bash run_scene_v33_spray.sh [--gui] [--isolated] [--object TYPE] [--profile PROFILE]
+#                               [--physics-mode stable|gravity] [--strict] [--verbose]
+#                               [--no-spray-sim] [--no-paint-patches]
+# ============================================================================
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PKG_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-WS_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-
-# ===== 默认值 =====
+# ---- 默认值 ----
 GUI=false
 HEADLESS=true
 ISOLATED=false
@@ -28,487 +28,468 @@ PROFILE="vm"
 PHYSICS_MODE="stable"
 ENABLE_SPRAY_SIM=true
 ENABLE_PAINT_PATCHES=true
+STRICT=false
 VERBOSE=false
 
-print_usage() {
-  cat << EOF
-Usage: $(basename "$0") [OPTIONS]
+# ---- 单实例锁 ----
+LOCK_FILE="/tmp/cr5_spray_demo.lock"
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+    echo "ERROR: another CR5 spray session is running."
+    echo "Close the previous session with Ctrl+C first, or remove $LOCK_FILE if stale."
+    exit 3
+fi
 
-Options:
-  --gui                       Launch with Gazebo GUI
-  --headless                  Launch headless (default)
-  --isolated                  Use random ports for multi-session
-  --object TYPE               motor_housing_cylinder | rectangular_housing
-  --profile PROF              vm | quality (default: vm)
-  --physics-mode MODE         stable (default, CR5 no-gravity) | gravity (experimental)
-  --no-spray-sim              Disable spray control
-  --no-paint-patches          Disable paint patches
-  --verbose                   Tail log files
-  -h, --help                  Show this help
+# ---- 帮助 ----
+usage() {
+    cat <<'EOF'
+CR5 Spray Demo V3.3.6 — 最小稳定运行版
+
+用法:
+  bash run_scene_v33_spray.sh [OPTIONS]
+
+选项:
+  --gui              启动 Gazebo GUI (默认 headless)
+  --isolated          使用独立 roscore + gazebo master
+  --object TYPE       motor_housing_cylinder | rectangular_housing (默认: motor_housing_cylinder)
+  --profile PROFILE   vm | quality (默认: vm)
+  --physics-mode MODE stable | gravity (默认: stable, CR5 运动链无重力)
+  --strict            健康检查失败后自动退出 (用于自动测试)
+  --no-spray-sim      不启动喷涂控制节点
+  --no-paint-patches  不生成 paint patches
+  --verbose           打印 roslaunch 日志到终端
+  -h, --help          显示此帮助
+
+示例:
+  bash run_scene_v33_spray.sh --gui --isolated
+  bash run_scene_v33_spray.sh --gui --isolated --strict              # 失败自动退出
+  bash run_scene_v33_spray.sh --isolated --strict                    # headless 自动测试
 EOF
+    exit 0
 }
 
+# ---- 参数解析 (支持 --key=value 和 --key value 两种格式) ----
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --gui)          GUI=true; HEADLESS=false; shift ;;
-    --headless)     HEADLESS=true; GUI=false; shift ;;
-    --isolated)     ISOLATED=true; shift ;;
-    --verbose)      VERBOSE=true; shift ;;
-    --no-spray-sim)      ENABLE_SPRAY_SIM=false; shift ;;
-    --no-paint-patches)  ENABLE_PAINT_PATCHES=false; shift ;;
-    --object)       OBJECT="$2"; shift 2 ;;
-    --object=*)     OBJECT="${1#*=}"; shift ;;
-    --profile)      PROFILE="$2"; shift 2 ;;
-    --profile=*)    PROFILE="${1#*=}"; shift ;;
-    --physics-mode) PHYSICS_MODE="$2"; shift 2 ;;
-    --physics-mode=*) PHYSICS_MODE="${1#*=}"; shift ;;
-    -h|--help)      print_usage; exit 0 ;;
-    *)              echo "ERROR: Unknown argument: $1" >&2; exit 2 ;;
-  esac
+    case "$1" in
+        --gui)       GUI=true; HEADLESS=false ;;
+        --headless)  HEADLESS=true; GUI=false ;;
+        --isolated)  ISOLATED=true ;;
+        --strict)    STRICT=true ;;
+        --no-spray-sim) ENABLE_SPRAY_SIM=false ;;
+        --no-paint-patches) ENABLE_PAINT_PATCHES=false ;;
+        --verbose)   VERBOSE=true ;;
+        -h|--help)   usage ;;
+        --object=*)   OBJECT="${1#*=}" ;;
+        --object)     OBJECT="$2"; shift ;;
+        --profile=*)  PROFILE="${1#*=}" ;;
+        --profile)    PROFILE="$2"; shift ;;
+        --physics-mode=*) PHYSICS_MODE="${1#*=}" ;;
+        --physics-mode)   PHYSICS_MODE="$2"; shift ;;
+        *) echo "Unknown option: $1"; usage ;;
+    esac
+    shift
 done
 
-if [[ "$PHYSICS_MODE" == "gravity" ]]; then
-  echo "WARNING: gravity mode is EXPERIMENTAL. Default is stable." >&2
-fi
+# ---- 校验 ----
 if [[ "$PHYSICS_MODE" != "stable" && "$PHYSICS_MODE" != "gravity" ]]; then
-  echo "ERROR: physics-mode must be 'stable' or 'gravity', got '$PHYSICS_MODE'" >&2; exit 1
+    echo "ERROR: --physics-mode must be 'stable' or 'gravity', got '$PHYSICS_MODE'"
+    exit 1
 fi
-
-echo "Argument parse PASS"
-echo "  WS: ${WS_DIR}  PKG: ${PKG_DIR}"
-echo "  physics: ${PHYSICS_MODE}"
-
-# ===== 验证 =====
 if [[ "$OBJECT" != "motor_housing_cylinder" && "$OBJECT" != "rectangular_housing" ]]; then
-  echo "ERROR: Unknown object type: $OBJECT" >&2; exit 1
-fi
-if [[ ! -f "${WS_DIR}/devel/setup.bash" ]]; then
-  echo "ERROR: Workspace not built. Run: cd ${WS_DIR} && catkin_make" >&2; exit 1
+    echo "ERROR: --object must be 'motor_housing_cylinder' or 'rectangular_housing'"
+    exit 1
 fi
 
-# ===== 环境 =====
+# ---- 工作空间检查 ----
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WS_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+if [[ ! -f "$WS_DIR/devel/setup.bash" ]]; then
+    echo "ERROR: workspace not built: $WS_DIR/devel/setup.bash not found"
+    echo "Run: cd $WS_DIR && catkin_make"
+    exit 1
+fi
+
+# ---- 环境设置 ----
 source /opt/ros/noetic/setup.bash
-source "${WS_DIR}/devel/setup.bash"
-export GAZEBO_MODEL_PATH="${PKG_DIR}/models:${GAZEBO_MODEL_PATH:-}"
+source "$WS_DIR/devel/setup.bash"
+export GAZEBO_MODEL_PATH="$WS_DIR/src/cr5_spray_sim/models:${GAZEBO_MODEL_PATH:-}"
 
-# ===== 会话 =====
-ENV_FILE_CURRENT="/tmp/cr5_spray_v33_current.env"
-SESSION_ID="v335_$(date +%Y%m%d_%H%M%S)"
-LOG_DIR="/tmp/cr5_spray_v33_${SESSION_ID}"
+# ---- Session 设置 ----
+SESSION_ID="v336_$(date +%Y%m%d_%H%M%S)"
+LOG_DIR="/tmp/cr5_spray_v336_${SESSION_ID}"
 mkdir -p "$LOG_DIR"
-export CR5_SPRAY_LOG_DIR="${LOG_DIR}"
-BRANCH=$(cd "$WS_DIR" && git branch --show-current 2>/dev/null || echo "unknown")
-HEAD_SHA=$(cd "$WS_DIR" && git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+GIT_BRANCH="$(git -C "$WS_DIR" branch --show-current 2>/dev/null || echo unknown)"
+GIT_SHA="$(git -C "$WS_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 ROS_MASTER_PID=""
 LAUNCH_PID=""
 LAUNCH_PGID=""
-GRAVITY_GUARD_USED=false
 CLEANED=false
 
-# ===== 失败取证函数 =====
-fatal_with_snapshot() {
-  local reason="$1"
-  echo "" >&2
-  echo "==============================================" >&2
-  echo "  FATAL: ${reason}" >&2
-  echo "==============================================" >&2
+# ---- 诊断辅助函数 ----
+save_diagnostics() {
+    local reason="${1:-UNKNOWN}"
+    local diag_dir="${LOG_DIR}/diagnostics_$(date +%H%M%S)"
+    mkdir -p "$diag_dir"
 
-  # 标记失败
-  rosparam set /cr5_spray/session_state "FAILED" 2>/dev/null || true
+    # 模型快照
+    rosrun cr5_spray_sim capture_scene_snapshot_v335.py \
+        --output "$diag_dir/scene_snapshot.json" 2>/dev/null || true
 
-  # 保存现场快照
-  local snapshot="${LOG_DIR}/failure_snapshot_$(date +%H%M%S).json"
-  echo "  Saving failure snapshot → ${snapshot}" >&2
-  "${PKG_DIR}/scripts/capture_scene_snapshot_v335.py" --output "$snapshot" 2>/dev/null || true
+    # 控制器状态
+    rosservice call /controller_manager/list_controllers 2>/dev/null \
+        > "$diag_dir/controllers.txt" || true
 
-  # 保存 controller 状态
-  rosservice call /controller_manager/list_controllers "{}" 2>/dev/null > "${LOG_DIR}/failure_controllers.txt" || true
+    # roslaunch 日志
+    if compgen -G "${ROS_LOG_DIR:-$HOME/.ros/log}/roslaunch-*.log" > /dev/null 2>&1; then
+        tail -80 "${ROS_LOG_DIR:-$HOME/.ros/log}"/roslaunch-*.log 2>/dev/null \
+            > "$diag_dir/roslaunch_tail.txt" || true
+    fi
 
-  # 保存 roslaunch log 尾部
-  if [[ -f "${LOG_DIR}/roslaunch.log" ]]; then
-    tail -80 "${LOG_DIR}/roslaunch.log" > "${LOG_DIR}/failure_roslaunch_tail.txt" 2>/dev/null || true
-  fi
-
-  # 生成摘要
-  cat > "${LOG_DIR}/failure_summary.json" << EOF
+    # 诊断摘要
+    cat > "$diag_dir/summary.json" <<JSONSUM
 {
-  "session": "${SESSION_ID}",
-  "reason": "${reason}",
-  "timestamp_wall": "$(date -Iseconds)",
-  "physics_mode": "${PHYSICS_MODE}",
-  "snapshot": "${snapshot}"
+  "version": "V3.3.6",
+  "session_id": "$SESSION_ID",
+  "branch": "$GIT_BRANCH",
+  "sha": "$GIT_SHA",
+  "reason": "$reason",
+  "wall_time": "$(date -Iseconds)",
+  "physics_mode": "$PHYSICS_MODE"
 }
-EOF
+JSONSUM
 
-  echo "" >&2
-  echo "Session FAILED — Gazebo is shutting down." >&2
-  echo "Do not assess model geometry during teardown." >&2
-  echo "Use snapshots: ${LOG_DIR}/" >&2
+    # 设置 session state
+    rosparam set /cr5_spray/session_state "DEGRADED" 2>/dev/null || true
+    rosparam set /cr5_spray/session_id "$SESSION_ID" 2>/dev/null || true
 
-  exit 1
+    echo "[$(date +%H:%M:%S)] diagnostics saved: $diag_dir"
 }
 
-# ===== 清理函数 =====
+# ---- Cleanup ----
 cleanup() {
-  local exit_code=$?
-  [[ "$CLEANED" == "true" ]] && return
-  CLEANED=true
+    if $CLEANED; then return; fi
+    CLEANED=true
+    echo ""
+    echo "========================================="
+    echo "[$(date +%H:%M:%S)] cleanup ..."
 
-  echo ""
-  echo "=== Cleanup (exit=${exit_code}) ==="
+    # 更新状态
+    rosparam set /cr5_spray/session_state "ENDED" 2>/dev/null || true
 
-  # V3.3.5: 只在确实使用了 gravity guard 时才恢复
-  if [[ "$GRAVITY_GUARD_USED" == "true" ]]; then
-    if rosservice list 2>/dev/null | grep -q '/gazebo/'; then
-      echo "  Restoring CR5 gravity (experimental mode)..."
-      "${PKG_DIR}/scripts/experimental/cr5_gravity_guard_v334.py" restore 2>/dev/null || true
+    # 停止 gzclient
+    if $GUI; then
+        pkill -f "gzclient" 2>/dev/null || true
+        echo "[$(date +%H:%M:%S)] gzclient stopped"
     fi
-  fi
 
-  rosparam set /cr5_spray/session_state "ENDED" 2>/dev/null || true
+    # 停止 rqt
+    pkill -f "rqt" 2>/dev/null || true
 
-  # 1. 先关闭 gzclient (避免残留画面)
-  if [[ "$GUI" == "true" ]]; then
-    pkill -f "gzclient.*${GAZEBO_MASTER_URI:-}" 2>/dev/null || true
-    sleep 1
-  fi
-
-  # 2. 停止辅助进程
-  if [[ -n "${RQT_PID:-}" ]]; then kill "$RQT_PID" 2>/dev/null || true; fi
-
-  # 3. 停止 roslaunch 进程组
-  if [[ -n "${LAUNCH_PGID:-}" ]]; then
-    echo "  Stopping launch process group ${LAUNCH_PGID}..."
-    kill -INT -- -${LAUNCH_PGID} 2>/dev/null || true
-    for i in $(seq 1 8); do
-      if ! kill -0 -- -${LAUNCH_PGID} 2>/dev/null; then break; fi
-      sleep 1
-    done
-    if kill -0 -- -${LAUNCH_PGID} 2>/dev/null; then
-      kill -TERM -- -${LAUNCH_PGID} 2>/dev/null || true
-      sleep 2
+    # 停止 roslaunch 进程组
+    if [[ -n "$LAUNCH_PGID" ]] && kill -0 -- "-$LAUNCH_PGID" 2>/dev/null; then
+        echo "[$(date +%H:%M:%S)] stopping roslaunch pgid=$LAUNCH_PGID ..."
+        kill -INT -- "-$LAUNCH_PGID" 2>/dev/null || true
+        for i in $(seq 1 8); do
+            kill -0 -- "-$LAUNCH_PGID" 2>/dev/null || break
+            sleep 1
+        done
+        if kill -0 -- "-$LAUNCH_PGID" 2>/dev/null; then
+            kill -TERM -- "-$LAUNCH_PGID" 2>/dev/null || true
+            sleep 2
+        fi
+        if kill -0 -- "-$LAUNCH_PGID" 2>/dev/null; then
+            kill -KILL -- "-$LAUNCH_PGID" 2>/dev/null || true
+        fi
+        echo "[$(date +%H:%M:%S)] roslaunch stopped"
     fi
-    if kill -0 -- -${LAUNCH_PGID} 2>/dev/null; then
-      kill -KILL -- -${LAUNCH_PGID} 2>/dev/null || true
+
+    # 停止独立 roscore
+    if $ISOLATED && [[ -n "$ROS_MASTER_PID" ]] && kill -0 "$ROS_MASTER_PID" 2>/dev/null; then
+        echo "[$(date +%H:%M:%S)] stopping roscore pid=$ROS_MASTER_PID ..."
+        kill "$ROS_MASTER_PID" 2>/dev/null || true
+        wait "$ROS_MASTER_PID" 2>/dev/null || true
     fi
-  elif [[ -n "${LAUNCH_PID:-}" ]]; then
-    kill "$LAUNCH_PID" 2>/dev/null || true
-    wait "$LAUNCH_PID" 2>/dev/null || true
-  fi
 
-  if [[ -n "${LAUNCH_PID:-}" ]]; then wait "$LAUNCH_PID" 2>/dev/null || true; fi
+    # 清理 env 文件
+    if $ISOLATED; then
+        rm -f "/tmp/cr5_spray_v336_env" "/tmp/cr5_spray_v336_env_pending"
+    fi
 
-  # 4. 停止 roscore
-  if [[ "$ISOLATED" == "true" ]] && [[ -n "${ROS_MASTER_PID:-}" ]]; then
-    echo "  Stopping roscore (pid=${ROS_MASTER_PID})..."
-    kill "$ROS_MASTER_PID" 2>/dev/null || true
-    wait "$ROS_MASTER_PID" 2>/dev/null || true
-  fi
+    # 释放锁
+    flock -u 9 2>/dev/null || true
 
-  # 5. 删除 env
-  if [[ "$ISOLATED" == "true" ]]; then
-    rm -f "$ENV_FILE_CURRENT" /tmp/cr5_spray_v33_pending_*.env
-  fi
-
-  echo "=== Cleanup done ==="
-  echo "  Session: ${SESSION_ID}  Logs: ${LOG_DIR}"
+    echo "[$(date +%H:%M:%S)] cleanup done"
+    echo "========================================="
 }
+
 trap cleanup INT TERM EXIT
 
-# ===== 独立 master =====
+# ---- Phase A: 独立 master 启动 ----
 start_isolated_master() {
-  local port=$((11311 + RANDOM % 1000))
-  export ROS_MASTER_URI="http://localhost:${port}"
+    local ROS_PORT=$((11311 + RANDOM % 1000))
+    local GZ_PORT=$((11345 + RANDOM % 1000))
 
-  roscore -p "$port" > "${LOG_DIR}/roscore.log" 2>&1 &
-  ROS_MASTER_PID=$!
-  sleep 3
+    export ROS_MASTER_URI="http://localhost:${ROS_PORT}"
+    export GAZEBO_MASTER_URI="http://localhost:${GZ_PORT}"
 
-  if ! kill -0 "$ROS_MASTER_PID" 2>/dev/null; then
-    echo "FATAL: roscore failed (port ${port})" >&2
-    cat "${LOG_DIR}/roscore.log" >&2
-    exit 1
-  fi
+    roscore -p "$ROS_PORT" &
+    ROS_MASTER_PID=$!
+    sleep 3
 
-  local gz_port=$((11345 + RANDOM % 1000))
-  export GAZEBO_MASTER_URI="http://localhost:${gz_port}"
+    if ! kill -0 "$ROS_MASTER_PID" 2>/dev/null; then
+        echo "ERROR: roscore failed to start"
+        exit 1
+    fi
 
-  # V3.3.5: pending env (激活后才 rename 为 current)
-  local pending_env="/tmp/cr5_spray_v33_pending_${SESSION_ID}.env"
-  cat > "$pending_env" << EOF
-export ROS_MASTER_URI=http://localhost:${port}
-export GAZEBO_MASTER_URI=http://localhost:${gz_port}
-export CR5_SPRAY_SESSION=${SESSION_ID}
-export CR5_SPRAY_LOG_DIR=${LOG_DIR}
-export CR5_SPRAY_BRANCH=${BRANCH}
-export CR5_SPRAY_HEAD=${HEAD_SHA}
-EOF
-
-  echo "ROS master ready (port=${port})"
+    # 写入 pending env (activate 时转为 current)
+    cat > "/tmp/cr5_spray_v336_env_pending" <<ENV
+SESSION_ID=$SESSION_ID
+ROS_MASTER_URI=$ROS_MASTER_URI
+GAZEBO_MASTER_URI=$GAZEBO_MASTER_URI
+LAUNCH_PID=__PENDING__
+LAUNCH_PGID=__PENDING__
+BRANCH=$GIT_BRANCH
+SHA=$GIT_SHA
+PHYSICS_MODE=$PHYSICS_MODE
+ENV
 }
 
 activate_session() {
-  if [[ "$ISOLATED" == "true" ]]; then
-    local pending_env="/tmp/cr5_spray_v33_pending_${SESSION_ID}.env"
-    mv "$pending_env" "$ENV_FILE_CURRENT"
-  fi
-  rosparam set /cr5_spray/session_state "ACTIVE" 2>/dev/null || true
-  rosparam set /cr5_spray/session_id "$SESSION_ID" 2>/dev/null || true
-}
-
-set_bootstrapping() {
-  rosparam set /cr5_spray/session_state "BOOTSTRAPPING" 2>/dev/null || true
-  rosparam set /cr5_spray/session_id "$SESSION_ID" 2>/dev/null || true
-}
-
-if [[ "$ISOLATED" == "true" ]]; then
-  start_isolated_master
-fi
-
-# ===== Launch =====
-LAUNCH_ARGS="object_type:=${OBJECT} camera_profile:=${PROFILE}"
-LAUNCH_ARGS="${LAUNCH_ARGS} gui:=${GUI} headless:=${HEADLESS}"
-LAUNCH_ARGS="${LAUNCH_ARGS} enable_spray_tool:=true"
-LAUNCH_ARGS="${LAUNCH_ARGS} enable_spray_sim:=${ENABLE_SPRAY_SIM}"
-LAUNCH_ARGS="${LAUNCH_ARGS} enable_paint_patches:=${ENABLE_PAINT_PATCHES}"
-LAUNCH_ARGS="${LAUNCH_ARGS} paused:=true start_controllers:=false"
-LAUNCH_ARGS="${LAUNCH_ARGS} physics_mode:=${PHYSICS_MODE}"
-if [[ "$PHYSICS_MODE" == "gravity" ]]; then
-  LAUNCH_ARGS="${LAUNCH_ARGS} robot_gravity:=true"
-else
-  LAUNCH_ARGS="${LAUNCH_ARGS} robot_gravity:=false"
-fi
-
-echo ""
-echo "=============================================="
-echo "  CR5 Spray Demo V3.3.5"
-echo "  Session:  ${SESSION_ID}"
-echo "  Object:   ${OBJECT}"
-echo "  Physics:  ${PHYSICS_MODE}"
-echo "  GUI: ${GUI}  Isolated: ${ISOLATED}"
-echo "  Branch:   ${BRANCH}  HEAD: ${HEAD_SHA}"
-echo "  Logs:     ${LOG_DIR}"
-echo "=============================================="
-
-setsid roslaunch cr5_spray_sim scene_v33_spray.launch ${LAUNCH_ARGS} \
-  > "${LOG_DIR}/roslaunch.log" 2>&1 &
-LAUNCH_PID=$!
-LAUNCH_PGID=$(ps -o pgid= -p "$LAUNCH_PID" 2>/dev/null | tr -d ' ' || echo "")
-echo "Launch: pid=${LAUNCH_PID} pgid=${LAUNCH_PGID}"
-
-if [[ "$VERBOSE" == "true" ]]; then
-  tail -f "${LOG_DIR}/roslaunch.log" &
-fi
-
-# ===== 等待 Gazebo =====
-echo ""
-echo "--- Waiting for Gazebo ---"
-WAIT_START=$(date +%s)
-MAX_WAIT=120
-while ! rosservice list 2>/dev/null | grep -q '/gazebo/'; do
-  sleep 1
-  if [[ $(($(date +%s) - WAIT_START)) -gt $MAX_WAIT ]]; then
-    fatal_with_snapshot "Gazebo did not start within ${MAX_WAIT}s"
-  fi
-  if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
-    echo "FATAL: roslaunch died" >&2
-    tail -60 "${LOG_DIR}/roslaunch.log" >&2
-    exit 1
-  fi
-done
-echo "  Gazebo ready ($(($(date +%s) - WAIT_START))s)"
-
-set_bootstrapping
-
-# ============================================================================
-# V3.3.5 硬门启动流程 (stable 模式默认，无 SetLinkProperties)
-# ============================================================================
-
-# ===== Phase 1: 控制器 loaded/not-running =====
-echo ""
-echo "--- Phase 1: Controller Loaded Check (V3.3.5) ---"
-CONTROLLER_STATES=$("${PKG_DIR}/scripts/check_controllers_loaded_v335.py" 2>&1 > "${LOG_DIR}/controller_initial_states.json" || true)
-echo "  ${CONTROLLER_STATES}"
-if ! echo "$CONTROLLER_STATES" | grep -q "CONTROLLERS_LOADED_NOT_RUNNING"; then
-  fatal_with_snapshot "PHASE1_CONTROLLERS_NOT_LOADED"
-fi
-
-# ===== Phase 2: 启动前模型快照 (paused) =====
-echo ""
-echo "--- Phase 2: Pre-Bootstrap Scene Snapshot ---"
-SNAPSHOT_PATH="${LOG_DIR}/scene_snapshot_pre_bootstrap.json"
-SNAPSHOT_OK=$("${PKG_DIR}/scripts/capture_scene_snapshot_v335.py" --output "$SNAPSHOT_PATH" 2>&1 || true)
-echo "  ${SNAPSHOT_OK}"
-if ! echo "$SNAPSHOT_OK" | grep -q "PRE_BOOTSTRAP_SCENE_BASELINE_PASS"; then
-  echo "  [WARN] Snapshot has non-finite coordinates (non-fatal)"
-fi
-echo "  Snapshot: ${SNAPSHOT_PATH}"
-
-# ===== Phase 3: Unpause + Clock 验证 =====
-echo ""
-echo "--- Phase 3: Unpause + Clock Verification ---"
-if [[ "$PHYSICS_MODE" == "gravity" ]]; then
-  # Experimental: 先关重力再 unpause
-  echo "  [EXPERIMENTAL] Disabling CR5 gravity before unpause..."
-  "${PKG_DIR}/scripts/experimental/cr5_gravity_guard_v334.py" disable 2>&1 || {
-    fatal_with_snapshot "PHASE3_GRAVITY_DISABLE_FAILED"
-  }
-  GRAVITY_GUARD_USED=true
-fi
-
-"${PKG_DIR}/scripts/unpause_and_verify_clock_v333.py" 2>&1 || {
-  fatal_with_snapshot "PHASE3_CLOCK_NOT_ADVANCING"
-}
-echo "  SIM_CLOCK_ADVANCING"
-
-# ===== Phase 4: 分步启动控制器 =====
-echo ""
-echo "--- Phase 4: Sequential Controller Start ---"
-"${PKG_DIR}/scripts/start_cr5_controllers_v335.py" 2>&1 || {
-  fatal_with_snapshot "PHASE4_CONTROLLERS_FAILED"
-}
-echo "  CONTROLLERS_RUNNING"
-
-# ===== Phase 5: 零位保持 + 高度验证 =====
-echo ""
-echo "--- Phase 5: Zero-Position Hold ---"
-"${PKG_DIR}/scripts/hold_cr5_zero_v334.py" 2>&1 || {
-  fatal_with_snapshot "PHASE5_ZERO_HOLD_FAILED"
-}
-echo "  CR5_ZERO_HOLD_OK"
-
-# gravity 模式下恢复重力
-if [[ "$GRAVITY_GUARD_USED" == "true" ]]; then
-  echo ""
-  echo "--- Phase 5b: Gravity Restore (experimental) ---"
-  "${PKG_DIR}/scripts/experimental/cr5_gravity_guard_v334.py" restore 2>&1 || {
-    fatal_with_snapshot "PHASE5b_GRAVITY_RESTORE_FAILED"
-  }
-  echo "  CR5_GRAVITY_RESTORED"
-  GRAVITY_GUARD_USED=false  # 已恢复
-fi
-
-# 验证 Link6/nozzle 高度
-echo ""
-echo "--- Phase 5c: Frame Height Verification ---"
-sleep 1
-LINK6_Z=""
-for i in $(seq 1 5); do
-  RESULT=$(timeout 3 rosrun tf tf_echo world Link6 2>/dev/null | grep -m1 "Translation" || echo "")
-  LINK6_Z=$(echo "$RESULT" | grep -oP '[-]?\d+\.\d+' | tail -1 || echo "")
-  if [[ -n "$LINK6_Z" ]]; then break; fi
-  sleep 1
-done
-if [[ -z "$LINK6_Z" ]]; then
-  fatal_with_snapshot "PHASE5c_LINK6_HEIGHT_UNKNOWN"
-fi
-if [[ $(echo "$LINK6_Z < 0.80" | bc -l 2>/dev/null) == "1" ]]; then
-  fatal_with_snapshot "PHASE5c_LINK6_Z_TOO_LOW (z=${LINK6_Z})"
-fi
-echo "  Link6.z = $LINK6_Z  [OK]"
-
-# V3.3.5: 稳定监控 (5s)
-echo ""
-echo "--- Phase 5d: Stability Monitor (5s) ---"
-START_Z="$LINK6_Z"
-STABLE_OK=true
-for i in $(seq 1 5); do
-  sleep 1
-  RESULT=$(timeout 3 rosrun tf tf_echo world Link6 2>/dev/null | grep -m1 "Translation" || echo "")
-  CUR_Z=$(echo "$RESULT" | grep -oP '[-]?\d+\.\d+' | tail -1 || echo "")
-  if [[ -n "$CUR_Z" ]] && [[ -n "$START_Z" ]]; then
-    DRIFT=$(echo "$CUR_Z - $START_Z" | bc -l 2>/dev/null || echo "0")
-    if [[ $(echo "$DRIFT < -0.05" | bc -l 2>/dev/null) == "1" ]]; then
-      echo "  [ALERT] Link6 dropped ${DRIFT}m at second $i"
-      STABLE_OK=false
+    if $ISOLATED; then
+        sed "s/LAUNCH_PID=__PENDING__/LAUNCH_PID=$LAUNCH_PID/; \
+             s/LAUNCH_PGID=__PENDING__/LAUNCH_PGID=$LAUNCH_PGID/" \
+            "/tmp/cr5_spray_v336_env_pending" > "/tmp/cr5_spray_v336_env"
+        rm -f "/tmp/cr5_spray_v336_env_pending"
     fi
-    echo "  second $i: Link6.z=$CUR_Z (drift=${DRIFT}m)"
-  fi
-done
-if [[ "$STABLE_OK" == "true" ]]; then
-  echo "  CR5_POSE_STABLE"
-else
-  echo "  [WARN] CR5 showed drift"
-fi
-
-# ===== Phase 6: Camera streams =====
-echo ""
-echo "--- Phase 6: Camera Streams ---"
-sleep 3
-"${PKG_DIR}/scripts/check_camera_streams_v333.py" 2>&1 || {
-  fatal_with_snapshot "PHASE6_CAMERA_STREAMS_FAILED"
+    rosparam set /cr5_spray/session_state "ACTIVE" 2>/dev/null || true
+    rosparam set /cr5_spray/session_id "$SESSION_ID" 2>/dev/null || true
+    echo "Session ACTIVE"
 }
-echo "  CAMERA_STREAMS_READY"
 
-# ===== Phase 7: Spray service =====
-if [[ "$ENABLE_SPRAY_SIM" == "true" ]]; then
-  echo ""
-  echo "--- Phase 7: Spray Service ---"
-  WAIT_START=$(date +%s)
-  while ! rosservice list 2>/dev/null | grep -q '/spray_demo/set_spray'; do
-    sleep 1
-    if [[ $(($(date +%s) - WAIT_START)) -gt 30 ]]; then
-      fatal_with_snapshot "PHASE7_SPRAY_SERVICE_MISSING"
+# ---- Phase B: 启动场景 ----
+launch_scene() {
+    echo "========================================="
+    echo "CR5 Spray Demo V3.3.6 — 最小稳定运行版"
+    echo "========================================="
+    echo "Session:   $SESSION_ID"
+    echo "Branch:    $GIT_BRANCH ($GIT_SHA)"
+    echo "Object:    $OBJECT"
+    echo "Profile:   $PROFILE"
+    echo "Physics:   $PHYSICS_MODE"
+    echo "GUI:       $GUI"
+    echo "Strict:    $STRICT"
+    echo "Log:       $LOG_DIR"
+    echo "========================================="
+
+    # 构建 launch 参数
+    local LAUNCH_ARGS=""
+    LAUNCH_ARGS="${LAUNCH_ARGS} object_type:=${OBJECT}"
+    LAUNCH_ARGS="${LAUNCH_ARGS} camera_profile:=${PROFILE}"
+    LAUNCH_ARGS="${LAUNCH_ARGS} paused:=false"
+    LAUNCH_ARGS="${LAUNCH_ARGS} enable_spray_sim:=${ENABLE_SPRAY_SIM}"
+    LAUNCH_ARGS="${LAUNCH_ARGS} enable_paint_patches:=${ENABLE_PAINT_PATCHES}"
+
+    if $GUI; then
+        LAUNCH_ARGS="${LAUNCH_ARGS} gui:=true headless:=false"
+    else
+        LAUNCH_ARGS="${LAUNCH_ARGS} gui:=false headless:=true"
     fi
-  done
-  echo "  /spray_demo/set_spray ready"
 
-  SPRAY_START=$(date +%s.%N)
-  SPRAY_RESULT=$(timeout 5 rosservice call /spray_demo/set_spray "data: true" 2>&1 || echo "TIMEOUT")
-  SPRAY_END=$(date +%s.%N)
-  SPRAY_ELAPSED=$(echo "$SPRAY_END - $SPRAY_START" | bc -l 2>/dev/null || echo "0")
-  echo "  set_spray(true) → ${SPRAY_RESULT}"
-  echo "  Wall response: ${SPRAY_ELAPSED}s"
+    if [[ "$PHYSICS_MODE" == "gravity" ]]; then
+        LAUNCH_ARGS="${LAUNCH_ARGS} robot_gravity:=true"
+    else
+        LAUNCH_ARGS="${LAUNCH_ARGS} robot_gravity:=false"
+    fi
 
-  if echo "$SPRAY_RESULT" | grep -qi "paused\|stalled"; then
-    fatal_with_snapshot "PHASE7_SPRAY_CLOCK_STALLED"
-  fi
+    echo "[$(date +%H:%M:%S)] launching scene..."
+    echo "  args: $LAUNCH_ARGS"
 
-  timeout 3 rosservice call /spray_demo/set_spray "data: false" 2>&1 || true
-  echo "  SPRAY_RUNTIME_READY"
+    setsid roslaunch cr5_spray_sim scene_v33_spray.launch $LAUNCH_ARGS \
+        > "$LOG_DIR/roslaunch.log" 2>&1 &
+    LAUNCH_PID=$!
+    LAUNCH_PGID=$(ps -o pgid= -p $LAUNCH_PID 2>/dev/null | tr -d ' ')
+    echo "  launch_pid=$LAUNCH_PID pgid=$LAUNCH_PGID"
+
+    if $VERBOSE; then
+        tail -f "$LOG_DIR/roslaunch.log" &
+    fi
+}
+
+# ---- Phase C: 等待就绪 ----
+wait_gazebo_services() {
+    echo "[$(date +%H:%M:%S)] waiting for Gazebo services ..."
+    local MAX_WAIT=120
+    local waited=0
+    while [[ $waited -lt $MAX_WAIT ]]; do
+        if rosservice list 2>/dev/null | grep -q '/gazebo/'; then
+            echo "[$(date +%H:%M:%S)] Gazebo services available (${waited}s)"
+            return 0
+        fi
+        if ! kill -0 "$LAUNCH_PID" 2>/dev/null; then
+            echo "ERROR: roslaunch died before Gazebo started"
+            tail -60 "$LOG_DIR/roslaunch.log" 2>/dev/null || true
+            return 1
+        fi
+        sleep 2
+        waited=$((waited + 2))
+    done
+    echo "ERROR: Gazebo did not start within ${MAX_WAIT}s"
+    return 1
+}
+
+wait_models() {
+    echo "[$(date +%H:%M:%S)] Phase C1: waiting for scene models ..."
+    rosrun cr5_spray_sim wait_scene_models_v336.py --timeout 45.0
+    local ret=$?
+    if [[ $ret -ne 0 ]]; then
+        echo "ERROR: SCENE_MODELS_FAILED"
+        return 1
+    fi
+    return 0
+}
+
+wait_controllers() {
+    echo "[$(date +%H:%M:%S)] Phase C2: waiting for controllers running ..."
+    rosrun cr5_spray_sim wait_controllers_running_v336.py --timeout 45.0
+    local ret=$?
+    if [[ $ret -ne 0 ]]; then
+        echo "ERROR: CONTROLLERS_FAILED"
+        return 1
+    fi
+    return 0
+}
+
+# ---- Phase D: 验证 ----
+check_clock() {
+    echo "[$(date +%H:%M:%S)] Phase D1: checking clock ..."
+    rosrun cr5_spray_sim check_clock_v336.py
+    local ret=$?
+    if [[ $ret -ne 0 ]]; then
+        echo "ERROR: CLOCK_NOT_ADVANCING"
+        return 1
+    fi
+    return 0
+}
+
+check_poses() {
+    echo "[$(date +%H:%M:%S)] Phase D2: checking model poses ..."
+    rosrun cr5_spray_sim check_model_poses_v336.py
+    local ret=$?
+    if [[ $ret -ne 0 ]]; then
+        echo "ERROR: MODEL_POSES_UNSTABLE"
+        return 1
+    fi
+    return 0
+}
+
+check_signals() {
+    echo "[$(date +%H:%M:%S)] Phase D3: checking runtime signals ..."
+    rosrun cr5_spray_sim check_runtime_signals_v336.py
+    local ret=$?
+    if [[ $ret -ne 0 ]]; then
+        echo "ERROR: RUNTIME_SIGNALS_DEGRADED"
+        return 1
+    fi
+    return 0
+}
+
+# ---- 处理失败 ----
+handle_failure() {
+    local phase="$1"
+    local reason="$2"
+    echo "========================================="
+    echo "FAILURE: $phase — $reason"
+    echo "========================================="
+
+    save_diagnostics "$phase: $reason"
+
+    if $STRICT || ! $GUI; then
+        # 严格模式或 headless → 自动退出
+        echo "Strict/headless mode: exiting ..."
+        exit 1
+    else
+        # GUI 模式 → DEGRADED，保持运行等待用户 Ctrl+C
+        echo ""
+        echo "========================================="
+        echo "Session DEGRADED — Gazebo is still running."
+        echo "Check the Gazebo window, then press Ctrl+C to exit."
+        echo "Log: $LOG_DIR"
+        echo "========================================="
+        # 等待 launch 进程 — 用户 Ctrl+C 触发 cleanup
+        wait "$LAUNCH_PID" 2>/dev/null || true
+        exit 1
+    fi
+}
+
+# ====================================================================
+# 主流程
+# ====================================================================
+
+# Phase A: 独立 master (如果需要)
+if $ISOLATED; then
+    echo "[$(date +%H:%M:%S)] Phase A: starting isolated roscore ..."
+    start_isolated_master
+else
+    echo "[$(date +%H:%M:%S)] Phase A: using shared roscore"
 fi
 
-# ===== TF 检查 =====
-echo ""
-echo "--- TF Check ---"
-"${PKG_DIR}/scripts/check_tf_once_v331.py" 2>&1 || {
-  fatal_with_snapshot "PHASE_TF_CHECK_FAILED"
-}
-echo "  TF check PASS"
+# Phase B: 启动场景
+launch_scene
 
-# ============================================================================
-# 全部硬门通过 → 激活会话
-# ============================================================================
+# 等待 Gazebo 服务
+if ! wait_gazebo_services; then
+    handle_failure "PHASE_B" "Gazebo did not start"
+fi
+
+# Phase C: 模型 + 控制器就绪
+if ! wait_models; then
+    handle_failure "PHASE_C1" "SCENE_MODELS_FAILED"
+fi
+
+if ! wait_controllers; then
+    handle_failure "PHASE_C2" "CONTROLLERS_FAILED"
+fi
+
+# Phase D: 验证
+echo "========================================="
+
+if ! check_clock; then
+    handle_failure "PHASE_D1" "CLOCK_NOT_ADVANCING"
+fi
+
+if ! check_poses; then
+    handle_failure "PHASE_D2" "MODEL_POSES_UNSTABLE"
+fi
+
+if ! check_signals; then
+    handle_failure "PHASE_D3" "RUNTIME_SIGNALS_DEGRADED"
+fi
+
+# ====================================================================
+# 成功!
+# ====================================================================
+echo "========================================="
+echo ""
+echo "  SCENE_MODELS_READY     ✓"
+echo "  CONTROLLERS_RUNNING    ✓"
+echo "  SIM_CLOCK_ADVANCING    ✓"
+echo "  MODEL_POSES_STABLE     ✓"
+echo "  RUNTIME_SIGNALS_READY  ✓"
+echo ""
+echo "  Session ACTIVE — Ctrl+C to exit"
+echo ""
+echo "========================================="
+
 activate_session
 
-echo ""
-echo "=============================================="
-echo "  V3.3.5 Session ACTIVE"
-echo "  Session:  ${SESSION_ID}"
-echo "  Physics:  ${PHYSICS_MODE}"
-echo "  CONTROLLERS_LOADED_NOT_RUNNING"
-echo "  PRE_BOOTSTRAP_SCENE_BASELINE_PASS"
-echo "  SIM_CLOCK_ADVANCING"
-echo "  JOINT_STATE_CONTROLLER_RUNNING"
-echo "  JOINT_STATES_READY"
-echo "  ARM_CONTROLLER_RUNNING"
-echo "  CONTROLLERS_RUNNING"
-echo "  CR5_POSE_STABLE"
-echo "  CAMERA_STREAMS_READY"
-if [[ "$ENABLE_SPRAY_SIM" == "true" ]]; then
-  echo "  SPRAY_RUNTIME_READY"
+# Headless 模式: 成功后退回 shell
+if ! $GUI; then
+    echo "[$(date +%H:%M:%S)] headless mode: session active, exiting cleanly."
+    exit 0
 fi
-echo "  Session ACTIVE"
-echo ""
-if [[ "$ISOLATED" == "true" ]]; then
-  echo "  Join: source ${PKG_DIR}/scripts/use_spray_session_v33.sh"
-  echo ""
-fi
-echo "  Spray ON:  rosservice call /spray_demo/set_spray \"data: true\""
-echo "  Spray OFF: rosservice call /spray_demo/set_spray \"data: false\""
-echo "  Test plume: rosservice call /spray_demo/show_test_plume \"{}\""
-echo "  State:     $(rosparam get /cr5_spray/session_state 2>/dev/null || echo '?')"
-echo "=============================================="
 
+# GUI 模式: 等待用户 Ctrl+C
+echo "Press Ctrl+C to stop."
 wait "$LAUNCH_PID" 2>/dev/null || true

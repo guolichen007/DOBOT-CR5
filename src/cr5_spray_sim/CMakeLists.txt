@@ -60,6 +60,12 @@ catkin_install_python(PROGRAMS
   scripts/check_controllers_loaded_v335.py
   scripts/start_cr5_controllers_v335.py
   scripts/capture_scene_snapshot_v335.py
+  # V3.3.6
+  scripts/wait_scene_models_v336.py
+  scripts/wait_controllers_running_v336.py
+  scripts/check_clock_v336.py
+  scripts/check_model_poses_v336.py
+  scripts/check_runtime_signals_v336.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
