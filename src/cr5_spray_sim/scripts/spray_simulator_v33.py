@@ -147,10 +147,17 @@ class SpraySimulatorV33:
         self.pub_spray_marker = rospy.Publisher("/spray_demo/spray_marker", Marker, queue_size=1)
         self.pub_paint_patches = rospy.Publisher("/spray_demo/paint_patches", MarkerArray, queue_size=1)
 
+        # V3.3.4: 诊断 plume 测试 (仅 Gazebo visual 验证用)
+        self.test_plume_active = False
+        self.test_plume_until = 0.0  # wall-time
+        self.pub_test_plume_pose = rospy.Publisher(
+            "/spray_demo/test_plume_pose", PoseStamped, queue_size=1)
+
         # Services
         rospy.Service("/spray_demo/set_spray", SetBool, self.handle_set_spray)
         rospy.Service("/spray_demo/reset_paint", Trigger, self.handle_reset_paint)
         rospy.Service("/spray_demo/save_result", Trigger, self.handle_save_result)
+        rospy.Service("/spray_demo/show_test_plume", Trigger, self.handle_test_plume)
 
         # Persistent patch state
         self.patches = []  # list of (position, normal, color) dicts
@@ -228,6 +235,16 @@ class SpraySimulatorV33:
         except Exception as e:
             rospy.logerr("Save failed: %s", e)
             return TriggerResponse(success=False, message=str(e))
+
+    def handle_test_plume(self, req):
+        """V3.3.4: 诊断 plume 显示 2 秒 (不增加漆层，不改变 spray_enabled)"""
+        self.test_plume_active = True
+        self.test_plume_until = time.monotonic() + 2.0
+        rospy.loginfo("Test plume triggered (2s, diagnostic only)")
+        return TriggerResponse(
+            success=True,
+            message="Test plume visible for 2s (Gazebo only, no paint)")
+
 
     def _try_enable(self):
         resp = SetBoolResponse()
@@ -521,6 +538,48 @@ class SpraySimulatorV33:
             rate.sleep()
 
     def _update(self, now):
+        # V3.3.4: 处理诊断 test plume (2s 限时)
+        if self.test_plume_active:
+            if time.monotonic() > self.test_plume_until:
+                self.test_plume_active = False
+                # 隐藏 test plume
+                hide = PoseStamped(header=Header(stamp=now, frame_id="world"))
+                hide.pose.position.z = -100.0
+                hide.pose.orientation.w = 1.0
+                self.pub_test_plume_pose.publish(hide)
+            else:
+                # 发布固定长度 test plume pose 给 gazebo visual
+                try:
+                    if self.tf_buffer.can_transform(
+                        "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.0)):
+                        t = self.tf_buffer.lookup_transform(
+                            "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.0))
+                        nz_q = t.transform.rotation
+                        nz_dir = self._rotate_z_axis(np.array(
+                            [nz_q.x, nz_q.y, nz_q.z, nz_q.w]))
+                        test_len = 0.15  # 固定测试长度
+                        plume_pose = PoseStamped(
+                            header=Header(stamp=now, frame_id="world"),
+                            pose=Pose(
+                                position=t.transform.translation,
+                                orientation=t.transform.rotation))
+                        self.pub_test_plume_pose.publish(plume_pose)
+
+                        # 也发布 RViz marker
+                        nz_pos = np.array([t.transform.translation.x,
+                                          t.transform.translation.y,
+                                          t.transform.translation.z])
+                        hit_pt = nz_pos + nz_dir * test_len
+                        mk = self._make_marker(
+                            now, Marker.SPHERE, (0.0, 1.0, 1.0),
+                            (0.03, 0.03, 0.03), 0.8)
+                        mk.pose.position.x = hit_pt[0]
+                        mk.pose.position.y = hit_pt[1]
+                        mk.pose.position.z = hit_pt[2]
+                        self.pub_spray_marker.publish(mk)
+                except Exception:
+                    pass
+
         # Publish nozzle pose (V3.3.3: non-blocking TF)
         try:
             if self.tf_buffer.can_transform(

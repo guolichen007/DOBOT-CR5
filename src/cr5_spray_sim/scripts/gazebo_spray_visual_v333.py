@@ -23,7 +23,7 @@ import numpy as np
 from std_msgs.msg import String
 from gazebo_msgs.msg import ModelState
 from gazebo_msgs.srv import SpawnModel, DeleteModel, SetModelState, SetModelStateRequest
-from geometry_msgs.msg import Pose, Point, Quaternion
+from geometry_msgs.msg import Pose, Point, Quaternion, PoseStamped
 
 # 喷雾锥 SDF 模板
 PLUME_SDF = """<?xml version="1.0"?>
@@ -80,12 +80,29 @@ class GazeboSprayVisual:
         self._state_sub = rospy.Subscriber(
             "/spray_demo/state", String, self._state_callback, queue_size=5)
 
+        # V3.3.4: 订阅诊断 test plume pose (用于 Gazebo 视觉验证)
+        self.test_plume_active = False
+        self.test_plume_pose = None
+        self._test_plume_sub = rospy.Subscriber(
+            "/spray_demo/test_plume_pose", PoseStamped,
+            self._test_plume_callback, queue_size=5)
+
         rospy.loginfo("Gazebo Spray Visual V3.3.3 ready")
         rospy.loginfo("  model=%s segments=%d nominal_dist=%.2fm alpha=%.2f",
                       MODEL_NAME, self.num_segments, self.nominal_standoff, self.alpha)
 
     def _state_callback(self, msg):
         self.current_spray_state = msg.data
+
+    def _test_plume_callback(self, msg):
+        """V3.3.4: 接收诊断 test plume 指令."""
+        # 如果 pose.z 被设为 -100，表示隐藏
+        if msg.pose.position.z < -50.0:
+            self.test_plume_active = False
+            self.test_plume_pose = None
+        else:
+            self.test_plume_active = True
+            self.test_plume_pose = msg
 
     def _build_sdf(self):
         """Build the multi-segment spray plume SDF."""
@@ -162,7 +179,10 @@ class GazeboSprayVisual:
         srv = rospy.ServiceProxy("/gazebo/set_model_state", SetModelState)
         req = SetModelStateRequest()
 
-        if self.current_spray_state == "SPRAYING":
+        # V3.3.4: 优先处理诊断 test plume
+        if self.test_plume_active and self.test_plume_pose is not None:
+            req.model_state.pose = self.test_plume_pose.pose
+        elif self.current_spray_state == "SPRAYING":
             # 获取 nozzle 姿态
             try:
                 t = self.tf_buffer.lookup_transform(

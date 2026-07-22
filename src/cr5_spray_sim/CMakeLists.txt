@@ -54,6 +54,10 @@ catkin_install_python(PROGRAMS
   scripts/unpause_and_verify_clock_v333.py
   scripts/check_camera_streams_v333.py
   scripts/gazebo_spray_visual_v333.py
+  # V3.3.4
+  scripts/cr5_gravity_guard_v334.py
+  scripts/start_cr5_controllers_v334.py
+  scripts/hold_cr5_zero_v334.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
