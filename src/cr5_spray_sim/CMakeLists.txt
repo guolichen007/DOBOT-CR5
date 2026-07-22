@@ -66,6 +66,12 @@ catkin_install_python(PROGRAMS
   scripts/check_clock_v336.py
   scripts/check_model_poses_v336.py
   scripts/check_runtime_signals_v336.py
+  # V3.3.7
+  scripts/audit_sim_processes_v337.py
+  scripts/check_scene_geometry_v337.py
+  scripts/bootstrap_controllers_v337.py
+  scripts/check_scene_runtime_v337.py
+  scripts/check_runtime_signals_v337.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
@@ -74,6 +80,7 @@ install(PROGRAMS
   scripts/run_scene_v2.sh
   scripts/run_scene_v31_simple.sh
   scripts/run_scene_v33_spray.sh
+  scripts/run_scene_v337.sh
   scripts/use_spray_session_v33.sh
   # V3.3.3
   scripts/show_camera_status_v333.sh

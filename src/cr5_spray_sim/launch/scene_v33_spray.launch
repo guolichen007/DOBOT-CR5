@@ -1,21 +1,20 @@
 <?xml version="1.0"?>
 <!--
-  CR5 Spray Demo V3.3: 稳定喷枪 + 表面上色
+  CR5 Spray Demo V3.3.7: 确定性模型初始化
   从 V3.1 稳定基线重建，修复 V3.2.1 的 TF/安装/启动器问题。
 
-  关键修复:
-  - TF: world→dummy_link (非 world→base_link，避免双父节点冲突)
-  - 喷枪: 从 Link6 法兰原点安装 (非旧 Tool_end)
-  - 第一阶段 visual-only (零附加质量，无 collision)
-  - state latched + 周期重发
-  - 启动器硬失败门
+  V3.3.7 关键变更:
+  - paused=true 默认启动，controller 不自动并发
+  - 由 run_scene_v337.sh 顺序执行: spawn → 绝对几何验证 → unpause → controller 启动
+  - CR5 Link1~Link6 gravity=false (不需要重力)
 
-  必须通过 run_scene_v33_spray.sh 启动。
+  必须通过 run_scene_v337.sh 启动。
 -->
 <launch>
   <arg name="gui" default="false"/>
   <arg name="headless" default="false"/>
-  <arg name="paused" default="false" doc="V3.3.6: 直接 unpaused 启动，CR5 运动链无重力无需暂停"/>
+  <arg name="paused" default="true" doc="V3.3.7: paused 启动，等模型全部 spawn + 零位验证后再 unpause"/>
+  <arg name="spawn_controllers" default="false" doc="V3.3.7: 由 bootstrap 脚本顺序启动，launch 默认不自动启动"/>
   <arg name="object_type" default="motor_housing_cylinder"
        doc="motor_housing_cylinder|rectangular_housing"/>
   <arg name="camera_profile" default="vm" doc="vm|quality"/>
@@ -71,9 +70,9 @@
           -J joint4 0.0 -J joint5 0.0 -J joint6 0.0"
     respawn="false" output="screen"/>
 
-  <!-- CR5 controllers (V3.3.6: 直接启动，不再使用 stopped 模式) -->
+  <!-- CR5 controllers (V3.3.7: 默认不自动启动，由 bootstrap_controllers_v337.py 顺序启动) -->
   <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
-  <node name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
+  <node if="$(arg spawn_controllers)" name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
     args="joint_state_controller arm_controller"
     respawn="false" output="screen"/>
 
