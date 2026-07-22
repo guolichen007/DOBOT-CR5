@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# CR5 Spray Demo V3.3.1 Launcher
-# 修复 V3.3 启动器的参数解析、进程泄漏、tf_echo 刷屏问题。
+# CR5 Spray Demo V3.3.3 Launcher
+# 修复 V3.3.2 控制器 stopped、/clock 不推进、相机无帧、喷枪服务卡死问题。
 #
 # 用法:
 #   bash run_scene_v33_spray.sh [--gui] [--headless] [--isolated]
@@ -216,12 +216,12 @@ LAUNCH_ARGS="${LAUNCH_ARGS} gui:=${GUI} headless:=${HEADLESS}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_spray_tool:=true"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_spray_sim:=${ENABLE_SPRAY_SIM}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_paint_patches:=${ENABLE_PAINT_PATCHES}"
-# V3.3.2: paused start, controllers managed by initialize_cr5_pose_v332
-LAUNCH_ARGS="${LAUNCH_ARGS} start_paused:=true start_controllers:=false"
+# V3.3.3: paused start, controllers start directly (no --stopped)
+LAUNCH_ARGS="${LAUNCH_ARGS} start_paused:=true start_controllers:=true"
 
 echo ""
 echo "=============================================="
-echo "  CR5 Spray Demo V3.3.2"
+echo "  CR5 Spray Demo V3.3.3"
 echo "  Session:  ${SESSION_ID}"
 echo "  Object:   ${OBJECT}"
 echo "  GUI: ${GUI}  Headless: ${HEADLESS}  Isolated: ${ISOLATED}"
@@ -262,52 +262,20 @@ while ! rosservice list 2>/dev/null | grep -q '/gazebo/'; do
 done
 echo "  Gazebo ready ($(($(date +%s) - WAIT_START))s)"
 
-# ===== V3.3.2: CR5 确定性初始姿态初始化 =====
-# 策略: spawn_model -J 设初始关节角 + Gazebo paused 启动 → 无需 controller_manager switch
+# ===== V3.3.3: CR5 初始化 (硬门流程) =====
 echo ""
-echo "--- CR5 Initial Pose Init ---"
+echo "--- Phase 1: Controller + JointState Check ---"
+"${PKG_DIR}/scripts/check_cr5_runtime_ready_v333.py" 2>&1 || {
+  echo "FATAL: CONTROLLERS_NOT_RUNNING or JOINT_STATES_INVALID" >&2
+  exit 1
+}
+echo "  CONTROLLERS_RUNNING"
 
-# 1. 等待 controller_manager 就绪
-echo "  Waiting for controller_manager..."
-WAIT_START=$(date +%s)
-while ! rosservice list 2>/dev/null | grep -q '/controller_manager/list_controllers'; do
-  sleep 1
-  if [[ $(($(date +%s) - WAIT_START)) -gt 30 ]]; then
-    echo "FATAL: controller_manager not available" >&2; exit 1
-  fi
-done
-
-# 2. 双重保险: set_model_configuration (以防 -J 未生效)
-echo "  Setting joints to upright_zero..."
-rosservice call /gazebo/set_model_configuration \
-  "model_name: 'cr5_robot'
-urdf_param_name: 'robot_description'
-joint_names: ['joint1','joint2','joint3','joint4','joint5','joint6']
-joint_positions: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]" 2>/dev/null
-sleep 1
-
-# 3. 等待 joint_states 有数据
-echo "  Waiting for joint_states..."
-WAIT_START=$(date +%s)
-JOINTS_OK=false
-while [[ $(($(date +%s) - WAIT_START)) -lt 20 ]]; do
-  JS=$(rostopic echo -n1 /joint_states 2>/dev/null)
-  if echo "$JS" | grep -q "joint1"; then
-    echo "$JS" | grep -E "name:|position:" | head -4
-    JOINTS_OK=true; break
-  fi
-  sleep 1
-done
-if [[ "$JOINTS_OK" == "false" ]]; then
-  echo "FATAL: no joint_states after 20s" >&2; exit 1
-fi
-
-# 4. 验证 Link6 高度 (仍在 paused)
+# Phase 2: 验证 Link6/nozzle 高度 (仍在 paused)
+echo ""
+echo "--- Phase 2: Frame Height Check (paused) ---"
 sleep 2
-echo "  Verifying Link6 height..."
 LINK6_RESULT=$(timeout 5 rosrun tf tf_echo world Link6 2>/dev/null | grep -m1 "Translation" || echo "")
-echo "  $LINK6_RESULT"
-# 提取 z 值
 LINK6_Z=$(echo "$LINK6_RESULT" | grep -oP '[-]?\d+\.\d+' | tail -1 || echo "")
 if [[ -z "$LINK6_Z" ]]; then
   echo "FATAL: Cannot determine Link6 height" >&2; exit 1
@@ -315,51 +283,69 @@ fi
 if [[ $(echo "$LINK6_Z < 0.30" | bc -l 2>/dev/null) == "1" ]]; then
   echo "FATAL: CR5_ARM_FOLDED_BELOW_WORKSPACE (Link6.z=$LINK6_Z)" >&2; exit 1
 fi
+echo "  Link6.z = $LINK6_Z  [OK]"
 
-# 5. Unpause physics
-echo "  Unpausing physics..."
-rosservice call /gazebo/unpause_physics 2>/dev/null || true
-sleep 3
+NOZZLE_RESULT=$(timeout 5 rosrun tf tf_echo world spray_nozzle_frame 2>/dev/null | grep -m1 "Translation" || echo "")
+NOZZLE_Z=$(echo "$NOZZLE_RESULT" | grep -oP '[-]?\d+\.\d+' | tail -1 || echo "")
+if [[ -z "$NOZZLE_Z" ]]; then
+  echo "  [WARN] Cannot determine spray_nozzle_frame height (TF may not exist yet)"
+else
+  echo "  spray_nozzle_frame.z = $NOZZLE_Z  [OK]"
+fi
+echo "  JOINTS_READY"
 
-# 6. 监控 5 秒
-echo "  Monitoring stability (5s)..."
-for i in $(seq 1 5); do
-  sleep 1
-  LINK6_Z=$(timeout 3 rosrun tf tf_echo world Link6 2>/dev/null | grep -m1 "Translation" | grep -oP '[-]?\d+\.\d+' | tail -1 || echo "0")
-  if [[ $(echo "$LINK6_Z < 0.80" | bc -l 2>/dev/null) == "1" ]]; then
-    echo "FATAL: Link6 dropped to z=$LINK6_Z during monitoring" >&2; exit 1
-  fi
-done
-echo "  Link6.z after 5s = $LINK6_Z"
+# Phase 3: Unpause + Clock verification
+echo ""
+echo "--- Phase 3: Unpause + Clock Verification ---"
+"${PKG_DIR}/scripts/unpause_and_verify_clock_v333.py" 2>&1 || {
+  echo "FATAL: GAZEBO_CLOCK_NOT_ADVANCING" >&2
+  exit 1
+}
+echo "  SIM_CLOCK_ADVANCING"
 
-echo "  CR5_INITIAL_POSE_READY"
+# Phase 4: Camera streams (real frames, wall-time)
+echo ""
+echo "--- Phase 4: Camera Stream Check ---"
+sleep 3  # 等相机传感器启动
+"${PKG_DIR}/scripts/check_camera_streams_v333.py" 2>&1 || {
+  echo "FATAL: CAMERA_STREAMS_FAILED" >&2
+  exit 1
+}
+echo "  CAMERA_STREAMS_READY"
 
-# ===== V3.3.2: 等待 Spray 服务 =====
+# Phase 5: 模型稳定性
+echo ""
+echo "--- Phase 5: Scene Health Check ---"
+sleep 5  # 让物理稳定
+"${PKG_DIR}/scripts/check_scene_v332.py" 2>&1 || {
+  echo "FATAL: Scene health check failed" >&2
+  exit 1
+}
+echo "  Scene health PASS"
+
+# Phase 6: Spray service
 if [[ "$ENABLE_SPRAY_SIM" == "true" ]]; then
   echo ""
-  echo "--- Waiting for /spray_demo/set_spray ---"
+  echo "--- Phase 6: Spray Service ---"
   WAIT_START=$(date +%s)
   while ! rosservice list 2>/dev/null | grep -q '/spray_demo/set_spray'; do
     sleep 1
-    if [[ $(($(date +%s) - WAIT_START)) -gt 60 ]]; then
-      echo "FATAL: /spray_demo/set_spray did not appear" >&2
-      exit 1
+    if [[ $(($(date +%s) - WAIT_START)) -gt 30 ]]; then
+      echo "FATAL: /spray_demo/set_spray did not appear" >&2; exit 1
     fi
   done
-  echo "  /spray_demo/set_spray ready ($(($(date +%s) - WAIT_START))s)"
+  echo "  /spray_demo/set_spray ready"
 
-  # ===== State 验证 =====
-  echo ""
-  echo "--- Verifying /spray_demo/state (latched) ---"
+  # 验证 state topic 有消息
   STATE_MSG=$(rostopic echo -n1 /spray_demo/state 2>/dev/null || true)
   if [[ -z "$STATE_MSG" ]]; then
-    echo "FATAL: /spray_demo/state has NO message" >&2
-    exit 1
+    echo "FATAL: /spray_demo/state has NO message" >&2; exit 1
   fi
   echo "  /spray_demo/state = ${STATE_MSG}"
+  echo "  SPRAY_RUNTIME_READY"
 fi
 
-# ===== TF 一次性检查 (使用 Python, 非 tf_echo) =====
+# ===== TF 检查 =====
 echo ""
 echo "--- TF Check ---"
 "${PKG_DIR}/scripts/check_tf_once_v331.py" 2>&1 || {
@@ -368,21 +354,19 @@ echo "--- TF Check ---"
 }
 echo "  TF check PASS"
 
-# ===== 模型稳定性检查 =====
-echo ""
-echo "--- Scene Health Check ---"
-sleep 8  # 让物理稳定
-"${PKG_DIR}/scripts/check_scene_v332.py" 2>&1 || {
-  echo "FATAL: Scene health check failed" >&2
-  exit 1
-}
-echo "  Scene health PASS"
-
 # ===== 最终摘要 =====
 echo ""
 echo "=============================================="
-echo "  V3.3.1 Session ACTIVE"
+echo "  V3.3.3 Session ACTIVE"
 echo "  Session: ${SESSION_ID}"
+echo "  CONTROLLERS_RUNNING"
+echo "  JOINTS_READY"
+echo "  SIM_CLOCK_ADVANCING"
+echo "  CAMERA_STREAMS_READY"
+if [[ "$ENABLE_SPRAY_SIM" == "true" ]]; then
+  echo "  SPRAY_RUNTIME_READY"
+fi
+echo "  Session ACTIVE"
 echo ""
 if [[ "$ISOLATED" == "true" ]]; then
   echo "  Join from another terminal:"

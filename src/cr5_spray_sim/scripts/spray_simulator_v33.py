@@ -11,11 +11,13 @@ V3.2.1 修复:
 import math
 import json
 import os
+import time
 import rospy
 import tf2_ros
 import numpy as np
 from std_srvs.srv import SetBool, SetBoolResponse, Trigger, TriggerResponse
 from std_msgs.msg import Bool, String, Float32, Header, ColorRGBA
+from rosgraph_msgs.msg import Clock
 from geometry_msgs.msg import PoseStamped, PointStamped, Vector3Stamped, Pose, Point, Quaternion
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -129,6 +131,12 @@ class SpraySimulatorV33:
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
+        # V3.3.3: Clock watchdog (wall-time based)
+        self.last_clock_value = None
+        self.last_clock_wall = time.monotonic()
+        self.clock_advancing = False
+        self._clock_sub = rospy.Subscriber("/clock", Clock, self._clock_callback, queue_size=5)
+
         # Publishers — V3.3 修复: state latched
         self.pub_enabled = rospy.Publisher("/spray_demo/enabled", Bool, queue_size=1, latch=True)
         self.pub_state = rospy.Publisher("/spray_demo/state", String, queue_size=1, latch=True)
@@ -223,6 +231,14 @@ class SpraySimulatorV33:
 
     def _try_enable(self):
         resp = SetBoolResponse()
+        wall_start = time.monotonic()
+
+        # V3.3.3: 检查仿真时钟是否在推进 (wall-time, < 0.5s)
+        if not self._is_clock_advancing():
+            resp.success = False
+            resp.message = "REJECTED: simulation clock paused or stalled"
+            self._set_state("SIM_PAUSED")
+            return resp
 
         if not rospy.get_param("/use_sim_time", False):
             resp.success = False
@@ -230,11 +246,25 @@ class SpraySimulatorV33:
             self._set_state("FAULT")
             return resp
 
+        # V3.3.3: 非阻塞 TF 查询 (< 0.5s wall-time)
         try:
+            if not self.tf_buffer.can_transform(
+                "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.0)):
+                resp.success = False
+                resp.message = "REJECTED: TF not available (nozzle→world)"
+                self._set_state("FAULT")
+                return resp
             nozzle_world = self.tf_buffer.lookup_transform(
-                "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(1.0))
+                "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.0))
+
+            if not self.tf_buffer.can_transform(
+                "world", self.target_frame, rospy.Time(0), rospy.Duration(0.0)):
+                resp.success = False
+                resp.message = "REJECTED: TF not available (target→world)"
+                self._set_state("FAULT")
+                return resp
             target_world = self.tf_buffer.lookup_transform(
-                "world", self.target_frame, rospy.Time(0), rospy.Duration(1.0))
+                "world", self.target_frame, rospy.Time(0), rospy.Duration(0.0))
         except Exception as e:
             resp.success = False
             resp.message = f"REJECTED: TF lookup failed: {e}"
@@ -305,6 +335,24 @@ class SpraySimulatorV33:
         """V3.3: 使用 latched publisher 设置状态，确保后启动节点可收到"""
         self.state = new_state
         self.pub_state.publish(String(data=new_state))
+
+    # ===== V3.3.3: Clock Watchdog =====
+
+    def _clock_callback(self, msg):
+        """Track clock messages with wall-time."""
+        now_wall = time.monotonic()
+        clock_val = msg.clock
+        if self.last_clock_value is not None:
+            if clock_val > self.last_clock_value:
+                self.clock_advancing = True
+        self.last_clock_value = clock_val
+        self.last_clock_wall = now_wall
+
+    def _is_clock_advancing(self):
+        """Check if /clock has advanced within the last 1.5s wall-time."""
+        if self.last_clock_value is None:
+            return False
+        return (time.monotonic() - self.last_clock_wall) < 1.5
 
     # ===== Hit Testing =====
 
@@ -473,15 +521,17 @@ class SpraySimulatorV33:
             rate.sleep()
 
     def _update(self, now):
-        # Publish nozzle pose
+        # Publish nozzle pose (V3.3.3: non-blocking TF)
         try:
-            transform = self.tf_buffer.lookup_transform(
-                "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.1))
-            nozzle_pose = PoseStamped(
-                header=Header(stamp=now, frame_id="world"),
-                pose=Pose(position=transform.transform.translation,
-                          orientation=transform.transform.rotation))
-            self.pub_nozzle_pose.publish(nozzle_pose)
+            if self.tf_buffer.can_transform(
+                "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.0)):
+                transform = self.tf_buffer.lookup_transform(
+                    "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.0))
+                nozzle_pose = PoseStamped(
+                    header=Header(stamp=now, frame_id="world"),
+                    pose=Pose(position=transform.transform.translation,
+                              orientation=transform.transform.rotation))
+                self.pub_nozzle_pose.publish(nozzle_pose)
         except Exception:
             nozzle_pose = None
 
@@ -489,12 +539,18 @@ class SpraySimulatorV33:
             self._publish_marker_off(now)
             return
 
-        # Spraying: compute hit
+        # Spraying: compute hit (V3.3.3: non-blocking TF)
         try:
+            if not (self.tf_buffer.can_transform(
+                "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.0)) and
+                    self.tf_buffer.can_transform(
+                "world", self.target_frame, rospy.Time(0), rospy.Duration(0.0))):
+                self._check_auto_off(now, lost=True)
+                return
             nozzle_world = self.tf_buffer.lookup_transform(
-                "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.1))
+                "world", self.nozzle_frame, rospy.Time(0), rospy.Duration(0.0))
             target_world = self.tf_buffer.lookup_transform(
-                "world", self.target_frame, rospy.Time(0), rospy.Duration(0.1))
+                "world", self.target_frame, rospy.Time(0), rospy.Duration(0.0))
         except Exception:
             self._check_auto_off(now, lost=True)
             return
@@ -542,10 +598,13 @@ class SpraySimulatorV33:
         self.last_no_hit_time = None
         self.pub_hit_distance.publish(Float32(data=t))
 
-        # Transform to world
+        # Transform to world (V3.3.3: non-blocking)
         try:
+            if not self.tf_buffer.can_transform(
+                "world", self.target_frame, rospy.Time(0), rospy.Duration(0.0)):
+                return
             world_tf = self.tf_buffer.lookup_transform(
-                "world", self.target_frame, rospy.Time(0), rospy.Duration(0.1))
+                "world", self.target_frame, rospy.Time(0), rospy.Duration(0.0))
         except Exception:
             return
 

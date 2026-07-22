@@ -69,10 +69,10 @@
           -J joint4 0.0 -J joint5 0.0 -J joint6 0.0"
     respawn="false" output="screen"/>
 
-  <!-- CR5 controllers (V3.3.2: paused 启动, spawner 在物理暂停时加载) -->
+  <!-- CR5 controllers (V3.3.3: Gazebo paused 时直接启动, 不再 --stopped) -->
   <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
   <node name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
-    args="--stopped joint_state_controller arm_controller"
+    args="joint_state_controller arm_controller"
     respawn="false" output="screen"/>
 
   <!-- Robot state publisher -->
@@ -130,12 +130,22 @@
     args="0 0 0 0 0 0 1 world dummy_link"
     respawn="false" output="screen"/>
 
-  <!-- ===== Spray Control (V3.3) ===== -->
+  <!-- ===== Spray Control (V3.3.3) ===== -->
   <!-- 包含: 喷涂开关、命中检测、状态机、paint patch 累积、RViz Marker 发布 -->
   <node if="$(arg enable_spray_sim)" name="spray_simulator_v33"
     pkg="cr5_spray_sim" type="spray_simulator_v33.py" output="screen" required="true">
     <param name="object_type" value="$(arg object_type)"/>
     <param name="enable_paint_patches" value="$(arg enable_paint_patches)"/>
+  </node>
+
+  <!-- V3.3.3: Gazebo 喷雾锥视觉 (半透明锥台，无碰撞，static) -->
+  <node if="$(arg enable_spray_sim)" name="gazebo_spray_visual_v333"
+    pkg="cr5_spray_sim" type="gazebo_spray_visual_v333.py" output="screen">
+    <param name="nominal_standoff_m" value="0.18"/>
+    <param name="cone_half_angle_deg" value="15.0"/>
+    <param name="paint_color" value="[0.10, 0.35, 0.75]"/>
+    <param name="alpha" value="0.22"/>
+    <param name="num_segments" value="5"/>
   </node>
 
 </launch>

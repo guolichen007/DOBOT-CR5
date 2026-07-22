@@ -49,6 +49,11 @@ catkin_install_python(PROGRAMS
   # V3.3.2
   scripts/initialize_cr5_pose_v332.py
   scripts/check_scene_v332.py
+  # V3.3.3
+  scripts/check_cr5_runtime_ready_v333.py
+  scripts/unpause_and_verify_clock_v333.py
+  scripts/check_camera_streams_v333.py
+  scripts/gazebo_spray_visual_v333.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
@@ -58,5 +63,8 @@ install(PROGRAMS
   scripts/run_scene_v31_simple.sh
   scripts/run_scene_v33_spray.sh
   scripts/use_spray_session_v33.sh
+  # V3.3.3
+  scripts/show_camera_status_v333.sh
+  scripts/open_spray_rviz_v333.sh
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
