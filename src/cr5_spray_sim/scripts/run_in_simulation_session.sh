@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# V4: 在当前活跃的 CR5 Spray V3.3.7 会话中执行任意命令.
+# V4: 在当前活跃的 CR5 Spray calibration-baseline 会话中执行任意命令.
 #
 # 用法:
 #   bash run_in_simulation_session.sh rosrun image_view image_view image:=/cam_front_left/camera/color/image_raw
@@ -11,7 +11,7 @@ set -euo pipefail
 ENV_FILE="/tmp/cr5_spray_simulation.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: No active CR5 Spray V3.3.7 session" >&2
+  echo "ERROR: No active CR5 Spray calibration-baseline session" >&2
   echo "Start first: bash run_simulation.sh --gui --object=<type>" >&2
   exit 1
 fi

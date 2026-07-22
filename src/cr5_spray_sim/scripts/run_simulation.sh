@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# CR5 Spray Demo V3.3.7 — 确定性模型初始化与信号闭环
+# CR5 Multi-Camera Calibration Simulation与信号闭环
 # ============================================================================
 #
 # 五阶段确定性启动:
@@ -53,7 +53,7 @@ fi
 # ---- 帮助 ----
 usage() {
     cat <<'EOF'
-CR5 Spray Demo V3.3.7 — 确定性模型初始化
+CR5 Multi-Camera Calibration Simulation
 
 用法:
   bash run_simulation.sh [OPTIONS]
@@ -187,7 +187,7 @@ save_diagnostics() {
 
     cat > "$diag_dir/summary.json" <<JSONSUM
 {
-  "version": "V3.3.7",
+  "version": "calibration-baseline",
   "session_id": "$SESSION_ID",
   "branch": "$GIT_BRANCH",
   "sha": "$GIT_SHA",
@@ -324,7 +324,7 @@ start_master() {
     ROS_MASTER_OWNED=true
     echo "[$(date +%H:%M:%S)] roscore ready (pid=$ROS_MASTER_PID, owned=true)"
 
-    # V4: 写入当前会话环境文件
+    # 写入当前会话环境文件
     write_session_env
 }
 
@@ -351,7 +351,7 @@ EOF
 
 run_audit() {
     # 非 isolated 模式才做审计 (isolated 用随机端口，冲突几率极低)
-    # V4: audit 在 roscore 启动前运行，直接用 python3 而非 rosrun
+    # audit 在 roscore 启动前运行，直接用 python3 而非 rosrun
     if $ISOLATED; then
         echo "[$(date +%H:%M:%S)] Phase A0: skipping audit (isolated mode)"
         echo "SIM_PROCESS_PREFLIGHT_PASS"
@@ -373,7 +373,7 @@ run_audit() {
 # ---- Phase B: 启动 paused 场景 ----
 launch_scene() {
     echo "========================================="
-    echo "CR5 Spray Demo V3.3.7 — 确定性模型初始化"
+    echo "CR5 Multi-Camera Calibration Simulation"
     echo "========================================="
     echo "Session:   $SESSION_ID"
     echo "Branch:    $GIT_BRANCH ($GIT_SHA)"

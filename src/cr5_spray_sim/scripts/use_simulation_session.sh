@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # ===========================================================================
-# V4: 接入当前活跃的 CR5 Spray V3.3.7 会话.
+# 接入当前活跃的 CR5 仿真会话.
 #
 # 用法: source use_simulation_session.sh
 # ===========================================================================
 ENV_FILE="/tmp/cr5_spray_simulation.env"
 
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: No active CR5 Spray V3.3.7 session ($ENV_FILE missing)" >&2
+  echo "ERROR: No active CR5 Spray calibration-baseline session ($ENV_FILE missing)" >&2
   echo "Start first: bash run_simulation.sh --gui --object=<type>" >&2
   return 1 2>/dev/null || exit 1
 fi
@@ -49,7 +49,7 @@ if [[ "$STATE" != "ACTIVE" ]]; then
   return 1 2>/dev/null || exit 1
 fi
 
-echo "Connected to CR5 Spray V3.3.7 session: ${CR5_SPRAY_SESSION_ID:-unknown}"
+echo "Connected to CR5 Spray calibration-baseline session: ${CR5_SPRAY_SESSION_ID:-unknown}"
 echo "  Branch:    ${CR5_SPRAY_BRANCH:-unknown}  HEAD: ${CR5_SPRAY_HEAD:-unknown}"
 echo "  State:     ${STATE}"
 echo "  ROS_MASTER_URI=${ROS_MASTER_URI}"

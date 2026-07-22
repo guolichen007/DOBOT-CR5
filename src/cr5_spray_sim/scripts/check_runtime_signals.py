@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-V3.3.7 Runtime Signals Health Check — 精确相机话题 + 喷枪信号。
+CR5 Calibration Runtime Signals Health Check — 精确相机话题 + 喷枪信号。
 
 关键修复 vs V3.3.6:
 - 相机话题写死精确路径，不再使用动态"第一个匹配"逻辑

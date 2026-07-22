@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-V4 Simulation Process Audit — 独立进程扫描 (不依赖 ROS).
+Calibration Simulation Process Audit — 独立进程扫描 (不依赖 ROS).
 
-V4 修复:
+Calibration 修复:
 - 去掉 rospy 依赖, 在 roscore 启动前运行
 - 只检查旧 gzserver / gzclient / scene launch 进程
 - 不再检查端口 (端口分配由 run_simulation.sh 唯一负责)

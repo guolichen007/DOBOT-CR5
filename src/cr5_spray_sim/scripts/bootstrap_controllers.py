@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-V3.3.7 Controller Bootstrap — 确定性顺序启动。
+CR5 Calibration Controller Bootstrap — 确定性顺序启动。
 
 在 Gazebo 已 unpause 后，顺序启动控制器：
 1. 调用 /gazebo/unpause_physics

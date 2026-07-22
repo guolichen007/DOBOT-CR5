@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-V3.3.7 CR5 Runtime Kinematic Chain Verification.
+CR5 Calibration CR5 Runtime Kinematic Chain Verification.
 
 在 controller 运行后验证完整 CR5 运动链:
 - joint1~joint6 接近 0

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-V5 标定目标内部 TF 发布 — 使用 StaticTransformBroadcaster.
+Calibration 标定目标内部 TF 发布 — 使用 StaticTransformBroadcaster.
 
 替代原来的 calibration_target_state_publisher (robot_state_publisher),
 只发布标定目标内部固定 frame, 不发布 CR5 Link1~Link6.
@@ -15,7 +15,7 @@ TF 树:
 
 world → object_frame 继续由 publish_object_pose.py 根据 Gazebo pose 发布.
 
-V5: 从 YAML 读取面板 pose, 不再硬编码 BODY_SX 等.
+Calibration: 从 YAML 读取面板 pose, 不再硬编码 BODY_SX 等.
     每个 face frame 的 local +Z 等于该面向外法向.
 """
 import math

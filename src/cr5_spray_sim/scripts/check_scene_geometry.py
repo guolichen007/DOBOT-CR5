@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-V3.3.7 Scene Geometry Absolute Check.
+CR5 Calibration Scene Geometry Absolute Check.
 
 在 paused 状态下验证所有模型绝对坐标，并设置 CR5 零位。
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-V5 标定目标几何一致性验证脚本.
+Calibration 标定目标几何一致性验证脚本.
 
 解析 YAML 和 SDF, 检查:
   - body size 一致
