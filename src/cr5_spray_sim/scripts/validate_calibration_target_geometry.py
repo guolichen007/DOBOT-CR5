@@ -23,8 +23,8 @@ import yaml
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PKG_DIR = os.path.dirname(SCRIPT_DIR)
 
-YAML_PATH = os.path.join(PKG_DIR, "config", "calibration_target_v1.yaml")
-SDF_PATH = os.path.join(PKG_DIR, "models", "calibration_target_v1", "model.sdf")
+YAML_PATH = os.path.join(PKG_DIR, "config", "calibration/calibration_target.yaml")
+SDF_PATH = os.path.join(PKG_DIR, "models", "calibration_target", "model.sdf")
 
 # YAML panel key → SDF link name + expected material
 PANEL_LINK_MAP = {

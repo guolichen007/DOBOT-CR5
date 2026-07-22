@@ -1,0 +1,205 @@
+<?xml version="1.0"?>
+<!--
+  Calibration Target V1 — 自包含 Gazebo SDF 模型 (V5).
+
+  V5 变更:
+  - 主体 0.34×0.28×0.24 m (为面板提供边距)
+  - 面板位置基于 PANEL_GAP=0.001 m
+  - 顶部偏置块缩小并偏移，不遮挡 Top AprilTag
+  - 吊索移到 Top 面板外侧
+
+  坐标:
+    +X: 正面 (ChArUco front)
+    +Y: 左侧 (ChArUco left)
+    +Z: 向上
+-->
+<sdf version="1.7">
+  <model name="simple_hanging_workpiece">
+    <static>true</static>
+
+    <!-- ============================================================ -->
+    <!-- 主体 0.34×0.28×0.24m                                          -->
+    <!-- ============================================================ -->
+    <link name="main_body">
+      <pose>0 0 0 0 0 0</pose>
+
+      <visual name="body_vis">
+        <geometry><box><size>0.34 0.28 0.24</size></box></geometry>
+        <material>
+          <ambient>0.55 0.55 0.57 1</ambient>
+          <diffuse>0.55 0.55 0.57 1</diffuse>
+        </material>
+      </visual>
+
+      <collision name="body_col">
+        <geometry><box><size>0.34 0.28 0.24</size></box></geometry>
+      </collision>
+    </link>
+
+    <!-- ============================================================ -->
+    <!-- 顶部偏置块 (非对称特征, 不遮挡 Top AprilTag)                    -->
+    <!-- size=0.06×0.05×0.04, pose=0.13 0.11 0.14                      -->
+    <!-- 与 Top 面板 (XY ±0.08) 至少保留 5mm 空隙                       -->
+    <!-- ============================================================ -->
+    <link name="top_offset_block">
+      <pose>0.13 0.11 0.14 0 0 0</pose>
+
+      <visual name="block_vis">
+        <geometry><box><size>0.06 0.05 0.04</size></box></geometry>
+        <material>
+          <ambient>0.92 0.45 0.08 1</ambient>
+          <diffuse>0.92 0.45 0.08 1</diffuse>
+        </material>
+      </visual>
+    </link>
+
+    <!-- ============================================================ -->
+    <!-- 面板 (DAE mesh, 1×1m XY 平面, UV 0→1, 双面)                   -->
+    <!-- pose 将 Z-normal 平面旋转到对应面方向, scale 匹配物理尺寸       -->
+    <!-- PANEL_GAP = 0.001 m                                           -->
+    <!-- ============================================================ -->
+
+    <!-- Front: ChArUco 8×6, 0.24×0.18m, 面向 +X -->
+    <link name="front_panel">
+      <pose>0.171 0 0 0 1.570796 0</pose>
+      <visual name="front_panel_vis">
+        <geometry>
+          <mesh>
+            <uri>model://calibration_target/meshes/panel_unit.dae</uri>
+            <scale>0.24 0.18 1.0</scale>
+          </mesh>
+        </geometry>
+        <cast_shadows>false</cast_shadows>
+        <material>
+          <script>
+            <uri>model://calibration_target/materials/scripts</uri>
+            <uri>model://calibration_target/materials/textures</uri>
+            <name>CR5/Calibration/CharucoFront</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+
+    <!-- Left: ChArUco 6×5, 0.16×0.12m, 面向 +Y -->
+    <link name="left_panel">
+      <pose>0 0.141 0 -1.570796 0 0</pose>
+      <visual name="left_panel_vis">
+        <geometry>
+          <mesh>
+            <uri>model://calibration_target/meshes/panel_unit.dae</uri>
+            <scale>0.16 0.12 1.0</scale>
+          </mesh>
+        </geometry>
+        <cast_shadows>false</cast_shadows>
+        <material>
+          <script>
+            <uri>model://calibration_target/materials/scripts</uri>
+            <uri>model://calibration_target/materials/textures</uri>
+            <name>CR5/Calibration/CharucoLeft</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+
+    <!-- Right: AprilTag 2×2, 0.22×0.18m, 面向 -Y -->
+    <link name="right_panel">
+      <pose>0 -0.141 0 1.570796 0 0</pose>
+      <visual name="right_panel_vis">
+        <geometry>
+          <mesh>
+            <uri>model://calibration_target/meshes/panel_unit.dae</uri>
+            <scale>0.22 0.18 1.0</scale>
+          </mesh>
+        </geometry>
+        <cast_shadows>false</cast_shadows>
+        <material>
+          <script>
+            <uri>model://calibration_target/materials/scripts</uri>
+            <uri>model://calibration_target/materials/textures</uri>
+            <name>CR5/Calibration/AprilTagRight</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+
+    <!-- Top: AprilTag, 0.16×0.16m, 面向 +Z -->
+    <link name="top_panel">
+      <pose>0 0 0.121 0 0 0</pose>
+      <visual name="top_panel_vis">
+        <geometry>
+          <mesh>
+            <uri>model://calibration_target/meshes/panel_unit.dae</uri>
+            <scale>0.16 0.16 1.0</scale>
+          </mesh>
+        </geometry>
+        <cast_shadows>false</cast_shadows>
+        <material>
+          <script>
+            <uri>model://calibration_target/materials/scripts</uri>
+            <uri>model://calibration_target/materials/textures</uri>
+            <name>CR5/Calibration/AprilTagTop</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+
+    <!-- Back: ChArUco 8×6, 0.24×0.18m, 面向 -X -->
+    <link name="back_panel">
+      <pose>-0.171 0 0 0 -1.570796 0</pose>
+      <visual name="back_panel_vis">
+        <geometry>
+          <mesh>
+            <uri>model://calibration_target/meshes/panel_unit.dae</uri>
+            <scale>0.24 0.18 1.0</scale>
+          </mesh>
+        </geometry>
+        <cast_shadows>false</cast_shadows>
+        <material>
+          <script>
+            <uri>model://calibration_target/materials/scripts</uri>
+            <uri>model://calibration_target/materials/textures</uri>
+            <name>CR5/Calibration/CharucoBack</name>
+          </script>
+        </material>
+      </visual>
+    </link>
+
+    <!-- ============================================================ -->
+    <!-- 吊索 + 横杆                                                    -->
+    <!-- hanger_y = ±0.115, cable z 范围 0.12~0.605, length=0.485      -->
+    <!-- ============================================================ -->
+    <link name="spreader_bar">
+      <pose>0 0 0.62 0 0 0</pose>
+      <visual name="bar_vis">
+        <geometry><box><size>0.03 0.30 0.03</size></box></geometry>
+        <material>
+          <ambient>0.40 0.40 0.42 1</ambient>
+        </material>
+      </visual>
+      <collision name="bar_col">
+        <geometry><box><size>0.03 0.30 0.03</size></box></geometry>
+      </collision>
+    </link>
+
+    <link name="left_cable">
+      <pose>0 -0.115 0.3625 0 0 0</pose>
+      <visual name="left_cable_vis">
+        <geometry><cylinder><radius>0.003</radius><length>0.485</length></cylinder></geometry>
+        <material>
+          <ambient>0.12 0.12 0.14 1</ambient>
+        </material>
+      </visual>
+    </link>
+
+    <link name="right_cable">
+      <pose>0 0.115 0.3625 0 0 0</pose>
+      <visual name="right_cable_vis">
+        <geometry><cylinder><radius>0.003</radius><length>0.485</length></cylinder></geometry>
+        <material>
+          <ambient>0.12 0.12 0.14 1</ambient>
+        </material>
+      </visual>
+    </link>
+
+  </model>
+</sdf>

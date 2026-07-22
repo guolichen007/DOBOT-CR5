@@ -12,7 +12,7 @@ auto_off_timeout_s: 0.25          # 连续丢失目标后自动关枪
 
 # 目标
 target_model: "simple_hanging_workpiece"  # Gazebo 模型名
-target_frame: "object_frame"              # 目标 TF frame (由 object_pose_tf_v31 发布)
+target_frame: "object_frame"              # 目标 TF frame (由 publish_object_pose 发布)
 
 # Paint Patch 参数
 paint:

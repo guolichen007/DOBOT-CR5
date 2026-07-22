@@ -5,9 +5,10 @@ find_package(catkin REQUIRED)
 
 catkin_package()
 
-# V5: Python package — cr5_spray_sim.aruco_compat
+# Python package — cr5_spray_sim.aruco_compat
 catkin_python_setup()
 
+# Resource directories
 install(DIRECTORY launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
@@ -28,85 +29,44 @@ install(DIRECTORY rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-install(DIRECTORY media
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-)
-
 install(DIRECTORY models
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-# Python scripts
+# Python scripts — 标定与仿真核心
 catkin_install_python(PROGRAMS
-  scripts/spawn_scene_cameras.py
-  scripts/object_yaw_controller.py
-  scripts/validate_scene.py
-  scripts/execution_safety_check.py
-  scripts/spawn_cameras_v2.py
-  scripts/object_yaw_v2.py
-  scripts/scene_tf_v2.py
-  scripts/compute_look_at.py
-  scripts/scene_v2_preflight.py
-  scripts/object_pose_tf_v2.py
-  # V3.1
-  scripts/spawn_cameras_v31.py
-  scripts/object_yaw_v31.py
-  scripts/object_pose_tf_v31.py
-  # V3.3
-  scripts/spray_simulator_v33.py
-  # V3.3.1
-  scripts/check_tf_once_v331.py
-  scripts/check_scene_v331.py
-  # V3.3.2
-  scripts/initialize_cr5_pose_v332.py
-  scripts/check_scene_v332.py
-  # V3.3.3
-  scripts/check_cr5_runtime_ready_v333.py
-  scripts/unpause_and_verify_clock_v333.py
-  scripts/check_camera_streams_v333.py
-  scripts/gazebo_spray_visual_v333.py
-  # V3.3.4
-  scripts/hold_cr5_zero_v334.py
-  # V3.3.5
-  scripts/check_controllers_loaded_v335.py
-  scripts/start_cr5_controllers_v335.py
-  scripts/capture_scene_snapshot_v335.py
-  # V3.3.6
-  scripts/wait_scene_models_v336.py
-  scripts/wait_controllers_running_v336.py
-  scripts/check_clock_v336.py
-  scripts/check_model_poses_v336.py
-  scripts/check_runtime_signals_v336.py
-  # V3.3.7
-  scripts/audit_sim_processes_v337.py
-  scripts/check_scene_geometry_v337.py
-  scripts/bootstrap_controllers_v337.py
-  scripts/check_scene_runtime_v337.py
-  scripts/check_runtime_signals_v337.py
-  # Calibration Target V1
-  # aruco_compat.py → catkin Python 包 (setup.py + src/cr5_spray_sim/)
-  scripts/validate_calibration_target_visibility.py
-  scripts/calibrate_three_fixed_cameras.py
-  # V4
-  scripts/publish_calibration_target_tf.py
-  # V5
+  # 相机与对象
+  scripts/spawn_fixed_cameras.py
+  scripts/control_object_yaw.py
+  scripts/publish_object_pose.py
+  # 场景引导
+  scripts/audit_sim_processes.py
+  scripts/bootstrap_controllers.py
+  scripts/initialize_robot_pose.py
+  scripts/hold_robot_zero.py
+  scripts/wait_scene_models.py
+  scripts/wait_controllers_running.py
+  scripts/capture_scene_snapshot.py
+  # 场景检查
+  scripts/check_scene_geometry.py
+  scripts/check_scene_runtime.py
+  scripts/check_runtime_signals.py
+  scripts/check_sim_clock.py
+  # 喷涂
+  scripts/spray_simulator.py
+  # 标定目标
+  scripts/publish_calibration_target_frames.py
   scripts/validate_calibration_target_geometry.py
+  scripts/validate_calibration_visibility.py
+  scripts/estimate_camera_extrinsics.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-# Shell launchers and tools
+# Shell tools
 install(PROGRAMS
-  scripts/run_scene_v2.sh
-  scripts/run_scene_v31_simple.sh
-  scripts/run_scene_v33_spray.sh
-  scripts/run_scene_v337.sh
-  scripts/use_spray_session_v33.sh
-  # V4
-  scripts/use_spray_session_v337.sh
-  scripts/run_in_spray_session_v337.sh
-  scripts/run_calibration_texture_smoke.sh
-  # V3.3.3
-  scripts/show_camera_status_v333.sh
-  scripts/open_spray_rviz_v333.sh
+  scripts/run_simulation.sh
+  scripts/use_simulation_session.sh
+  scripts/run_in_simulation_session.sh
+  scripts/validate_calibration_texture.sh
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
