@@ -25,7 +25,7 @@ install(DIRECTORY rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-install(DIRECTORY materials
+install(DIRECTORY media
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
@@ -77,6 +77,7 @@ catkin_install_python(PROGRAMS
   scripts/check_scene_runtime_v337.py
   scripts/check_runtime_signals_v337.py
   # Calibration Target V1
+  scripts/aruco_compat.py
   scripts/validate_calibration_target_visibility.py
   scripts/calibrate_three_fixed_cameras.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

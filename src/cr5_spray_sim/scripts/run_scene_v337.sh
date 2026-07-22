@@ -127,15 +127,23 @@ PKG_DIR="$(rospack find cr5_spray_sim)"
 export GAZEBO_MODEL_PATH="$PKG_DIR/models:${GAZEBO_MODEL_PATH:-}"
 export GAZEBO_RESOURCE_PATH="$PKG_DIR:${GAZEBO_RESOURCE_PATH:-}"
 
-# 启动前验证标定资源 (非阻塞检查)
-_test_calib_file() {
+# 启动前验证标定资源 (阻塞式失败)
+require_file() {
     if [[ ! -f "$1" ]]; then
-        echo "WARNING: calibration resource not found: $1" >&2
+        echo "ERROR: required calibration resource missing: $1" >&2
+        exit 12
     fi
 }
 if [[ "$OBJECT" == "calibration_target_v1" ]]; then
-    _test_calib_file "$PKG_DIR/materials/scripts/cr5_calibration_target.material"
-    _test_calib_file "$PKG_DIR/materials/textures/calibration/charuco_front_v1.png"
+    require_file "$PKG_DIR/media/materials/scripts/cr5_calibration_target.material"
+    require_file "$PKG_DIR/media/materials/textures/charuco_front_v1.png"
+    require_file "$PKG_DIR/media/materials/textures/charuco_left_v1.png"
+    require_file "$PKG_DIR/media/materials/textures/charuco_back_v1.png"
+    require_file "$PKG_DIR/media/materials/textures/apriltag_right_v1.png"
+    require_file "$PKG_DIR/media/materials/textures/apriltag_top_v1.png"
+    echo "GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH"
+    echo "Calibration media tree:"
+    find "$PKG_DIR/media/materials" -maxdepth 2 -type f -printf '  %p\n' | sort
 fi
 
 # ---- Session 设置 ----

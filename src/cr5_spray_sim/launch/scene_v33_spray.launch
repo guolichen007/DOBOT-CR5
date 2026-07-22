@@ -94,7 +94,8 @@
     name="calibration_target_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
     respawn="false" output="screen">
     <param name="publish_frequency" value="5.0"/>
-    <remap from="robot_description" to="hanging_workpiece_description"/>
+    <param name="robot_description"
+      command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/objects/calibration_target_v1.xacro"/>
   </node>
 
   <!-- Simple Goalpost Frame -->
