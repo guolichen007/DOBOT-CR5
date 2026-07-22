@@ -1,543 +1,421 @@
 #!/usr/bin/env python3
 """
-V1 三固定相机初始外参标定 — 骨架 (Stage 1).
+V2 三固定相机初始外参标定 (P1 修复版).
 
-从标定目标的多面 ChArUco/AprilTag 建立 2D-3D 对应，solvePnPRansac 求解
-每台相机相对 calibration_target_frame 的位姿，与 Gazebo 真值 TF 对比验证。
-
-仅建立骨架：
-- 不覆盖正式 TF
-- 不推进 bundle adjustment
-- 不更改现有相机配置
-
-用法:
-  rosrun cr5_spray_sim calibrate_three_fixed_cameras.py \
-    --config config/calibration_target_v1.yaml \
-    --output artifacts/calibration_target_v1/
-
-输出:
-  artifacts/calibration_target_v1/
-  ├── observations/          # 每台相机原始检测
-  ├── initial_extrinsics.yaml
-  ├── reprojection_report.json
-  └── gazebo_truth_comparison.json
+P1 修复:
+- 读取 CameraInfo D (畸变系数) + header.frame_id (optical frame)
+- ChArUco: 自定义 ID board (100-123, 200-214, 300-323) + 手动匹配
+- AprilTag Right: 2×2 真实网格位置 (85mm 间距)
+- PnP: 单方形用 IPPE_SQUARE, 多点用 IPPE/EPNP + RefineLM
+- TF: T_camera_target = T_camera_face × inv(T_target_face)
+- Gazebo 真值: optical_frame ← calibration_target_frame
 """
-import sys
-import os
-import json
-import math
-import time
-import yaml
-import numpy as np
-import cv2
-import rospy
-import rospkg
-import tf2_ros
+import sys, os, json, time, math, yaml
+import cv2, numpy as np
+import rospy, rospkg, tf2_ros
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
 from cv2 import aruco
 from geometry_msgs.msg import TransformStamped
 
-
 CAMERAS = {
     "cam_front_left": {
         "color": "/cam_front_left/camera/color/image_raw",
         "info":  "/cam_front_left/camera/color/camera_info",
-        "frame": "cam_front_left_link",
+        "link":  "cam_front_left_link",
     },
     "cam_front_right": {
         "color": "/cam_front_right/camera/color/image_raw",
         "info":  "/cam_front_right/camera/color/camera_info",
-        "frame": "cam_front_right_link",
+        "link":  "cam_front_right_link",
     },
     "cam_rear": {
         "color": "/cam_rear/camera/color/image_raw",
         "info":  "/cam_rear/camera/color/camera_info",
-        "frame": "cam_rear_link",
+        "link":  "cam_rear_link",
     },
 }
 
-# 标定板物理参数 (引用 calibration_target_v1.yaml)
-CHARUCO_FRONT = {
-    "squares_x": 8, "squares_y": 6,
-    "square_length": 0.027, "marker_length": 0.020,
-    "dict": aruco.DICT_5X5_1000,
-    "marker_ids": list(range(100, 124)),
-    # 面板中心在 calibration_target_frame 中的位姿
-    "panel_center_xyz": [0.1515, 0.0, 0.0],  # 正面板外表面
-    "panel_normal": [1.0, 0.0, 0.0],          # +X
+# === ChArUco 面板定义 ===
+CHARUCO_PANELS = {
+    "front": {
+        "board": None, "id_start": 100, "sx": 8, "sy": 6,
+        "sq_m": 0.027, "mk_m": 0.020, "dict_id": aruco.DICT_5X5_1000,
+        "face_frame": "calibration_target_front_frame",
+        "panel_normal": np.array([1.0, 0.0, 0.0]),
+    },
+    "left": {
+        "board": None, "id_start": 200, "sx": 6, "sy": 5,
+        "sq_m": 0.022, "mk_m": 0.016, "dict_id": aruco.DICT_5X5_1000,
+        "face_frame": "calibration_target_left_frame",
+        "panel_normal": np.array([0.0, 1.0, 0.0]),
+    },
+    "back": {
+        "board": None, "id_start": 300, "sx": 8, "sy": 6,
+        "sq_m": 0.027, "mk_m": 0.020, "dict_id": aruco.DICT_5X5_1000,
+        "face_frame": "calibration_target_back_frame",
+        "panel_normal": np.array([-1.0, 0.0, 0.0]),
+    },
 }
 
-CHARUCO_LEFT = {
-    "squares_x": 6, "squares_y": 5,
-    "square_length": 0.022, "marker_length": 0.016,
-    "dict": aruco.DICT_5X5_1000,
-    "marker_ids": list(range(200, 215)),
-    "panel_center_xyz": [0.0, 0.1115, 0.0],
-    "panel_normal": [0.0, 1.0, 0.0],
-}
-
+# AprilTag 定义
 APRILTAG_RIGHT = {
-    "tag_size": 0.07, "tag_gap": 0.015,
-    "dict": aruco.DICT_APRILTAG_36h11,
+    "tag_size": 0.07, "tag_gap": 0.015, "center_dist": 0.085,
     "tag_ids": [4, 5, 6, 7],
-    "layout": [[4, 5], [6, 7]],  # 2x2 grid
-    "panel_center_xyz": [0.0, -0.1115, 0.0],
-    "panel_normal": [0.0, -1.0, 0.0],
+    "positions": {
+        4: (-0.0425,  0.0425, 0.0),   # TL
+        5: ( 0.0425,  0.0425, 0.0),   # TR
+        6: (-0.0425, -0.0425, 0.0),   # BL
+        7: ( 0.0425, -0.0425, 0.0),   # BR
+    },
+    "face_frame": "calibration_target_right_frame",
 }
 
 APRILTAG_TOP = {
     "tag_size": 0.12,
-    "dict": aruco.DICT_APRILTAG_36h11,
     "tag_ids": [8],
-    "panel_center_xyz": [0.0, 0.0, 0.0915],
-    "panel_normal": [0.0, 0.0, 1.0],
+    "positions": {8: (0.0, 0.0, 0.0)},
+    "face_frame": "calibration_target_top_frame",
 }
 
-# PnP 参数
-RANSAC_THRESH = 2.0     # px
+RANSAC_THRESH = 2.0
 MIN_INLIERS = 10
-TARGET_REPROJ_ERROR = 1.0  # px
-MAX_REPROJ_ERROR = 2.0     # px — 超过标记为失败
+MAX_REPROJ = 2.0
+
+# 初始化 ChArUco boards
+for k, p in CHARUCO_PANELS.items():
+    dict_obj = aruco.getPredefinedDictionary(p["dict_id"])
+    p["board"] = aruco.CharucoBoard_create(p["sx"], p["sy"], p["sq_m"], p["mk_m"], dict_obj)
+    p["expected_ids"] = set(range(p["id_start"], p["id_start"] + p["sx"] * p["sy"]))
 
 
 class CameraCalibrator:
-    def __init__(self, config_path, output_dir):
+    def __init__(self, output_dir):
         self.bridge = CvBridge()
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
-        os.makedirs(os.path.join(output_dir, "observations"), exist_ok=True)
 
-        # Load YAML config
-        with open(config_path) as f:
-            self.config = yaml.safe_load(f)
-
-        # TF buffer for Gazebo truth
         self.tf_buf = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buf)
-        rospy.sleep(1.0)
+        rospy.sleep(1.5)
 
-        # ChArUco boards for front and left
-        self.front_board = aruco.CharucoBoard(
-            (CHARUCO_FRONT["squares_x"], CHARUCO_FRONT["squares_y"]),
-            CHARUCO_FRONT["square_length"],
-            CHARUCO_FRONT["marker_length"],
-            aruco.getPredefinedDictionary(CHARUCO_FRONT["dict"]),
-        )
-        self.left_board = aruco.CharucoBoard(
-            (CHARUCO_LEFT["squares_x"], CHARUCO_LEFT["squares_y"]),
-            CHARUCO_LEFT["square_length"],
-            CHARUCO_LEFT["marker_length"],
-            aruco.getPredefinedDictionary(CHARUCO_LEFT["dict"]),
-        )
+    def capture(self, cam_name):
+        topics = CAMERAS[cam_name]
+        try:
+            color_msg = rospy.wait_for_message(topics["color"], Image, timeout=10.0)
+            info_msg  = rospy.wait_for_message(topics["info"],  CameraInfo, timeout=10.0)
+        except rospy.ROSException:
+            return None, None, None, None
 
-        # AprilTag detectors
-        self.right_tag_dict = aruco.getPredefinedDictionary(APRILTAG_RIGHT["dict"])
-        self.top_tag_dict = aruco.getPredefinedDictionary(APRILTAG_TOP["dict"])
-        det_params = aruco.DetectorParameters()
-        self.right_detector = aruco.ArucoDetector(self.right_tag_dict, det_params)
-        self.top_detector = aruco.ArucoDetector(self.top_tag_dict, det_params)
+        cv_img = self.bridge.imgmsg_to_cv2(color_msg, "bgr8")
+        K = np.array(info_msg.K).reshape(3, 3)
+        D = np.array(info_msg.D) if info_msg.D else np.zeros(4)
+        optical_frame = info_msg.header.frame_id
+        return cv_img, K, D, optical_frame
 
-        self.all_results = {}
+    def detect_charuco(self, gray, panel_key):
+        """检测单个 ChArUco 面板."""
+        panel = CHARUCO_PANELS[panel_key]
+        board = panel["board"]
+        dict_obj = board.dictionary
 
-    def get_board_object_points(self, board_type, marker_ids):
-        """获取标定板上 Markers 对应的 3D 物体点."""
-        if board_type == "front":
-            board = self.front_board
-            ids_to_use = [i for i in marker_ids if i in CHARUCO_FRONT["marker_ids"]]
-        else:
-            board = self.left_board
-            ids_to_use = [i for i in marker_ids if i in CHARUCO_LEFT["marker_ids"]]
+        params = aruco.DetectorParameters_create()
+        params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+        corners, ids, rejected = aruco.detectMarkers(gray, dict_obj, parameters=params)
 
-        if not ids_to_use:
+        if ids is None:
             return None, None
 
-        # 获取每个 marker 的四角 3D 坐标
-        obj_points = []
-        for mid in ids_to_use:
-            marker_corners = board.getObjPoints()[mid - min(board.ids.flatten())]
-            if marker_corners is not None:
-                obj_points.extend(marker_corners.tolist())
+        ids_flat = [int(i) for i in ids.flatten()]
+        matched = [(i, ids_flat[i]) for i in range(len(ids_flat))
+                   if ids_flat[i] in panel["expected_ids"]]
 
-        return np.array(obj_points, dtype=np.float32), ids_to_use
+        if len(matched) < 2:
+            return None, None
 
-    def get_apriltag_object_points(self, panel_type, tag_ids):
-        """获取 AprilTag 的 3D 物体点 (tag 四角)."""
-        config = APRILTAG_RIGHT if panel_type == "right" else APRILTAG_TOP
-        tag_size = config["tag_size"]
-        half = tag_size / 2.0
+        matched_idx = [m[0] for m in matched]
+        matched_ids_arr = np.array([[ids_flat[i]] for i in matched_idx], dtype=np.int32)
+        matched_corners = tuple([corners[i] for i in matched_idx])
 
-        obj_points = []
-        valid_ids = []
+        # ChArUco corner interpolation
+        ret, charuco_corners, charuco_ids = aruco.interpolateCornersCharuco(
+            matched_corners, matched_ids_arr, gray, board)
+        if charuco_ids is None or len(charuco_ids) < 4:
+            return None, None
 
-        for tid in tag_ids:
-            if tid not in config["tag_ids"]:
-                continue
+        # 3D 点: 直接用 board 的 chessboard corners (objPoints)
+        board_pts = board.chessboardCorners  # shape: (48, 1, 3) for 8×6
+        charuco_ids_flat = [int(i) for i in charuco_ids.flatten()]
+        obj_pts = np.array([board_pts[i][0] for i in charuco_ids_flat], dtype=np.float32)
+        img_pts = charuco_corners.reshape(-1, 2).astype(np.float32)
 
-            if panel_type == "right":
-                # 计算在 2x2 网格中的位置
-                layout = config["layout"]
-                for r, row in enumerate(layout):
-                    for c, val in enumerate(row):
-                        if val == tid:
-                            cx = (c - 0.5) * (tag_size + config["tag_gap"])
-                            cy = (0.5 - r) * (tag_size + config["tag_gap"])
-                            obj_points.append([cx - half, cy + half, 0.0])
-                            obj_points.append([cx + half, cy + half, 0.0])
-                            obj_points.append([cx + half, cy - half, 0.0])
-                            obj_points.append([cx - half, cy - half, 0.0])
-                            valid_ids.append(tid)
-            else:  # top: single tag
-                obj_points.append([-half, half, 0.0])
-                obj_points.append([half, half, 0.0])
-                obj_points.append([half, -half, 0.0])
-                obj_points.append([-half, -half, 0.0])
-                valid_ids.append(tid)
+        return obj_pts, img_pts
 
-        return np.array(obj_points, dtype=np.float32), valid_ids
+    def detect_apriltag_right(self, gray):
+        """检测 Right AprilTag 2×2 grid."""
+        params = aruco.DetectorParameters_create()
+        params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+        tag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+        detector = aruco.ArucoDetector(tag_dict, params)
+        corners, ids, rejected = detector.detectMarkers(gray)
 
-    def detect_and_solve(self, cam_name, cv_img, K):
-        """对单帧执行检测和 PnP 求解."""
-        gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-        result = {
-            "camera": cam_name,
-            "stamp": rospy.get_time(),
-            "solutions": [],
-        }
+        if ids is None:
+            return None, None
 
-        # === ChArUco detection for front and left ===
-        aruco_dict = aruco.getPredefinedDictionary(CHARUCO_FRONT["dict"])
-        aruco_params = aruco.DetectorParameters()
-        aruco_params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
-
-        corners, ids, _ = aruco.detectMarkers(gray, aruco_dict, parameters=aruco_params)
-
-        if ids is not None:
-            ids_flat = [int(i) for i in ids.flatten()]
-
-            # 尝试正面 ChArUco
-            front_ids = [i for i in ids_flat if i in CHARUCO_FRONT["marker_ids"]]
-            if front_ids:
-                self._solve_charuco_pnp(
-                    result, gray, corners, ids, "front", front_ids, K,
-                    CHARUCO_FRONT["panel_center_xyz"], CHARUCO_FRONT["panel_normal"])
-
-            # 尝试左面 ChArUco
-            left_ids = [i for i in ids_flat if i in CHARUCO_LEFT["marker_ids"]]
-            if left_ids:
-                self._solve_charuco_pnp(
-                    result, gray, corners, ids, "left", left_ids, K,
-                    CHARUCO_LEFT["panel_center_xyz"], CHARUCO_LEFT["panel_normal"])
-
-        # === AprilTag detection for right and top ===
-        right_corners, right_ids, _ = self.right_detector.detectMarkers(gray)
-        if right_ids is not None:
-            rids = [int(i) for i in right_ids.flatten() if i in APRILTAG_RIGHT["tag_ids"]]
-            if rids:
-                self._solve_apriltag_pnp(
-                    result, right_corners, right_ids, "right", rids, K,
-                    APRILTAG_RIGHT["panel_center_xyz"], APRILTAG_RIGHT["panel_normal"])
-
-        top_corners, top_ids, _ = self.top_detector.detectMarkers(gray)
-        if top_ids is not None:
-            tids = [int(i) for i in top_ids.flatten() if i in APRILTAG_TOP["tag_ids"]]
-            if tids:
-                self._solve_apriltag_pnp(
-                    result, top_corners, top_ids, "top", tids, K,
-                    APRILTAG_TOP["panel_center_xyz"], APRILTAG_TOP["panel_normal"])
-
-        return result
-
-    def _solve_charuco_pnp(self, result, gray, all_corners, all_ids,
-                           panel_name, marker_ids, K, panel_center, panel_normal):
-        """ChArUco PnP 求解."""
-        # 只取对应面的 markers
-        valid_indices = []
-        valid_marker_ids = []
-        for i, mid in enumerate(all_ids.flatten()):
-            if int(mid) in marker_ids:
-                valid_indices.append(i)
-                valid_marker_ids.append(int(mid))
-
-        if len(valid_indices) < 2:
-            return
-
-        valid_corners = [all_corners[i] for i in valid_indices]
-
-        # Interpolate ChArUco corners
-        if panel_name == "front":
-            board = self.front_board
-        else:
-            board = self.left_board
-
-        # 构建针对面的 board points
-        # 简单近似：使用 marker corners 直接匹配
+        ids_flat = [int(i) for i in ids.flatten()]
         obj_pts_list = []
         img_pts_list = []
 
-        for idx, mid in zip(valid_indices, valid_marker_ids):
-            marker_obj = board.getObjPoints()[mid - min(board.ids.flatten())]
-            marker_img = all_corners[idx][0]
-            obj_pts_list.append(marker_obj)
-            img_pts_list.append(marker_img)
+        for i, tid in enumerate(ids_flat):
+            if tid not in APRILTAG_RIGHT["tag_ids"]:
+                continue
+
+            pos = APRILTAG_RIGHT["positions"][tid]
+            half = APRILTAG_RIGHT["tag_size"] / 2.0
+            # Tag 四角 (centered at panel origin, Z=0, counter-clockwise from top-left)
+            tag_obj = np.array([
+                [pos[0] - half, pos[1] + half, 0.0],
+                [pos[0] + half, pos[1] + half, 0.0],
+                [pos[0] + half, pos[1] - half, 0.0],
+                [pos[0] - half, pos[1] - half, 0.0],
+            ], dtype=np.float32)
+            obj_pts_list.append(tag_obj)
+            img_pts_list.append(corners[i][0])
 
         if not obj_pts_list:
-            return
+            return None, None
 
-        obj_pts = np.vstack(obj_pts_list).astype(np.float32)
-        img_pts = np.vstack(img_pts_list).astype(np.float32)
+        return np.vstack(obj_pts_list).astype(np.float32), np.vstack(img_pts_list).astype(np.float32)
 
-        if len(obj_pts) < 4:
-            return
+    def detect_apriltag_top(self, gray):
+        """检测 Top AprilTag single."""
+        params = aruco.DetectorParameters_create()
+        params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+        tag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
+        detector = aruco.ArucoDetector(tag_dict, params)
+        corners, ids, rejected = detector.detectMarkers(gray)
 
-        # PnP without panel offset (solve directly)
-        dist_coeffs = np.zeros((4, 1), dtype=np.float32)
+        if ids is None:
+            return None, None
 
-        try:
-            success, rvec, tvec, inliers = cv2.solvePnPRansac(
-                obj_pts, img_pts, K, dist_coeffs,
-                reprojectionError=RANSAC_THRESH,
-                flags=cv2.SOLVEPNP_IPPE_SQUARE,
-            )
-        except Exception as e:
-            rospy.logwarn("%s PnP failed: %s", panel_name, e)
-            return
+        ids_flat = [int(i) for i in ids.flatten()]
+        if 8 not in ids_flat:
+            return None, None
 
-        if not success or inliers is None:
-            return
+        idx = ids_flat.index(8)
+        half = APRILTAG_TOP["tag_size"] / 2.0
+        tag_obj = np.array([
+            [-half,  half, 0.0],
+            [ half,  half, 0.0],
+            [ half, -half, 0.0],
+            [-half, -half, 0.0],
+        ], dtype=np.float32)
+
+        return tag_obj, corners[idx][0].astype(np.float32)
+
+    def solve_pnp(self, obj_pts, img_pts, K, D):
+        """PnP 求解: 多点用 IPPE/EPNP, 单 tag 用 IPPE_SQUARE."""
+        n_pts = len(obj_pts)
+        if n_pts < 4:
+            return None, None, None
+
+        if n_pts == 4:
+            flag = cv2.SOLVEPNP_IPPE_SQUARE
+        else:
+            flag = cv2.SOLVEPNP_IPPE
+
+        success, rvec, tvec, inliers = cv2.solvePnPRansac(
+            obj_pts, img_pts, K, D,
+            reprojectionError=RANSAC_THRESH,
+            flags=flag,
+        )
+
+        if not success or inliers is None or len(inliers) < MIN_INLIERS:
+            return None, None, None
+
+        # Refine with LM
+        obj_in = obj_pts[inliers.flatten()]
+        img_in = img_pts[inliers.flatten()]
+        rvec2, tvec2 = cv2.solvePnPRefineLM(obj_in, img_in, K, D, rvec, tvec)
 
         # 重投影误差
-        obj_pts_inlier = obj_pts[inliers.flatten()]
-        img_pts_inlier = img_pts[inliers.flatten()]
-        projected, _ = cv2.projectPoints(obj_pts_inlier, rvec, tvec, K, dist_coeffs)
-        reproj_errors = np.linalg.norm(img_pts_inlier - projected.reshape(-1, 2), axis=1)
-        mean_error = np.mean(reproj_errors)
+        projected, _ = cv2.projectPoints(obj_in, rvec2, tvec2, K, D)
+        errors = np.linalg.norm(img_in - projected.reshape(-1, 2), axis=1)
 
-        solution = {
-            "panel": panel_name,
-            "type": "charuco",
-            "marker_ids": valid_marker_ids,
-            "inliers": len(inliers),
-            "rvec": rvec.flatten().tolist(),
-            "tvec": tvec.flatten().tolist(),
-            "mean_reprojection_error_px": round(float(mean_error), 4),
-            "pass": mean_error <= MAX_REPROJ_ERROR and len(inliers) >= MIN_INLIERS,
-        }
-        result["solutions"].append(solution)
+        return rvec2, tvec2, {"inliers": len(inliers), "n_pts": n_pts,
+                               "rmse_px": float(np.sqrt(np.mean(errors**2))),
+                               "max_error_px": float(np.max(errors)),
+                               "pass": np.sqrt(np.mean(errors**2)) <= MAX_REPROJ}
 
-        rospy.loginfo("%s: %s PnP — inliers=%d error=%.3fpx %s",
-                      result["camera"], panel_name,
-                      len(inliers), mean_error,
-                      "PASS" if solution["pass"] else "FAIL")
-
-    def _solve_apriltag_pnp(self, result, tag_corners, tag_ids,
-                            panel_name, matched_ids, K, panel_center, panel_normal):
-        """AprilTag PnP 求解."""
-        obj_pts_list = []
-        img_pts_list = []
-
-        for i, (corner, tid) in enumerate(zip(tag_corners, tag_ids.flatten())):
-            if int(tid) not in matched_ids:
-                continue
-
-            half = (APRILTAG_RIGHT["tag_size"] if panel_name == "right"
-                    else APRILTAG_TOP["tag_size"]) / 2.0
-
-            # Tag corners in object space (planar, Z=0)
-            tag_obj = np.array([
-                [-half, half, 0.0],
-                [half, half, 0.0],
-                [half, -half, 0.0],
-                [-half, -half, 0.0],
-            ], dtype=np.float32)
-
-            obj_pts_list.append(tag_obj)
-            img_pts_list.append(corner[0])
-
-        if not obj_pts_list:
-            return
-
-        obj_pts = np.vstack(obj_pts_list).astype(np.float32)
-        img_pts = np.vstack(img_pts_list).astype(np.float32)
-
-        if len(obj_pts) < 4:
-            return
-
-        dist_coeffs = np.zeros((4, 1), dtype=np.float32)
-
-        try:
-            success, rvec, tvec, inliers = cv2.solvePnPRansac(
-                obj_pts, img_pts, K, dist_coeffs,
-                reprojectionError=RANSAC_THRESH,
-                flags=cv2.SOLVEPNP_IPPE_SQUARE,
-            )
-        except Exception as e:
-            rospy.logwarn("%s AprilTag PnP failed: %s", panel_name, e)
-            return
-
-        if not success or inliers is None:
-            return
-
-        obj_pts_inlier = obj_pts[inliers.flatten()]
-        img_pts_inlier = img_pts[inliers.flatten()]
-        projected, _ = cv2.projectPoints(obj_pts_inlier, rvec, tvec, K, dist_coeffs)
-        reproj_errors = np.linalg.norm(img_pts_inlier - projected.reshape(-1, 2), axis=1)
-        mean_error = np.mean(reproj_errors)
-
-        solution = {
-            "panel": panel_name,
-            "type": "apriltag",
-            "tag_ids": matched_ids,
-            "inliers": len(inliers),
-            "rvec": rvec.flatten().tolist(),
-            "tvec": tvec.flatten().tolist(),
-            "mean_reprojection_error_px": round(float(mean_error), 4),
-            "pass": mean_error <= MAX_REPROJ_ERROR and len(inliers) >= MIN_INLIERS,
-        }
-        result["solutions"].append(solution)
-
-    def get_gazebo_truth(self, cam_name):
-        """获取 Gazebo 真值: 相机 frame → calibration_target_frame."""
+    def get_target_face_tf(self, face_frame):
+        """从 TF 获取 calibration_target_frame → face_frame 的变换."""
         try:
             ts = self.tf_buf.lookup_transform(
-                "calibration_target_frame",
-                CAMERAS[cam_name]["frame"],
-                rospy.Time(0),
-                rospy.Duration(5.0),
-            )
+                "calibration_target_frame", face_frame,
+                rospy.Time(0), rospy.Duration(5.0))
             t = ts.transform.translation
             q = ts.transform.rotation
-            return {
-                "tx": t.x, "ty": t.y, "tz": t.z,
-                "qx": q.x, "qy": q.y, "qz": q.z, "qw": q.w,
-            }
+            return np.array([t.x, t.y, t.z]), np.array([q.x, q.y, q.z, q.w])
         except Exception as e:
-            rospy.logwarn("TF truth for %s: %s", cam_name, e)
+            rospy.logwarn("TF %s→%s: %s", "calibration_target_frame", face_frame, e)
+            return None, None
+
+    def get_gazebo_truth(self, optical_frame):
+        """Gazebo 真值: optical_frame → calibration_target_frame."""
+        try:
+            ts = self.tf_buf.lookup_transform(
+                optical_frame, "calibration_target_frame",
+                rospy.Time(0), rospy.Duration(5.0))
+            t = ts.transform.translation
+            q = ts.transform.rotation
+            return {"tx": t.x, "ty": t.y, "tz": t.z,
+                    "qx": q.x, "qy": q.y, "qz": q.z, "qw": q.w}
+        except Exception as e:
             return None
 
-    def compare_with_truth(self, tvec, rvec, truth):
-        """比较 PnP 结果与 Gazebo 真值."""
-        if truth is None:
-            return None
+    def rvec_tvec_to_cam_target(self, rvec, tvec, face_frame):
+        """将 face-local PnP 结果转换为 camera→target 位姿."""
+        R_cam_face, _ = cv2.Rodrigues(rvec)
+        T_cam_face = np.eye(4)
+        T_cam_face[:3, :3] = R_cam_face
+        T_cam_face[:3, 3] = tvec.flatten()
 
-        t_diff = np.linalg.norm([
-            tvec[0] - truth["tx"],
-            tvec[1] - truth["ty"],
-            tvec[2] - truth["tz"],
-        ])
+        face_pos, face_quat = self.get_target_face_tf(face_frame)
+        if face_pos is None:
+            return None, None
 
-        return {
-            "translation_diff_m": round(float(t_diff), 6),
-        }
+        from tf.transformations import quaternion_matrix
+        T_target_face = quaternion_matrix([
+            face_quat[0], face_quat[1], face_quat[2], face_quat[3]])
+        T_target_face[:3, 3] = face_pos
+
+        # T_camera_target = T_camera_face × inv(T_target_face)
+        T_camera_target = T_cam_face @ np.linalg.inv(T_target_face)
+
+        rvec_ct = cv2.Rodrigues(T_camera_target[:3, :3])[0]
+        tvec_ct = T_camera_target[:3, 3]
+        return rvec_ct.flatten().tolist(), tvec_ct.flatten().tolist()
+
+    def process_camera(self, cam_name):
+        """处理单台相机."""
+        rospy.loginfo("=== %s ===", cam_name)
+        cv_img, K, D, optical_frame = self.capture(cam_name)
+
+        if cv_img is None:
+            return {"camera": cam_name, "error": "capture_timeout",
+                    "optical_frame": optical_frame}
+
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+        results = {"camera": cam_name, "optical_frame": optical_frame,
+                   "K": K.tolist(), "D": D.tolist(), "solutions": []}
+
+        # ChArUco: front, left, back
+        for face_key in ["front", "left", "back"]:
+            obj_pts, img_pts = self.detect_charuco(gray, face_key)
+            if obj_pts is None:
+                continue
+
+            rvec, tvec, stats = self.solve_pnp(obj_pts, img_pts, K, D)
+            if rvec is not None:
+                face_frame = CHARUCO_PANELS[face_key]["face_frame"]
+                rvec_ct, tvec_ct = self.rvec_tvec_to_cam_target(rvec, tvec, face_frame)
+                results["solutions"].append({
+                    "panel": face_key, "type": "charuco",
+                    "rvec_camera_face": rvec.flatten().tolist(),
+                    "tvec_camera_face": tvec.flatten().tolist(),
+                    "rvec_camera_target": rvec_ct,
+                    "tvec_camera_target": tvec_ct,
+                    **stats,
+                })
+
+        # AprilTag: right
+        obj_pts, img_pts = self.detect_apriltag_right(gray)
+        if obj_pts is not None:
+            rvec, tvec, stats = self.solve_pnp(obj_pts, img_pts, K, D)
+            if rvec is not None:
+                face_frame = APRILTAG_RIGHT["face_frame"]
+                rvec_ct, tvec_ct = self.rvec_tvec_to_cam_target(rvec, tvec, face_frame)
+                results["solutions"].append({
+                    "panel": "right", "type": "apriltag",
+                    "rvec_camera_face": rvec.flatten().tolist(),
+                    "tvec_camera_face": tvec.flatten().tolist(),
+                    "rvec_camera_target": rvec_ct,
+                    "tvec_camera_target": tvec_ct,
+                    **stats,
+                })
+
+        # AprilTag: top
+        obj_pts, img_pts = self.detect_apriltag_top(gray)
+        if obj_pts is not None:
+            rvec, tvec, stats = self.solve_pnp(obj_pts, img_pts, K, D)
+            if rvec is not None:
+                face_frame = APRILTAG_TOP["face_frame"]
+                rvec_ct, tvec_ct = self.rvec_tvec_to_cam_target(rvec, tvec, face_frame)
+                results["solutions"].append({
+                    "panel": "top", "type": "apriltag",
+                    "rvec_camera_face": rvec.flatten().tolist(),
+                    "tvec_camera_face": tvec.flatten().tolist(),
+                    "rvec_camera_target": rvec_ct,
+                    "tvec_camera_target": tvec_ct,
+                    **stats,
+                })
+
+        # Gazebo truth comparison
+        truth = self.get_gazebo_truth(optical_frame)
+        results["gazebo_truth"] = truth
+        if truth and results["solutions"]:
+            best = min(results["solutions"], key=lambda s: s.get("rmse_px", 99))
+            if best.get("tvec_camera_target"):
+                t_sol = np.array(best["tvec_camera_target"])
+                t_truth = np.array([truth["tx"], truth["ty"], truth["tz"]])
+                results["translation_error_m"] = float(np.linalg.norm(t_sol - t_truth))
+
+        # 保存图
+        img_path = os.path.join(self.output_dir, f"{cam_name}.png")
+        cv2.imwrite(img_path, cv_img)
+        obs_path = os.path.join(self.output_dir, f"{cam_name}_result.json")
+        with open(obs_path, "w") as f:
+            json.dump(results, f, indent=2, default=str)
+
+        return results
 
 
 def main():
-    rospy.init_node("calibrate_three_fixed_cameras", anonymous=True,
-                    log_level=rospy.WARN)
+    rospy.init_node("calibrate_three_fixed_cameras", anonymous=True, log_level=rospy.WARN)
 
-    config_path = None
     output_dir = "artifacts/calibration_target_v1"
-
     for i, arg in enumerate(sys.argv):
-        if arg == "--config" and i + 1 < len(sys.argv):
-            config_path = sys.argv[i + 1]
         if arg == "--output" and i + 1 < len(sys.argv):
             output_dir = sys.argv[i + 1]
 
-    if config_path is None:
-        try:
-            rp = rospkg.RosPack()
-            config_path = os.path.join(
-                rp.get_path("cr5_spray_sim"),
-                "config", "calibration_target_v1.yaml")
-        except Exception:
-            rospy.logerr("Cannot find config file")
-            sys.exit(1)
-
-    calibrator = CameraCalibrator(config_path, output_dir)
+    calibrator = CameraCalibrator(output_dir)
     all_results = {}
-    truth_data = {}
 
-    for cam_name, topics in sorted(CAMERAS.items()):
-        rospy.loginfo("=== Processing %s ===", cam_name)
-
-        # Capture
-        try:
-            color_msg = rospy.wait_for_message(topics["color"], Image, timeout=10.0)
-            info_msg = rospy.wait_for_message(topics["info"], CameraInfo, timeout=10.0)
-        except rospy.ROSException:
-            rospy.logerr("%s: capture timeout", cam_name)
-            all_results[cam_name] = {"error": "capture_timeout"}
-            continue
-
-        try:
-            cv_img = calibrator.bridge.imgmsg_to_cv2(color_msg, desired_encoding="bgr8")
-        except Exception as e:
-            rospy.logerr("%s: bridge failed: %s", cam_name, e)
-            all_results[cam_name] = {"error": str(e)}
-            continue
-
-        K = np.array(info_msg.K).reshape(3, 3)
-
-        # Detect + PnP
-        result = calibrator.detect_and_solve(cam_name, cv_img, K)
+    for cam_name in sorted(CAMERAS.keys()):
+        result = calibrator.process_camera(cam_name)
         all_results[cam_name] = result
 
-        # Gazebo truth
-        truth = calibrator.get_gazebo_truth(cam_name)
-        truth_data[cam_name] = truth
-
-        # Save observation
-        obs_dir = os.path.join(output_dir, "observations")
-        os.makedirs(obs_dir, exist_ok=True)
-        obs_path = os.path.join(obs_dir, "{}.json".format(cam_name))
-        with open(obs_path, "w") as f:
-            json.dump(result, f, indent=2, default=str)
-
-        # Save image sample
-        img_path = os.path.join(obs_dir, "{}.png".format(cam_name))
-        cv2.imwrite(img_path, cv_img)
-
     # 汇总
-    summary = {
-        "config": config_path,
-        "timestamp": time.time(),
-        "results": all_results,
-        "gazebo_truth": truth_data,
-        "any_solution": any(
-            len(r.get("solutions", [])) > 0 for r in all_results.values()
-        ),
-    }
+    any_solution = any(len(r.get("solutions", [])) > 0 for r in all_results.values())
+    summary = {"timestamp": time.time(), "results": all_results, "any_solution": any_solution}
 
-    # Save outputs
     with open(os.path.join(output_dir, "initial_extrinsics.yaml"), "w") as f:
         yaml.dump(summary, f, default_flow_style=False)
 
-    reproj_report = {
-        "target_reprojection_error_px": TARGET_REPROJ_ERROR,
-        "max_reprojection_error_px": MAX_REPROJ_ERROR,
-        "results": {},
-    }
-    for cam_name, result in all_results.items():
-        cam_errors = []
-        for sol in result.get("solutions", []):
-            cam_errors.append({
-                "panel": sol["panel"],
-                "error_px": sol["mean_reprojection_error_px"],
-                "inliers": sol["inliers"],
-                "pass": sol["pass"],
-            })
-        reproj_report["results"][cam_name] = cam_errors
-
+    # 重投影报告
+    reproj = {}
+    for cn, cr in all_results.items():
+        reproj[cn] = [{"panel": s["panel"], "rmse_px": s.get("rmse_px", -1),
+                        "inliers": s.get("inliers", 0), "pass": s.get("pass", False)}
+                      for s in cr.get("solutions", [])]
     with open(os.path.join(output_dir, "reprojection_report.json"), "w") as f:
-        json.dump(reproj_report, f, indent=2, default=str)
+        json.dump(reproj, f, indent=2, default=str)
 
+    truth_data = {cn: cr.get("gazebo_truth") for cn, cr in all_results.items()}
     with open(os.path.join(output_dir, "gazebo_truth_comparison.json"), "w") as f:
         json.dump(truth_data, f, indent=2, default=str)
 
-    rospy.loginfo("Calibration skeleton complete. Output: %s", output_dir)
-    rospy.loginfo("Solutions found: %s",
-                  summary["any_solution"])
+    rospy.loginfo("Calibration complete. Solutions: %s", any_solution)
 
 
 if __name__ == "__main__":
