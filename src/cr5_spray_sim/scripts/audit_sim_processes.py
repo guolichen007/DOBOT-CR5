@@ -24,7 +24,7 @@ import subprocess
 PROC_PATTERNS = {
     "gzserver": re.compile(r"gzserver"),
     "gzclient": re.compile(r"gzclient"),
-    "scene_launch": re.compile(r"scene_v33_spray"),
+    "scene_launch": re.compile(r"spray_simulation"),
 }
 
 
