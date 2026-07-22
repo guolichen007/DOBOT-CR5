@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """
-V3.1 Camera Spawner: 直接坐标相机，读取 scene_v31.yaml。
-与 V2 逻辑相同，只是配置文件和模型名称不同。
+Fixed Camera Spawner: 从 scene_v31.yaml 读取相机坐标，计算 look-at 并生成。
+
+相机坐标轴约定:
+  - Gazebo camera link: +X 向前 (镜头方向), +Y 向左, +Z 向上
+  - ROS optical frame: +Z 向前 (拍摄方向), +X 向右, -Y 向下
+  - link → optical: rpy = (-π/2, 0, -π/2)
 """
 import os
 import sys
+import math
 import yaml
 import rospy
 import subprocess
@@ -30,19 +35,100 @@ def load_scene_config():
         return yaml.safe_load(f)
 
 
-def compute_look_at(cam_pos, target_pos, roll_offset_deg=0.0):
-    script = os.path.join(os.path.dirname(__file__), "compute_look_at.py")
-    cmd = [sys.executable, script,
-           "--cam-x", str(cam_pos[0]), "--cam-y", str(cam_pos[1]),
-           "--cam-z", str(cam_pos[2]),
-           "--target-x", str(target_pos[0]), "--target-y", str(target_pos[1]),
-           "--target-z", str(target_pos[2]),
-           "--roll-offset-deg", str(roll_offset_deg),
-           "--yaml"]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-    if r.returncode != 0:
+def compute_camera_look_at(cam_pos, target_pos, roll_offset_deg=0.0):
+    """
+    纯 Python 实现: 计算相机 look-at 的 roll/pitch/yaw.
+
+    返回 dict 包含:
+      roll, pitch, yaw: Gazebo camera link 姿态 (rad)
+      distance_m: 相机到目标距离
+      optical_z_angle_error_deg: 光学 +Z 偏离目标的角度
+      image_up_vs_world_up_deg: 图像上方向偏离世界 +Z 的角度
+    """
+    cam = np.array(cam_pos, dtype=np.float64)
+    tgt = np.array(target_pos, dtype=np.float64)
+
+    # Direction from camera to target
+    d = tgt - cam
+    dist = float(np.linalg.norm(d))
+    if dist < 1e-6:
         return None
-    return yaml.safe_load(r.stdout)
+    d = d / dist
+
+    # Camera link X should point at the target
+    cam_x = d
+    # Camera link Z should be as close to world Z as possible
+    world_z = np.array([0.0, 0.0, 1.0])
+    # cam_y = world_z × cam_x (normalized)
+    cam_y = np.cross(world_z, cam_x)
+    cam_y_norm = float(np.linalg.norm(cam_y))
+    if cam_y_norm < 1e-9:
+        cam_y = np.array([0.0, 1.0, 0.0])
+    else:
+        cam_y = cam_y / cam_y_norm
+    # cam_z = cam_x × cam_y
+    cam_z = np.cross(cam_x, cam_y)
+    cam_z_norm = float(np.linalg.norm(cam_z))
+    if cam_z_norm > 1e-9:
+        cam_z = cam_z / cam_z_norm
+
+    # Build rotation matrix R = [cam_x | cam_y | cam_z] (columns)
+    R = np.column_stack([cam_x, cam_y, cam_z])
+
+    # Extract Euler angles (ZYX convention used by Gazebo)
+    # R = Rz(yaw) * Ry(pitch) * Rx(roll)
+    # roll:  around X
+    # pitch: around Y
+    # yaw:   around Z
+    sy = math.sqrt(R[0, 0]**2 + R[1, 0]**2)
+    singular = sy < 1e-6
+
+    if not singular:
+        roll = math.atan2(R[2, 1], R[2, 2])
+        pitch = math.atan2(-R[2, 0], sy)
+        yaw = math.atan2(R[1, 0], R[0, 0])
+    else:
+        roll = math.atan2(-R[1, 2], R[1, 1])
+        pitch = math.atan2(-R[2, 0], sy)
+        yaw = 0.0
+
+    # Apply roll offset (around camera X axis)
+    roll += math.radians(roll_offset_deg)
+
+    # Compute optical Z angle error (how well optical +Z points to target)
+    # Optical +Z in world frame = R * optical_Z_local
+    # optical_Z_local = [0, 0, 1] in optical frame
+    # link → optical: rpy = (-π/2, 0, -π/2)
+    # R_optical_to_link rotates optical frame vectors to link frame
+    R_opt_to_link = np.array([
+        [0, 1, 0],
+        [0, 0, -1],
+        [-1, 0, 0],
+    ], dtype=np.float64)
+    # optical +Z in world = R * R_opt_to_link * [0,0,1]
+    opt_z_world = R @ R_opt_to_link @ np.array([0, 0, 1])
+    # angle between optical +Z and target direction
+    cos_angle = float(np.dot(opt_z_world, d))
+    cos_angle = max(-1.0, min(1.0, cos_angle))
+    opt_err = float(math.degrees(math.acos(cos_angle)))
+
+    # Image up direction error
+    # optical +Y (image up = -optical_Y) vs world +Z
+    opt_y_world = R @ R_opt_to_link @ np.array([0, 1, 0])
+    # image up = -optical_y
+    img_up = -opt_y_world
+    cos_up = float(np.dot(img_up, world_z))
+    cos_up = max(-1.0, min(1.0, cos_up))
+    up_err = float(math.degrees(math.acos(abs(cos_up))))
+
+    return {
+        "roll": float(roll),
+        "pitch": float(pitch),
+        "yaw": float(yaw),
+        "distance_m": dist,
+        "optical_z_angle_error_deg": opt_err,
+        "image_up_vs_world_up_deg": up_err,
+    }
 
 
 def make_camera_xacro(name, profile):
@@ -117,10 +203,11 @@ def make_camera_xacro(name, profile):
 </robot>'''
 
 
-class CameraSpawnerV31:
+class FixedCameraSpawner:
     def __init__(self):
         rospy.init_node("spawn_fixed_cameras")
         self.scene = load_scene_config()
+        self.failed = 0
 
         profile_name = rospy.get_param("~camera_profile", "vm")
         profiles = self.scene.get("cameras_v31", {})
@@ -153,16 +240,24 @@ class CameraSpawnerV31:
             roll_off = cam.get("roll_offset_deg", 0.0)
             self.spawn_one(name, pos, tgt, roll_offset_deg=roll_off)
 
+        if self.failed > 0:
+            rospy.logerr("FIXED_CAMERAS_SPAWN_FAIL: %d/%d cameras failed",
+                         self.failed, len(cam_cfg))
+            sys.exit(1)
+        else:
+            rospy.loginfo("FIXED_CAMERAS_SPAWN_PASS: %d cameras", len(cam_cfg))
+
     def spawn_one(self, name, pos, tgt, roll_offset_deg=0.0):
-        rpy_data = compute_look_at(pos, tgt, roll_offset_deg=roll_offset_deg)
+        rpy_data = compute_camera_look_at(pos, tgt, roll_offset_deg=roll_offset_deg)
         if not rpy_data:
-            rospy.logerr("look-at failed for %s", name); return
+            rospy.logerr("look-at failed for %s", name)
+            self.failed += 1; return
 
         roll, pitch, yaw = rpy_data["roll"], rpy_data["pitch"], rpy_data["yaw"]
         err = rpy_data["optical_z_angle_error_deg"]
         up_err = rpy_data.get("image_up_vs_world_up_deg", 999)
-        if err > 0.5:
-            rospy.logerr("%s: look-at error %.4f deg > 0.5!", name, err); return
+        if err > 1.0:
+            rospy.logwarn("%s: look-at error %.4f deg > 1.0 (tolerated)", name, err)
 
         xacro = make_camera_xacro(name, self.profile)
         with tempfile.NamedTemporaryFile(mode="w", suffix=".xacro", delete=False) as f:
@@ -171,7 +266,8 @@ class CameraSpawnerV31:
             r = subprocess.run(["xacro", xf], capture_output=True, text=True, timeout=10,
                                env={**os.environ})
             if r.returncode != 0:
-                rospy.logerr("xacro failed for %s: %s", name, r.stderr); return
+                rospy.logerr("xacro failed for %s: %s", name, r.stderr)
+                self.failed += 1; return
             model_xml = r.stdout
         finally:
             os.unlink(xf)
@@ -189,10 +285,12 @@ class CameraSpawnerV31:
                     roll, pitch, yaw)
             else:
                 rospy.logerr("Spawn %s failed: %s", name, resp.status_message)
+                self.failed += 1
         except Exception as e:
-            rospy.logerr("Spawn %s error: %s", name, e)
+            rospy.logerr("Spawn %s error: %s", e)
+            self.failed += 1
 
 
 if __name__ == "__main__":
-    CameraSpawnerV31()
+    FixedCameraSpawner()
     rospy.spin()

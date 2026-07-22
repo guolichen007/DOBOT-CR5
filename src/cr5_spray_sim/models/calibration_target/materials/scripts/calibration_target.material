@@ -17,7 +17,7 @@ material CR5/Calibration/CharucoFront
 
       texture_unit
       {
-        texture charuco_front_v1.png
+        texture charuco_front.png
         tex_address_mode clamp
         filtering none
       }
@@ -41,7 +41,7 @@ material CR5/Calibration/CharucoLeft
 
       texture_unit
       {
-        texture charuco_left_v1.png
+        texture charuco_left.png
         tex_address_mode clamp
         filtering none
       }
@@ -65,7 +65,7 @@ material CR5/Calibration/AprilTagRight
 
       texture_unit
       {
-        texture apriltag_right_v1.png
+        texture apriltag_right.png
         tex_address_mode clamp
         filtering none
       }
@@ -89,7 +89,7 @@ material CR5/Calibration/AprilTagTop
 
       texture_unit
       {
-        texture apriltag_top_v1.png
+        texture apriltag_top.png
         tex_address_mode clamp
         filtering none
       }
@@ -113,31 +113,7 @@ material CR5/Calibration/CharucoBack
 
       texture_unit
       {
-        texture charuco_back_v1.png
-        tex_address_mode clamp
-        filtering none
-      }
-    }
-  }
-}
-
-material CR5/Calibration/FaceGuide
-{
-  technique
-  {
-    pass
-    {
-      cull_hardware none
-      cull_software none
-      lighting off
-      ambient  1.0 1.0 1.0 1.0
-      diffuse  1.0 1.0 1.0 1.0
-      specular 0.0 0.0 0.0 1.0
-      emissive 0.0 0.0 0.0 1.0
-
-      texture_unit
-      {
-        texture calibration_target_face_guide_v1.png
+        texture charuco_back.png
         tex_address_mode clamp
         filtering none
       }
