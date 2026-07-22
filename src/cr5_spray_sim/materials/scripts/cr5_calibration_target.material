@@ -1,0 +1,107 @@
+// CR5 Calibration Target V1 — OGRE Material Scripts
+// 标定贴图材料：关闭光照，避免亮度梯度影响仿真检测
+
+material CR5/Calibration/CharucoFrontV1
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient  1.0 1.0 1.0 1.0
+      diffuse  1.0 1.0 1.0 1.0
+      specular 0.0 0.0 0.0 1.0
+      emissive 0.0 0.0 0.0 1.0
+
+      texture_unit
+      {
+        texture charuco_front_v1.png
+        filtering none
+      }
+    }
+  }
+}
+
+material CR5/Calibration/CharucoLeftV1
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient  1.0 1.0 1.0 1.0
+      diffuse  1.0 1.0 1.0 1.0
+      specular 0.0 0.0 0.0 1.0
+      emissive 0.0 0.0 0.0 1.0
+
+      texture_unit
+      {
+        texture charuco_left_v1.png
+        filtering none
+      }
+    }
+  }
+}
+
+material CR5/Calibration/AprilTagRightV1
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient  1.0 1.0 1.0 1.0
+      diffuse  1.0 1.0 1.0 1.0
+      specular 0.0 0.0 0.0 1.0
+      emissive 0.0 0.0 0.0 1.0
+
+      texture_unit
+      {
+        texture apriltag_right_v1.png
+        filtering none
+      }
+    }
+  }
+}
+
+material CR5/Calibration/AprilTagTopV1
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient  1.0 1.0 1.0 1.0
+      diffuse  1.0 1.0 1.0 1.0
+      specular 0.0 0.0 0.0 1.0
+      emissive 0.0 0.0 0.0 1.0
+
+      texture_unit
+      {
+        texture apriltag_top_v1.png
+        filtering none
+      }
+    }
+  }
+}
+
+material CR5/Calibration/FaceGuideV1
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient  1.0 1.0 1.0 1.0
+      diffuse  1.0 1.0 1.0 1.0
+      specular 0.0 0.0 0.0 1.0
+      emissive 0.0 0.0 0.0 1.0
+
+      texture_unit
+      {
+        texture calibration_target_face_guide_v1.png
+        filtering none
+      }
+    }
+  }
+}

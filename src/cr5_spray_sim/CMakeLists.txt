@@ -25,6 +25,10 @@ install(DIRECTORY rviz
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
+install(DIRECTORY materials
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
 # Python scripts
 catkin_install_python(PROGRAMS
   scripts/spawn_scene_cameras.py
@@ -72,6 +76,9 @@ catkin_install_python(PROGRAMS
   scripts/bootstrap_controllers_v337.py
   scripts/check_scene_runtime_v337.py
   scripts/check_runtime_signals_v337.py
+  # Calibration Target V1
+  scripts/validate_calibration_target_visibility.py
+  scripts/calibrate_three_fixed_cameras.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

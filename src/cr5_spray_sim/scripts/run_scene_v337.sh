@@ -106,8 +106,8 @@ if [[ "$PHYSICS_MODE" != "stable" && "$PHYSICS_MODE" != "gravity" ]]; then
     echo "ERROR: --physics-mode must be 'stable' or 'gravity'"
     exit 1
 fi
-if [[ "$OBJECT" != "motor_housing_cylinder" && "$OBJECT" != "rectangular_housing" ]]; then
-    echo "ERROR: --object must be 'motor_housing_cylinder' or 'rectangular_housing'"
+if [[ "$OBJECT" != "motor_housing_cylinder" && "$OBJECT" != "rectangular_housing" && "$OBJECT" != "calibration_target_v1" ]]; then
+    echo "ERROR: --object must be 'motor_housing_cylinder', 'rectangular_housing', or 'calibration_target_v1'"
     exit 1
 fi
 

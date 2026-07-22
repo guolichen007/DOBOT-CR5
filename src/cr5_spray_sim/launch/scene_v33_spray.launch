@@ -16,7 +16,7 @@
   <arg name="paused" default="true" doc="V3.3.7: paused 启动，等模型全部 spawn + 零位验证后再 unpause"/>
   <arg name="spawn_controllers" default="false" doc="V3.3.7: 由 bootstrap 脚本顺序启动，launch 默认不自动启动"/>
   <arg name="object_type" default="motor_housing_cylinder"
-       doc="motor_housing_cylinder|rectangular_housing"/>
+       doc="motor_housing_cylinder|rectangular_housing|calibration_target_v1"/>
   <arg name="camera_profile" default="vm" doc="vm|quality"/>
   <arg name="enable_spray_tool" default="true" doc="Include spray gun on CR5 flange"/>
   <arg name="enable_spray_sim" default="true" doc="Run spray control + paint patch nodes"/>
@@ -41,8 +41,14 @@
   <param name="goalpost_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/simple_goalpost_frame_v31.xacro"/>
 
-  <!-- Simple Hanging Workpiece V3.1 -->
-  <param name="hanging_workpiece_description"
+  <!-- Calibration Target V1 (独立 xacro, 多面标定板) -->
+  <param if="$(eval object_type == 'calibration_target_v1')"
+    name="hanging_workpiece_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/objects/calibration_target_v1.xacro"/>
+
+  <!-- Standard Hanging Workpiece V3.1 (motor_housing_cylinder / rectangular_housing) -->
+  <param unless="$(eval object_type == 'calibration_target_v1')"
+    name="hanging_workpiece_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/simple_hanging_workpiece_v31.xacro
              object_type:=$(arg object_type)"/>
 

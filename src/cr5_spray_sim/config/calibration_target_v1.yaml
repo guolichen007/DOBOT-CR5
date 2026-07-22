@@ -1,0 +1,264 @@
+schema_version: 1
+target:
+  name: calibration_target_v1
+  frame: calibration_target_frame
+  frame_origin: main_body_geometric_center
+  axes:
+    x: outward normal of the main front ChArUco panel
+    y: toward the left face
+    z: up
+  main_body_m:
+  - 0.3
+  - 0.22
+  - 0.18
+  asymmetric_top_block_m:
+  - 0.08
+  - 0.06
+  - 0.05
+  surface_finish: matte_light_gray_or_white
+  hanging:
+    type: two_rope
+    requirement: rigid target body; ropes only suspend the target
+opencv:
+  generator_version: 4.13.0
+  charuco_dictionary: DICT_5X5_1000
+  apriltag_dictionary: DICT_APRILTAG_36h11
+  marker_border_bits: 1
+  image_encoding: 8-bit PNG
+  calibration_patterns_antialiased: false
+  charuco_marker_id_policy: unique IDs per physical face
+panels:
+  front:
+    frame: calibration_target_front_frame
+    texture: charuco_front_v1.png
+    pattern: charuco
+    canvas_px:
+    - 2400
+    - 1800
+    physical_canvas_m:
+    - 0.24
+    - 0.18
+    board:
+      squares_x: 8
+      squares_y: 6
+      square_length_m: 0.027
+      marker_length_m: 0.02
+      dictionary: DICT_5X5_1000
+      marker_ids:
+      - 100
+      - 101
+      - 102
+      - 103
+      - 104
+      - 105
+      - 106
+      - 107
+      - 108
+      - 109
+      - 110
+      - 111
+      - 112
+      - 113
+      - 114
+      - 115
+      - 116
+      - 117
+      - 118
+      - 119
+      - 120
+      - 121
+      - 122
+      - 123
+    model_note: use a dedicated 0.240 x 0.180 m rigid plate; do not stretch onto the 0.220 x 0.180 m body face
+  left:
+    frame: calibration_target_left_frame
+    texture: charuco_left_v1.png
+    pattern: charuco
+    canvas_px:
+    - 1600
+    - 1200
+    physical_canvas_m:
+    - 0.16
+    - 0.12
+    board:
+      squares_x: 6
+      squares_y: 5
+      square_length_m: 0.022
+      marker_length_m: 0.016
+      dictionary: DICT_5X5_1000
+      marker_ids:
+      - 200
+      - 201
+      - 202
+      - 203
+      - 204
+      - 205
+      - 206
+      - 207
+      - 208
+      - 209
+      - 210
+      - 211
+      - 212
+      - 213
+      - 214
+  right:
+    frame: calibration_target_right_frame
+    texture: apriltag_right_v1.png
+    pattern: apriltag_grid
+    canvas_px:
+    - 2200
+    - 1800
+    physical_canvas_m:
+    - 0.22
+    - 0.18
+    dictionary: DICT_APRILTAG_36h11
+    tag_ids:
+    - 4
+    - 5
+    - 6
+    - 7
+    layout:
+    - - 4
+      - 5
+    - - 6
+      - 7
+    tag_size_m: 0.07
+    tag_gap_m: 0.015
+  top:
+    frame: calibration_target_top_frame
+    texture: apriltag_top_v1.png
+    pattern: apriltag_single
+    canvas_px:
+    - 1600
+    - 1600
+    physical_canvas_m:
+    - 0.16
+    - 0.16
+    dictionary: DICT_APRILTAG_36h11
+    tag_ids:
+    - 8
+    tag_size_m: 0.12
+  face_guide:
+    texture: calibration_target_face_guide_v1.png
+    algorithm_use: false
+    purpose: human-only orientation and mirror check
+gazebo_materials:
+  texture_directory: src/cr5_spray_sim/materials/textures/calibration/
+  script_directory: src/cr5_spray_sim/materials/scripts/
+  required_material_names:
+  - CR5/Calibration/CharucoFrontV1
+  - CR5/Calibration/CharucoLeftV1
+  - CR5/Calibration/AprilTagRightV1
+  - CR5/Calibration/AprilTagTopV1
+  - CR5/Calibration/FaceGuideV1
+  rendering:
+    lighting: false
+    ambient:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    diffuse:
+    - 1.0
+    - 1.0
+    - 1.0
+    - 1.0
+    specular:
+    - 0.0
+    - 0.0
+    - 0.0
+    - 1.0
+    texture_filtering_note: prefer nearest/no mipmap for calibration textures when supported
+validation:
+  generator_self_test:
+    charuco_front_v1.png:
+      detected_marker_count: 24
+      detected_marker_ids:
+      - 100
+      - 101
+      - 102
+      - 103
+      - 104
+      - 105
+      - 106
+      - 107
+      - 108
+      - 109
+      - 110
+      - 111
+      - 112
+      - 113
+      - 114
+      - 115
+      - 116
+      - 117
+      - 118
+      - 119
+      - 120
+      - 121
+      - 122
+      - 123
+      detected_charuco_corner_count: 35
+      rejected_candidate_count: 88
+    charuco_left_v1.png:
+      detected_marker_count: 15
+      detected_marker_ids:
+      - 200
+      - 201
+      - 202
+      - 203
+      - 204
+      - 205
+      - 206
+      - 207
+      - 208
+      - 209
+      - 210
+      - 211
+      - 212
+      - 213
+      - 214
+      detected_charuco_corner_count: 20
+      rejected_candidate_count: 59
+    apriltag_right_v1.png:
+      detected_tag_count: 4
+      detected_tag_ids:
+      - 4
+      - 5
+      - 6
+      - 7
+      rejected_candidate_count: 18
+    apriltag_top_v1.png:
+      detected_tag_count: 1
+      detected_tag_ids:
+      - 8
+      rejected_candidate_count: 4
+  required_runtime_repetitions: 5
+  pass_condition: 5/5
+files:
+  charuco_front_v1.png:
+    width_px: 2400
+    height_px: 1800
+    mode: L
+    sha256: 88bd0f1959b108490823cf47aadb5af1c88f267351e27cedc79019ea50ac9363
+  charuco_left_v1.png:
+    width_px: 1600
+    height_px: 1200
+    mode: L
+    sha256: 4d658ccf2d907a6b13c079c00b7e55ae0f6755f75108982672460cd554685787
+  apriltag_right_v1.png:
+    width_px: 2200
+    height_px: 1800
+    mode: L
+    sha256: 0cb8caf9e67e6758fb5e1603b64824e437d9988337029fd4c6f8f5a9888994c7
+  apriltag_top_v1.png:
+    width_px: 1600
+    height_px: 1600
+    mode: L
+    sha256: f7b6846790565753e8ca085ec9bc44fb339aba40cd68a7983e3441eb92cd6c4d
+  calibration_target_face_guide_v1.png:
+    width_px: 1600
+    height_px: 1200
+    mode: RGB
+    sha256: 403597f55619f4f9333a19c736fe9d2aab4c4a2ca08b0e0faf7d72e8ed6e27f2
