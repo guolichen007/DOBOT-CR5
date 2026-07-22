@@ -89,6 +89,14 @@
     <remap from="robot_description" to="robot_description"/>
   </node>
 
+  <!-- Calibration Target TF publisher (独立, 不修改 CR5 主 publisher) -->
+  <node if="$(eval object_type == 'calibration_target_v1')"
+    name="calibration_target_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+    respawn="false" output="screen">
+    <param name="publish_frequency" value="5.0"/>
+    <remap from="robot_description" to="hanging_workpiece_description"/>
+  </node>
+
   <!-- Simple Goalpost Frame -->
   <node name="spawn_goalpost" pkg="gazebo_ros" type="spawn_model"
     args="-urdf -param goalpost_description -model simple_goalpost_frame -x 0.68 -y 0 -z 0"

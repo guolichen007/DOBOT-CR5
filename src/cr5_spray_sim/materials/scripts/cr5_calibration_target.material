@@ -105,3 +105,24 @@ material CR5/Calibration/FaceGuideV1
     }
   }
 }
+
+material CR5/Calibration/CharucoBackV1
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      ambient  1.0 1.0 1.0 1.0
+      diffuse  1.0 1.0 1.0 1.0
+      specular 0.0 0.0 0.0 1.0
+      emissive 0.0 0.0 0.0 1.0
+
+      texture_unit
+      {
+        texture charuco_back_v1.png
+        filtering none
+      }
+    }
+  }
+}

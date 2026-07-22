@@ -1,52 +1,48 @@
 <?xml version="1.0"?>
 <!--
-  Calibration Target V1: 吊挂式非对称多面标定目标模型
+  Calibration Target V1: 吊挂式非对称多面标定目标模型 (V2 — 几何修复版)
 
-  结构:
-    calibration_target_frame          — 原点 (几何中心)
-    ├── main_body                    — 0.30×0.22×0.18m 哑光灰主体
-    ├── top_offset_block             — 0.08×0.06×0.05m 顶部偏置块 (非对称)
-    ├── front_panel                  — 0.24×0.18m ChArUco 100-123 (独立薄板, 外伸)
-    │   └── calibration_target_front_frame
-    ├── left_panel                   — 0.16×0.12m ChArUco 200-214
-    │   └── calibration_target_left_frame
-    ├── right_panel                  — 0.22×0.18m AprilTag 4-7
-    │   └── calibration_target_right_frame
-    ├── top_panel                    — 0.16×0.16m AprilTag 8
-    │   └── calibration_target_top_frame
-    ├── back_panel                   — 0.24×0.18m 背面标识
-    │   └── calibration_target_back_frame
-    ├── left_cable + right_cable     — 吊索
-    └── spreader_bar                 — 顶部横杆
+  V2 修复:
+  - 面板 box 尺寸轴直接对应世界轴，不用 rpy 旋转
+  - 新增 object_frame root link + identity joint → calibration_target_frame
+  - Back panel 使用 CharucoBackV1 (ChArUco 300-323)
+  - package.xml gazebo_media_path + GAZEBO_RESOURCE_PATH 确保材质加载
 
-  坐标系:
-    +X: 正面 ChArUco 板外法向 (朝向 CR5 工作区)
+  坐标系 (world-frame 对齐):
+    +X: 正面 ChArUco 板外法向 (朝向 CR5)
     +Y: 左侧面
     +Z: 竖直向上
+
+  TF 树:
+    world → object_frame → calibration_target_frame
+      ├── calibration_target_front_frame
+      ├── calibration_target_left_frame
+      ├── calibration_target_right_frame
+      ├── calibration_target_top_frame
+      └── calibration_target_back_frame
 -->
 <robot name="calibration_target_v1" xmlns:xacro="http://ros.org/wiki/xacro">
 
-  <!-- ===== 参数 ===== -->
+  <!-- ===== 基本参数 ===== -->
   <xacro:property name="body_sx" value="0.30"/>  <!-- X: 前后 -->
   <xacro:property name="body_sy" value="0.22"/>  <!-- Y: 左右 -->
   <xacro:property name="body_sz" value="0.18"/>  <!-- Z: 上下 -->
   <xacro:property name="panel_thick" value="0.003"/>
 
-  <!-- 吊具参数 (参考 hanging_workpiece) -->
-  <xacro:property name="spreader_z" value="0.62"/>
-  <xacro:property name="spreader_half_y" value="0.15"/>
-  <xacro:property name="cable_radius" value="0.003"/>
-  <xacro:property name="hanger_y" value="0.08"/>
-  <xacro:property name="cable_bottom_z" value="${body_sz/2 + 0.015}"/>
-  <xacro:property name="cable_len" value="${spreader_z - cable_bottom_z}"/>
-  <xacro:property name="cable_mid_z" value="${(spreader_z + cable_bottom_z) / 2}"/>
-
-  <!-- 面板外表面偏移 (贴在主体表面外侧) -->
+  <!-- 面板外表面偏移 -->
   <xacro:property name="front_x" value="${body_sx/2 + panel_thick/2}"/>
   <xacro:property name="back_x"  value="${-body_sx/2 - panel_thick/2}"/>
   <xacro:property name="left_y"  value="${body_sy/2 + panel_thick/2}"/>
   <xacro:property name="right_y" value="${-body_sy/2 - panel_thick/2}"/>
   <xacro:property name="top_z"   value="${body_sz/2 + panel_thick/2}"/>
+
+  <!-- 吊具参数 -->
+  <xacro:property name="spreader_z" value="0.62"/>
+  <xacro:property name="hanger_y" value="0.08"/>
+  <xacro:property name="cable_radius" value="0.003"/>
+  <xacro:property name="cable_bottom_z" value="${body_sz/2 + 0.015}"/>
+  <xacro:property name="cable_len" value="${spreader_z - cable_bottom_z}"/>
+  <xacro:property name="cable_mid_z" value="${(spreader_z + cable_bottom_z) / 2}"/>
 
   <!-- ===== 材质 ===== -->
   <material name="body_mat_gray">
@@ -62,16 +58,22 @@
     <color rgba="0.40 0.40 0.42 1"/>
   </material>
 
-  <!-- ===== 面板材质使用 OGRE 材质 (贴图) ===== -->
-  <!-- 通过 <gazebo> 引用 material script，此处 visual 中设置占位 -->
+  <!-- ========================================================= -->
+  <!-- object_frame — 工件坐标系 root (供 object_pose_tf_v31 发布) -->
+  <!-- ========================================================= -->
+  <link name="object_frame"/>
 
-  <!-- ========================================================= -->
-  <!-- 坐标系 link (无几何，仅提供 frame)                           -->
-  <!-- ========================================================= -->
+  <!-- calibration_target_frame — 目标几何中心 (所有面板的父 frame) -->
   <link name="calibration_target_frame"/>
 
+  <joint name="object_to_calibration_target" type="fixed">
+    <parent link="object_frame"/>
+    <child link="calibration_target_frame"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
   <!-- ========================================================= -->
-  <!-- 主体 (object_frame 直接作为 root link 的子)                  -->
+  <!-- 主体 0.30×0.22×0.18m                                         -->
   <!-- ========================================================= -->
   <link name="main_body">
     <inertial>
@@ -89,14 +91,13 @@
     </collision>
   </link>
 
-  <!-- object_frame → main_body -->
-  <joint name="frame_to_body" type="fixed">
+  <joint name="ct_to_body" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="main_body"/>
   </joint>
 
   <!-- ========================================================= -->
-  <!-- 顶部偏置块 (非对称特征, 偏 +Y 偏 +X)                         -->
+  <!-- 顶部偏置块 (非对称特征)                                      -->
   <!-- ========================================================= -->
   <xacro:property name="block_sx" value="0.08"/>
   <xacro:property name="block_sy" value="0.06"/>
@@ -116,19 +117,16 @@
     </visual>
   </link>
 
-  <joint name="body_to_block" type="fixed">
+  <joint name="ct_to_block" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="top_offset_block"/>
     <origin xyz="${block_off_x} ${block_off_y} ${body_sz/2 + block_sz/2}" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================================================= -->
-  <!-- 正面板: ChArUco 8×6, Marker 100-123, 0.24×0.18m              -->
-  <!-- 面板比主体正面 0.22m 宽，各外伸 10mm                           -->
+  <!-- Front panel: ChArUco 8×6, Markers 100–123                   -->
+  <!-- Box: thickness(X) × 0.24(Y) × 0.18(Z), 贴 +X 面              -->
   <!-- ========================================================= -->
-  <xacro:property name="front_panel_sx" value="0.24"/>
-  <xacro:property name="front_panel_sy" value="0.18"/>
-
   <link name="front_panel">
     <inertial>
       <mass value="0.05"/>
@@ -136,32 +134,26 @@
     </inertial>
     <visual name="front_panel_vis">
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><box size="${panel_thick} ${front_panel_sy} ${front_panel_sx}"/></geometry>
+      <geometry><box size="${panel_thick} 0.24 0.18"/></geometry>
     </visual>
   </link>
 
-  <joint name="frame_to_front_panel" type="fixed">
+  <joint name="ct_to_front_panel" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="front_panel"/>
-    <origin xyz="${front_x} 0 0" rpy="0 ${pi/2} 0"/>
+    <origin xyz="${front_x} 0 0" rpy="0 0 0"/>
   </joint>
 
-  <!-- 正面板坐标系: +Z 指向上, +Y 指向左, +X 指向外法向 -->
   <link name="calibration_target_front_frame"/>
-  <joint name="front_panel_frame_joint" type="fixed">
+  <joint name="front_panel_to_frame" type="fixed">
     <parent link="front_panel"/>
     <child link="calibration_target_front_frame"/>
-    <!-- 面板外法向已经是 +X，将 frame 与面板中心对齐 -->
-    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================================================= -->
-  <!-- 左侧面板: ChArUco 6×5, Marker 200-214, 0.16×0.12m           -->
+  <!-- Left panel: ChArUco 6×5, Markers 200–214                    -->
+  <!-- Box: 0.16(X) × thickness(Y) × 0.12(Z), 贴 +Y 面              -->
   <!-- ========================================================= -->
-  <xacro:property name="left_panel_sx" value="0.003"/>
-  <xacro:property name="left_panel_sy" value="0.16"/>
-  <xacro:property name="left_panel_sz" value="0.12"/>
-
   <link name="left_panel">
     <inertial>
       <mass value="0.03"/>
@@ -169,30 +161,26 @@
     </inertial>
     <visual name="left_panel_vis">
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><box size="${panel_thick} ${left_panel_sy} ${left_panel_sz}"/></geometry>
+      <geometry><box size="0.16 ${panel_thick} 0.12"/></geometry>
     </visual>
   </link>
 
-  <joint name="frame_to_left_panel" type="fixed">
+  <joint name="ct_to_left_panel" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="left_panel"/>
-    <origin xyz="0 ${left_y} ${0}" rpy="0 ${pi/2} 0"/>
+    <origin xyz="0 ${left_y} 0" rpy="0 0 0"/>
   </joint>
 
   <link name="calibration_target_left_frame"/>
-  <joint name="left_panel_frame_joint" type="fixed">
+  <joint name="left_panel_to_frame" type="fixed">
     <parent link="left_panel"/>
     <child link="calibration_target_left_frame"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================================================= -->
-  <!-- 右侧面板: AprilTag 2×2, ID 4-7, 0.22×0.18m                  -->
+  <!-- Right panel: AprilTag 2×2, IDs 4–7                         -->
+  <!-- Box: 0.22(X) × thickness(Y) × 0.18(Z), 贴 -Y 面             -->
   <!-- ========================================================= -->
-  <xacro:property name="right_panel_sx" value="0.003"/>
-  <xacro:property name="right_panel_sy" value="0.22"/>
-  <xacro:property name="right_panel_sz" value="0.18"/>
-
   <link name="right_panel">
     <inertial>
       <mass value="0.04"/>
@@ -200,29 +188,25 @@
     </inertial>
     <visual name="right_panel_vis">
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><box size="${panel_thick} ${right_panel_sy} ${right_panel_sz}"/></geometry>
+      <geometry><box size="0.22 ${panel_thick} 0.18"/></geometry>
     </visual>
   </link>
 
-  <joint name="frame_to_right_panel" type="fixed">
+  <joint name="ct_to_right_panel" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="right_panel"/>
-    <origin xyz="0 ${right_y} 0" rpy="0 ${-pi/2} 0"/>
+    <origin xyz="0 ${right_y} 0" rpy="0 0 0"/>
   </joint>
 
   <link name="calibration_target_right_frame"/>
-  <joint name="right_panel_frame_joint" type="fixed">
+  <joint name="right_panel_to_frame" type="fixed">
     <parent link="right_panel"/>
     <child link="calibration_target_right_frame"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================================================= -->
-  <!-- 顶面板: AprilTag, ID 8, 0.16×0.16m                         -->
+  <!-- Top panel: AprilTag, ID 8, 贴 +Z 面                          -->
   <!-- ========================================================= -->
-  <xacro:property name="top_panel_sx" value="0.16"/>
-  <xacro:property name="top_panel_sy" value="0.16"/>
-
   <link name="top_panel">
     <inertial>
       <mass value="0.03"/>
@@ -230,29 +214,25 @@
     </inertial>
     <visual name="top_panel_vis">
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><box size="${top_panel_sx} ${top_panel_sy} ${panel_thick}"/></geometry>
+      <geometry><box size="0.16 0.16 ${panel_thick}"/></geometry>
     </visual>
   </link>
 
-  <joint name="frame_to_top_panel" type="fixed">
+  <joint name="ct_to_top_panel" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="top_panel"/>
     <origin xyz="0 0 ${top_z}" rpy="0 0 0"/>
   </joint>
 
   <link name="calibration_target_top_frame"/>
-  <joint name="top_panel_frame_joint" type="fixed">
+  <joint name="top_panel_to_frame" type="fixed">
     <parent link="top_panel"/>
     <child link="calibration_target_top_frame"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================================================= -->
-  <!-- 背面板: 后相机覆盖, 0.24×0.18m (与正面相同尺寸)              -->
+  <!-- Back panel: ChArUco 300–323, 后相机覆盖, 贴 -X 面            -->
   <!-- ========================================================= -->
-  <xacro:property name="back_panel_sx" value="0.24"/>
-  <xacro:property name="back_panel_sy" value="0.18"/>
-
   <link name="back_panel">
     <inertial>
       <mass value="0.05"/>
@@ -260,28 +240,26 @@
     </inertial>
     <visual name="back_panel_vis">
       <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry><box size="${panel_thick} ${back_panel_sy} ${back_panel_sx}"/></geometry>
+      <geometry><box size="${panel_thick} 0.24 0.18"/></geometry>
     </visual>
   </link>
 
-  <joint name="frame_to_back_panel" type="fixed">
+  <joint name="ct_to_back_panel" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="back_panel"/>
-    <origin xyz="${back_x} 0 0" rpy="0 ${-pi/2} 0"/>
+    <origin xyz="${back_x} 0 0" rpy="0 0 0"/>
   </joint>
 
   <link name="calibration_target_back_frame"/>
-  <joint name="back_panel_frame_joint" type="fixed">
+  <joint name="back_panel_to_frame" type="fixed">
     <parent link="back_panel"/>
     <child link="calibration_target_back_frame"/>
-    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
 
   <!-- ========================================================= -->
-  <!-- 吊索 + 横杆 (参考 hanging_workpiece 设计)                    -->
+  <!-- 吊索 + 横杆                                                  -->
   <!-- ========================================================= -->
 
-  <!-- 左吊索 -->
   <link name="left_cable">
     <inertial>
       <mass value="0.05"/>
@@ -293,12 +271,11 @@
       <material name="cable_black"/>
     </visual>
   </link>
-  <joint name="frame_to_left_cable" type="fixed">
+  <joint name="ct_to_left_cable" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="left_cable"/>
   </joint>
 
-  <!-- 右吊索 -->
   <link name="right_cable">
     <inertial>
       <mass value="0.05"/>
@@ -310,12 +287,11 @@
       <material name="cable_black"/>
     </visual>
   </link>
-  <joint name="frame_to_right_cable" type="fixed">
+  <joint name="ct_to_right_cable" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="right_cable"/>
   </joint>
 
-  <!-- 顶部横杆 -->
   <link name="spreader_bar">
     <inertial>
       <mass value="1.0"/>
@@ -331,7 +307,7 @@
       <geometry><box size="0.03 0.30 0.03"/></geometry>
     </collision>
   </link>
-  <joint name="frame_to_spreader" type="fixed">
+  <joint name="ct_to_spreader" type="fixed">
     <parent link="calibration_target_frame"/>
     <child link="spreader_bar"/>
   </joint>
@@ -341,7 +317,6 @@
   <!-- ========================================================= -->
   <gazebo><static>true</static></gazebo>
 
-  <!-- 面板贴图: 通过 OGRE material 引用 -->
   <gazebo reference="front_panel">
     <material>CR5/Calibration/CharucoFrontV1</material>
   </gazebo>
@@ -355,7 +330,7 @@
     <material>CR5/Calibration/AprilTagTopV1</material>
   </gazebo>
   <gazebo reference="back_panel">
-    <material>CR5/Calibration/FaceGuideV1</material>
+    <material>CR5/Calibration/CharucoBackV1</material>
   </gazebo>
 
 </robot>

@@ -122,7 +122,21 @@ fi
 # ---- 环境设置 ----
 source /opt/ros/noetic/setup.bash
 source "$WS_DIR/devel/setup.bash"
-export GAZEBO_MODEL_PATH="$WS_DIR/src/cr5_spray_sim/models:${GAZEBO_MODEL_PATH:-}"
+
+PKG_DIR="$(rospack find cr5_spray_sim)"
+export GAZEBO_MODEL_PATH="$PKG_DIR/models:${GAZEBO_MODEL_PATH:-}"
+export GAZEBO_RESOURCE_PATH="$PKG_DIR:${GAZEBO_RESOURCE_PATH:-}"
+
+# 启动前验证标定资源 (非阻塞检查)
+_test_calib_file() {
+    if [[ ! -f "$1" ]]; then
+        echo "WARNING: calibration resource not found: $1" >&2
+    fi
+}
+if [[ "$OBJECT" == "calibration_target_v1" ]]; then
+    _test_calib_file "$PKG_DIR/materials/scripts/cr5_calibration_target.material"
+    _test_calib_file "$PKG_DIR/materials/textures/calibration/charuco_front_v1.png"
+fi
 
 # ---- Session 设置 ----
 SESSION_ID="v337_$(date +%Y%m%d_%H%M%S)"

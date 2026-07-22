@@ -159,12 +159,21 @@ def main():
         sys.stderr.flush()
         sys.exit(1)
 
-    # 报告旧 gzclient 但不是致命错误
+    # 旧 gzclient: GUI + calibration target 模式下致命, 否则警告
     if old_gzclient:
-        rospy.logwarn("Found existing gzclient processes (non-fatal):")
-        for c in old_gzclient:
-            rospy.logwarn("  PID %d: %s", c["pid"], c["args"])
-            rospy.logwarn("    GAZEBO_MASTER_URI=%s", c["gazebo_master_uri"])
+        if gui:
+            rospy.logerr("Found existing gzclient processes — fatal in GUI/calibration mode:")
+            for c in old_gzclient:
+                rospy.logerr("  PID %d: %s", c["pid"], c["args"])
+                rospy.logerr("    GAZEBO_MASTER_URI=%s", c["gazebo_master_uri"])
+            sys.stderr.write("SIM_PROCESS_PREFLIGHT_FAIL\n")
+            sys.stderr.write("OLD_GZCLIENT_FOUND\n")
+            sys.stderr.flush()
+            sys.exit(1)
+        else:
+            rospy.logwarn("Found existing gzclient processes (headless, non-fatal):")
+            for c in old_gzclient:
+                rospy.logwarn("  PID %d: %s", c["pid"], c["args"])
 
     # 检查端口占用
     ros_port = None
