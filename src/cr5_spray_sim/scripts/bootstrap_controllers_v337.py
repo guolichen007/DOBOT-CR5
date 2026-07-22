@@ -144,7 +144,7 @@ class ControllerBootstrapper:
                 stable = 0
                 last_state = state
                 rospy.loginfo("%s state: %s (waiting...)", name, state)
-            rospy.sleep(0.2)
+            time.sleep(0.2)
         rospy.logerr("%s timed out waiting for running, last state: %s",
                      name, self._get_controller_state(name))
         return False

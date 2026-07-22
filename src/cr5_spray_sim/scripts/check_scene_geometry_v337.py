@@ -69,8 +69,8 @@ MAX_POSITION_MM = 2.0      # mm
 MAX_ORIENTATION_DEG = 0.2  # 度
 MAX_JOINT_RAD = 0.01       # rad
 
-# ground_plane 不做绝对坐标检查 (它由 empty_world 管理)
-SKIP_MODELS = {"ground_plane"}
+# 相机模型不检查方向 (由 compute_look_at 动态计算，pitch 约 12-13°)
+SKIP_ORIENTATION_CHECK = {"cam_front_left", "cam_front_right", "cam_rear"}
 
 
 def load_expected():
@@ -178,9 +178,6 @@ class GeometryChecker:
 
     def check_model_pose(self, name):
         """检查单个模型的绝对位置和姿态."""
-        if name in SKIP_MODELS:
-            return True
-
         req = GetModelStateRequest()
         req.model_name = name
         req.relative_entity_name = "world"
@@ -197,6 +194,10 @@ class GeometryChecker:
 
         xyz_rpy = self._pose_to_xyz_rpy(resp.pose)
         pos_ok = self._check_position(name, xyz_rpy[:3])
+        # 相机模型不检查方向 (look-at 动态计算)
+        if name in SKIP_ORIENTATION_CHECK:
+            rospy.loginfo("%s orientation skipped (look-at camera)", name)
+            return pos_ok
         ori_ok = self._check_orientation(name, xyz_rpy[3:])
         return pos_ok and ori_ok
 

@@ -299,7 +299,7 @@ run_audit() {
     # 非 isolated 模式才做审计 (isolated 用随机端口，冲突几率极低)
     if $ISOLATED; then
         echo "[$(date +%H:%M:%S)] Phase A: skipping audit (isolated mode)"
-        sys.stderr.write "SIM_PROCESS_PREFLIGHT_PASS\n"
+        echo "SIM_PROCESS_PREFLIGHT_PASS"
         return 0
     fi
 

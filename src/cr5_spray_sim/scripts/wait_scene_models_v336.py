@@ -18,6 +18,7 @@ V3.3.6 Scene Models Waiter.
   2 = 模型缺失
 """
 import sys
+import time
 import rospy
 from gazebo_msgs.srv import GetWorldProperties
 
@@ -65,15 +66,14 @@ def main():
 
     stable = 0
     last_set = None
-    rate = rospy.Rate(1.0 / POLL_INTERVAL)
-    start = rospy.get_time()
+    start = time.time()
 
-    while rospy.get_time() - start < timeout:
+    while time.time() - start < timeout:
         try:
             current = _get_models()
         except Exception as e:
             rospy.logwarn("get_world_properties failed: %s", e)
-            rate.sleep()
+            time.sleep(POLL_INTERVAL)
             continue
 
         missing = REQUIRED_MODELS - current
@@ -94,14 +94,14 @@ def main():
                           len(current))
 
         if stable >= STABLE_COUNT:
-            elapsed = rospy.get_time() - start
+            elapsed = time.time() - start
             rospy.loginfo("all %d models ready after %.1fs: %s",
                           len(current), elapsed, sorted(current))
             sys.stderr.write("SCENE_MODELS_READY\n")
             sys.stderr.flush()
             sys.exit(0)
 
-        rate.sleep()
+        time.sleep(POLL_INTERVAL)
 
     # 超时
     try:
