@@ -8,17 +8,32 @@ target:
     y: toward the left face
     z: up
   main_body_m:
-  - 0.3
-  - 0.22
-  - 0.18
+  - 0.34
+  - 0.28
+  - 0.24
   asymmetric_top_block_m:
-  - 0.08
   - 0.06
   - 0.05
+  - 0.04
+  asymmetric_top_block_pose_m:
+  - 0.13
+  - 0.11
+  - 0.14
+  panel_gap_m: 0.001
+  hanger_y_m: 0.115
+  spreader_center_z_m: 0.62
+  spreader_size_m:
+  - 0.03
+  - 0.30
+  - 0.03
   surface_finish: matte_light_gray_or_white
   hanging:
     type: two_rope
     requirement: rigid target body; ropes only suspend the target
+  cable_bottom_z_m: 0.12
+  cable_top_z_m: 0.605
+  cable_length_m: 0.485
+  cable_center_z_m: 0.3625
 opencv:
   generator_version: 4.13.0
   charuco_dictionary: DICT_5X5_1000
@@ -38,6 +53,15 @@ panels:
     physical_canvas_m:
     - 0.24
     - 0.18
+    pose_target:
+      xyz:
+      - 0.171
+      - 0.0
+      - 0.0
+      rpy:
+      - 0.0
+      - 1.57079632679
+      - 0.0
     board:
       squares_x: 8
       squares_y: 6
@@ -80,6 +104,15 @@ panels:
     physical_canvas_m:
     - 0.16
     - 0.12
+    pose_target:
+      xyz:
+      - 0.0
+      - 0.141
+      - 0.0
+      rpy:
+      - -1.57079632679
+      - 0.0
+      - 0.0
     board:
       squares_x: 6
       squares_y: 5
@@ -112,6 +145,15 @@ panels:
     physical_canvas_m:
     - 0.22
     - 0.18
+    pose_target:
+      xyz:
+      - 0.0
+      - -0.141
+      - 0.0
+      rpy:
+      - 1.57079632679
+      - 0.0
+      - 0.0
     dictionary: DICT_APRILTAG_36h11
     tag_ids:
     - 4
@@ -135,6 +177,15 @@ panels:
     physical_canvas_m:
     - 0.16
     - 0.16
+    pose_target:
+      xyz:
+      - 0.0
+      - 0.0
+      - 0.121
+      rpy:
+      - 0.0
+      - 0.0
+      - 0.0
     dictionary: DICT_APRILTAG_36h11
     tag_ids:
     - 8
@@ -153,6 +204,15 @@ panels:
     physical_canvas_m:
     - 0.24
     - 0.18
+    pose_target:
+      xyz:
+      - -0.171
+      - 0.0
+      - 0.0
+      rpy:
+      - 0.0
+      - -1.57079632679
+      - 0.0
     board:
       squares_x: 8
       squares_y: 6

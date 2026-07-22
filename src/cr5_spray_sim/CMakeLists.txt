@@ -5,6 +5,9 @@ find_package(catkin REQUIRED)
 
 catkin_package()
 
+# V5: Python package — cr5_spray_sim.aruco_compat
+catkin_python_setup()
+
 install(DIRECTORY launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
@@ -81,11 +84,13 @@ catkin_install_python(PROGRAMS
   scripts/check_scene_runtime_v337.py
   scripts/check_runtime_signals_v337.py
   # Calibration Target V1
-  scripts/aruco_compat.py
+  # aruco_compat.py → catkin Python 包 (setup.py + src/cr5_spray_sim/)
   scripts/validate_calibration_target_visibility.py
   scripts/calibrate_three_fixed_cameras.py
   # V4
   scripts/publish_calibration_target_tf.py
+  # V5
+  scripts/validate_calibration_target_geometry.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

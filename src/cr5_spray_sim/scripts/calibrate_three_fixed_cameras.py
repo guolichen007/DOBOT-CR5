@@ -100,6 +100,15 @@ def detect_charuco_face(gray, K, D, face_key):
 
     # 3D points from board chessboard corners
     board_pts = np.asarray(board.chessboardCorners, dtype=np.float32).reshape(-1, 3)
+
+    # V5: 将 ChArUco board 原点平移到面板中心
+    # board.chessboardCorners 使用 ChArUco board 局部原点,
+    # 但 calibration_target_*_frame 位于面板中心
+    board_width = cfg["sx"] * cfg["sq_m"]
+    board_height = cfg["sy"] * cfg["sq_m"]
+    board_pts[:, 0] -= board_width / 2.0
+    board_pts[:, 1] -= board_height / 2.0
+
     cids_flat = [int(i) for i in cids.flatten()]
     obj_pts = np.array([board_pts[i] for i in cids_flat], dtype=np.float32)
     img_pts = cc.reshape(-1, 2).astype(np.float32)

@@ -23,26 +23,27 @@
 -->
 <robot name="calibration_target_v1" xmlns:xacro="http://ros.org/wiki/xacro">
 
-  <!-- ===== 基本参数 ===== -->
-  <xacro:property name="body_sx" value="0.30"/>  <!-- X: 前后 -->
-  <xacro:property name="body_sy" value="0.22"/>  <!-- Y: 左右 -->
-  <xacro:property name="body_sz" value="0.18"/>  <!-- Z: 上下 -->
-  <xacro:property name="panel_thick" value="0.003"/>
+  <!-- ===== 基本参数 (V5) ===== -->
+  <xacro:property name="body_sx" value="0.34"/>  <!-- X: 前后 -->
+  <xacro:property name="body_sy" value="0.28"/>  <!-- Y: 左右 -->
+  <xacro:property name="body_sz" value="0.24"/>  <!-- Z: 上下 -->
+  <xacro:property name="panel_gap" value="0.001"/>
 
-  <!-- 面板外表面偏移 -->
-  <xacro:property name="front_x" value="${body_sx/2 + panel_thick/2}"/>
-  <xacro:property name="back_x"  value="${-body_sx/2 - panel_thick/2}"/>
-  <xacro:property name="left_y"  value="${body_sy/2 + panel_thick/2}"/>
-  <xacro:property name="right_y" value="${-body_sy/2 - panel_thick/2}"/>
-  <xacro:property name="top_z"   value="${body_sz/2 + panel_thick/2}"/>
+  <!-- 面板外表面偏移 (V5: PANEL_GAP 替代 panel_thick/2) -->
+  <xacro:property name="front_x" value="${body_sx/2 + panel_gap}"/>
+  <xacro:property name="back_x"  value="${-body_sx/2 - panel_gap}"/>
+  <xacro:property name="left_y"  value="${body_sy/2 + panel_gap}"/>
+  <xacro:property name="right_y" value="${-body_sy/2 - panel_gap}"/>
+  <xacro:property name="top_z"   value="${body_sz/2 + panel_gap}"/>
 
-  <!-- 吊具参数 -->
+  <!-- 吊具参数 (V5) -->
   <xacro:property name="spreader_z" value="0.62"/>
-  <xacro:property name="hanger_y" value="0.08"/>
+  <xacro:property name="hanger_y" value="0.115"/>
   <xacro:property name="cable_radius" value="0.003"/>
-  <xacro:property name="cable_bottom_z" value="${body_sz/2 + 0.015}"/>
-  <xacro:property name="cable_len" value="${spreader_z - cable_bottom_z}"/>
-  <xacro:property name="cable_mid_z" value="${(spreader_z + cable_bottom_z) / 2}"/>
+  <xacro:property name="cable_bottom_z" value="0.12"/>
+  <xacro:property name="cable_top_z" value="0.605"/>
+  <xacro:property name="cable_len" value="${cable_top_z - cable_bottom_z}"/>
+  <xacro:property name="cable_mid_z" value="${(cable_top_z + cable_bottom_z) / 2}"/>
 
   <!-- ===== 材质 ===== -->
   <material name="body_mat_gray">
@@ -99,11 +100,11 @@
   <!-- ========================================================= -->
   <!-- 顶部偏置块 (非对称特征)                                      -->
   <!-- ========================================================= -->
-  <xacro:property name="block_sx" value="0.08"/>
-  <xacro:property name="block_sy" value="0.06"/>
-  <xacro:property name="block_sz" value="0.05"/>
-  <xacro:property name="block_off_x" value="0.06"/>
-  <xacro:property name="block_off_y" value="0.05"/>
+  <xacro:property name="block_sx" value="0.06"/>  <!-- V5: 缩小 -->
+  <xacro:property name="block_sy" value="0.05"/>
+  <xacro:property name="block_sz" value="0.04"/>
+  <xacro:property name="block_off_x" value="0.13"/>
+  <xacro:property name="block_off_y" value="0.11"/>
 
   <link name="top_offset_block">
     <inertial>
