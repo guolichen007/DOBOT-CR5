@@ -200,9 +200,10 @@ def process_camera(cam_name, output_dir):
 
 
 def build_graph(results):
-    """构建共同观测图."""
-    cams = sorted([k for k in results.keys() if not k.startswith("_")])
-    edges = []
+    """构建共同观测图 (仅使用 CAMERAS 定义的真实相机)."""
+    cams = sorted(CAMERAS.keys())
+    # Direct edges: two cameras see the same face
+    direct_edges = []
     for i, c1 in enumerate(cams):
         r1 = results.get(c1, {})
         if isinstance(r1, dict):
@@ -212,10 +213,19 @@ def build_graph(results):
                 if isinstance(r2, dict):
                     shared = f1 & set(r2.get("complete_faces", []))
                     if shared:
-                        edges.append({"cameras": [c1, c2], "shared_faces": sorted(shared)})
+                        direct_edges.append({"cameras": [c1, c2], "shared_faces": sorted(shared)})
+    # Rigid target edges: two cameras see different faces on same rigid target
+    rigid_edges = []
+    cameras_with_faces = [c for c in cams if results.get(c, {}).get("complete_faces")]
+    for i, c1 in enumerate(cameras_with_faces):
+        for c2 in cameras_with_faces[i+1:]:
+            if not any(e for e in direct_edges if {c1, c2} == set(e["cameras"])):
+                rigid_edges.append({"cameras": [c1, c2], "note": "both observe rigid calibration_target"})
 
+    # Build adjacency from all edge types
+    all_edges = direct_edges + rigid_edges
     adj = {c: [] for c in cams}
-    for e in edges:
+    for e in all_edges:
         adj[e["cameras"][0]].append(e["cameras"][1])
         adj[e["cameras"][1]].append(e["cameras"][0])
 
@@ -230,10 +240,11 @@ def build_graph(results):
                     stack.extend(adj[n])
             components.append(comp)
 
+    all_connected = len(components) == 1 and len(components[0]) >= len(cams)
     return {
-        "direct_shared_observation_edges": edges,
-        "rigid_target_edges": [{"note": "All cameras observe faces on rigid calibration_target_frame"}],
-        "all_cameras_connected_via_target": len(components) == 1 and len(components[0]) >= 3,
+        "direct_shared_observation_edges": direct_edges,
+        "rigid_target_edges": rigid_edges,
+        "all_cameras_connected_via_target": all_connected,
         "connected_components": components,
     }
 

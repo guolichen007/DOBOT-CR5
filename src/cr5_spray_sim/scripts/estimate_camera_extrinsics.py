@@ -351,13 +351,22 @@ def main():
     rospy.sleep(1.5)
 
     all_results = {"opencv_capability": aruco_compat.get_opencv_info()}
+    per_camera_pass = {}
     for cam_name in sorted(CAMERAS.keys()):
-        all_results[cam_name] = process_camera(cam_name, tf_buf, args.output)
+        cr = process_camera(cam_name, tf_buf, args.output)
+        all_results[cam_name] = cr
+        # Per-camera: must have at least one passing solution
+        solutions = cr.get("solutions", []) if isinstance(cr, dict) else []
+        per_camera_pass[cam_name] = any(
+            s.get("pass", False) and s.get("tvec_camera_target") is not None
+            for s in solutions
+        )
 
-    any_sol = any(len(r.get("solutions", [])) > 0 for r in all_results.values()
-                  if isinstance(r, dict))
-    all_results["any_solution"] = any_sol
+    all_cameras_have_solution = all(per_camera_pass.values())
+    all_results["per_camera_pass"] = per_camera_pass
+    all_results["all_cameras_have_solution"] = all_cameras_have_solution
 
+    # Save outputs
     import yaml as _yaml
     with open(os.path.join(args.output, "initial_extrinsics.yaml"), "w") as f:
         _yaml.dump(all_results, f, default_flow_style=False)
@@ -376,7 +385,20 @@ def main():
     with open(os.path.join(args.output, "gazebo_truth_comparison.json"), "w") as f:
         json.dump(truth_d, f, indent=2)
 
-    rospy.loginfo("Calibration done. Solutions: %s", any_sol)
+    summary = {
+        "per_camera_pass": per_camera_pass,
+        "all_cameras_have_solution": all_cameras_have_solution,
+        "git_sha": os.environ.get("CR5_SPRAY_GIT_SHA", "unknown"),
+    }
+    with open(os.path.join(args.output, "calibration_summary.json"), "w") as f:
+        json.dump(summary, f, indent=2)
+
+    if all_cameras_have_solution:
+        rospy.loginfo("Calibration PASS: all cameras have valid solutions")
+        sys.exit(0)
+    else:
+        rospy.logerr("Calibration FAIL: %s", per_camera_pass)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

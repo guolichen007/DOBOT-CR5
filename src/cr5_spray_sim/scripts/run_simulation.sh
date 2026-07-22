@@ -107,8 +107,14 @@ if [[ "$PHYSICS_MODE" != "stable" && "$PHYSICS_MODE" != "gravity" ]]; then
     exit 1
 fi
 if [[ "$OBJECT" != "motor_housing_cylinder" && "$OBJECT" != "rectangular_housing" && "$OBJECT" != "calibration_target" ]]; then
-    echo "ERROR: --object must be 'motor_housing_cylinder', 'rectangular_housing', or 'calibration_target'"
+    echo "ERROR: --object must be 'calibration_target', 'motor_housing_cylinder', or 'rectangular_housing'"
     exit 1
+fi
+
+# 标定模式: 默认关闭喷涂模拟
+if [[ "$OBJECT" == "calibration_target" ]]; then
+    ENABLE_SPRAY_SIM=false
+    ENABLE_PAINT_PATCHES=false
 fi
 
 # ---- 工作空间检查 ----
@@ -156,6 +162,7 @@ GIT_BRANCH="$(git -C "$WS_DIR" branch --show-current 2>/dev/null || echo unknown
 GIT_SHA="$(git -C "$WS_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 ROS_MASTER_PID=""
+ROS_MASTER_OWNED=false
 LAUNCH_PID=""
 LAUNCH_PGID=""
 CLEANED=false
@@ -237,9 +244,9 @@ cleanup() {
         echo "[$(date +%H:%M:%S)] roslaunch stopped"
     fi
 
-    # 停止独立 roscore
-    if $ISOLATED && [[ -n "$ROS_MASTER_PID" ]] && kill -0 "$ROS_MASTER_PID" 2>/dev/null; then
-        echo "[$(date +%H:%M:%S)] stopping roscore pid=$ROS_MASTER_PID ..."
+    # 停止本脚本启动的 roscore (不论 GUI/isolated)
+    if $ROS_MASTER_OWNED && [[ -n "$ROS_MASTER_PID" ]] && kill -0 "$ROS_MASTER_PID" 2>/dev/null; then
+        echo "[$(date +%H:%M:%S)] stopping owned roscore pid=$ROS_MASTER_PID ..."
         kill "$ROS_MASTER_PID" 2>/dev/null || true
         wait "$ROS_MASTER_PID" 2>/dev/null || true
     fi
@@ -314,7 +321,8 @@ start_master() {
         echo "ERROR: roscore failed to start"
         exit 1
     fi
-    echo "[$(date +%H:%M:%S)] roscore ready (pid=$ROS_MASTER_PID)"
+    ROS_MASTER_OWNED=true
+    echo "[$(date +%H:%M:%S)] roscore ready (pid=$ROS_MASTER_PID, owned=true)"
 
     # V4: 写入当前会话环境文件
     write_session_env

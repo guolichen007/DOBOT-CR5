@@ -10,16 +10,22 @@
 
   <depend>gazebo_ros</depend>
   <depend>gazebo_ros_control</depend>
+  <depend>gazebo_msgs</depend>
   <depend>roscpp</depend>
   <depend>rospy</depend>
   <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>geometry_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>tf</depend>
   <depend>tf2_ros</depend>
+  <depend>cv_bridge</depend>
+  <depend>rospkg</depend>
   <depend>joint_state_controller</depend>
   <depend>joint_trajectory_controller</depend>
   <depend>robot_state_publisher</depend>
   <depend>controller_manager</depend>
+  <depend>controller_manager_msgs</depend>
   <depend>xacro</depend>
   <depend>dobot_description</depend>
   <depend>cr5_moveit</depend>
