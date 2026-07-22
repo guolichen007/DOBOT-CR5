@@ -274,6 +274,11 @@ LAUNCH_ARGS="${LAUNCH_ARGS} enable_spray_sim:=${ENABLE_SPRAY_SIM}"
 LAUNCH_ARGS="${LAUNCH_ARGS} enable_paint_patches:=${ENABLE_PAINT_PATCHES}"
 LAUNCH_ARGS="${LAUNCH_ARGS} paused:=true start_controllers:=false"
 LAUNCH_ARGS="${LAUNCH_ARGS} physics_mode:=${PHYSICS_MODE}"
+if [[ "$PHYSICS_MODE" == "gravity" ]]; then
+  LAUNCH_ARGS="${LAUNCH_ARGS} robot_gravity:=true"
+else
+  LAUNCH_ARGS="${LAUNCH_ARGS} robot_gravity:=false"
+fi
 
 echo ""
 echo "=============================================="
