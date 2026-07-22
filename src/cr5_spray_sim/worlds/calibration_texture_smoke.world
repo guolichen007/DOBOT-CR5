@@ -1,0 +1,189 @@
+<?xml version="1.0"?>
+<!--
+  Calibration Texture Smoke Test World (V4).
+
+  仅包含:
+  - 标定目标模型 (自包含 SDF)
+  - 一个正对 Front ChArUco 面板的 Gazebo camera
+  - 光源和地面
+
+  验证: 贴图是否实际渲染 (黑色/白色像素比例 + Marker 检出).
+  在 smoke test 通过前，禁止启动完整 CR5 场景.
+-->
+<sdf version="1.7">
+  <world name="calibration_texture_smoke">
+
+    <!-- 光源 -->
+    <light name="sun" type="directional">
+      <pose>0 0 2 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular>
+      <direction>0 -0.5 -1</direction>
+      <cast_shadows>false</cast_shadows>
+    </light>
+
+    <!-- 环境光 (确保贴图不依赖方向光) -->
+    <light name="ambient_fill" type="directional">
+      <pose>0 0 1 0 0 0</pose>
+      <diffuse>0.4 0.4 0.4 1</diffuse>
+      <specular>0 0 0 1</specular>
+      <direction>0 0 -1</direction>
+      <cast_shadows>false</cast_shadows>
+    </light>
+
+    <!-- 地面 -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>10 10</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>10 10</size></plane></geometry>
+          <material>
+            <ambient>0.3 0.3 0.35 1</ambient>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 标定目标 V1 (SDF model, 位置与完整场景一致) -->
+    <model name="simple_hanging_workpiece">
+      <static>true</static>
+      <pose>0.56 0 0.98 0 0 0</pose>
+
+      <!-- 主体 -->
+      <link name="main_body">
+        <visual name="body_vis">
+          <geometry><box><size>0.30 0.22 0.18</size></box></geometry>
+          <material><ambient>0.55 0.55 0.57 1</ambient></material>
+        </visual>
+      </link>
+
+      <!-- Front ChArUco panel — 面向 +X (smoke test 验证目标) -->
+      <link name="front_panel_smoke">
+        <pose>0.1515 0 0 0 1.570796 0</pose>
+        <visual name="front_panel_vis">
+          <geometry>
+            <mesh>
+              <uri>model://calibration_target_v1/meshes/panel_unit.dae</uri>
+              <scale>0.24 0.18 1.0</scale>
+            </mesh>
+          </geometry>
+          <cast_shadows>false</cast_shadows>
+          <material>
+            <script>
+              <uri>model://calibration_target_v1/materials/scripts</uri>
+              <uri>model://calibration_target_v1/materials/textures</uri>
+              <name>CR5/Calibration/CharucoFrontV1</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+
+      <!-- Left panel -->
+      <link name="left_panel">
+        <pose>0 0.1115 0 -1.570796 0 0</pose>
+        <visual name="left_panel_vis">
+          <geometry>
+            <mesh>
+              <uri>model://calibration_target_v1/meshes/panel_unit.dae</uri>
+              <scale>0.16 0.12 1.0</scale>
+            </mesh>
+          </geometry>
+          <cast_shadows>false</cast_shadows>
+          <material>
+            <script>
+              <uri>model://calibration_target_v1/materials/scripts</uri>
+              <uri>model://calibration_target_v1/materials/textures</uri>
+              <name>CR5/Calibration/CharucoLeftV1</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+
+      <!-- Right panel -->
+      <link name="right_panel">
+        <pose>0 -0.1115 0 1.570796 0 0</pose>
+        <visual name="right_panel_vis">
+          <geometry>
+            <mesh>
+              <uri>model://calibration_target_v1/meshes/panel_unit.dae</uri>
+              <scale>0.22 0.18 1.0</scale>
+            </mesh>
+          </geometry>
+          <cast_shadows>false</cast_shadows>
+          <material>
+            <script>
+              <uri>model://calibration_target_v1/materials/scripts</uri>
+              <uri>model://calibration_target_v1/materials/textures</uri>
+              <name>CR5/Calibration/AprilTagRightV1</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+
+      <!-- Top panel -->
+      <link name="top_panel">
+        <pose>0 0 0.0915 0 0 0</pose>
+        <visual name="top_panel_vis">
+          <geometry>
+            <mesh>
+              <uri>model://calibration_target_v1/meshes/panel_unit.dae</uri>
+              <scale>0.16 0.16 1.0</scale>
+            </mesh>
+          </geometry>
+          <cast_shadows>false</cast_shadows>
+          <material>
+            <script>
+              <uri>model://calibration_target_v1/materials/scripts</uri>
+              <uri>model://calibration_target_v1/materials/textures</uri>
+              <name>CR5/Calibration/AprilTagTopV1</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+
+      <!-- Back panel -->
+      <link name="back_panel">
+        <pose>-0.1515 0 0 0 -1.570796 0</pose>
+        <visual name="back_panel_vis">
+          <geometry>
+            <mesh>
+              <uri>model://calibration_target_v1/meshes/panel_unit.dae</uri>
+              <scale>0.24 0.18 1.0</scale>
+            </mesh>
+          </geometry>
+          <cast_shadows>false</cast_shadows>
+          <material>
+            <script>
+              <uri>model://calibration_target_v1/materials/scripts</uri>
+              <uri>model://calibration_target_v1/materials/textures</uri>
+              <name>CR5/Calibration/CharucoBackV1</name>
+            </script>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Smoke test camera: 正对 Front 面板 (约 0.6m 距离) -->
+    <model name="smoke_camera">
+      <static>true</static>
+      <pose>1.16 0 0.98 0 0 0</pose>
+      <link name="camera_link">
+        <pose>0 0 0 0 0 0</pose>
+        <sensor name="smoke_cam" type="camera">
+          <camera>
+            <horizontal_fov>1.0472</horizontal_fov>
+            <image><width>1280</width><height>960</height></image>
+            <clip><near>0.1</near><far>10</far></clip>
+          </camera>
+          <always_on>true</always_on>
+          <update_rate>10</update_rate>
+          <visualize>false</visualize>
+        </sensor>
+      </link>
+    </model>
+
+  </world>
+</sdf>

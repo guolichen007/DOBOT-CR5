@@ -29,6 +29,10 @@ install(DIRECTORY media
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
+install(DIRECTORY models
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
 # Python scripts
 catkin_install_python(PROGRAMS
   scripts/spawn_scene_cameras.py
@@ -80,6 +84,8 @@ catkin_install_python(PROGRAMS
   scripts/aruco_compat.py
   scripts/validate_calibration_target_visibility.py
   scripts/calibrate_three_fixed_cameras.py
+  # V4
+  scripts/publish_calibration_target_tf.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
@@ -90,6 +96,10 @@ install(PROGRAMS
   scripts/run_scene_v33_spray.sh
   scripts/run_scene_v337.sh
   scripts/use_spray_session_v33.sh
+  # V4
+  scripts/use_spray_session_v337.sh
+  scripts/run_in_spray_session_v337.sh
+  scripts/run_calibration_texture_smoke.sh
   # V3.3.3
   scripts/show_camera_status_v333.sh
   scripts/open_spray_rviz_v333.sh

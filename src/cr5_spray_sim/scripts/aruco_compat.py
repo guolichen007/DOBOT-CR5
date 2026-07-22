@@ -52,16 +52,13 @@ def detect_markers(image, dictionary, parameters=None):
 def interpolate_charuco_corners(marker_corners, marker_ids, image, board,
                                 cameraMatrix=None, distCoeffs=None):
     """
-    ChArUco 角点插值 (兼容新旧 API).
+    ChArUco 角点插值 — 所有 OpenCV 版本统一走 interpolateCornersCharuco.
 
-    marker_ids: 必须是 board 的 local ID (0-based), 不是自定义 ID.
+    marker_ids: 必须是 board 的 local ID (0-based), 不是自定义 ID (已 remap).
+
+    V4 修复: 不再使用 CharucoDetector.detectBoard(image),
+    因为该方法会从完整图像重新检测所有 marker, 忽略已经 remap 的自定义 ID.
     """
-    if _HAS_CHARUCO_DETECTOR:
-        detector = aruco.CharucoDetector(board)
-        charuco_corners, charuco_ids, _, _ = detector.detectBoard(image)
-        return charuco_corners, charuco_ids
-
-    # Legacy API
     kwargs = {}
     if cameraMatrix is not None:
         kwargs["cameraMatrix"] = cameraMatrix

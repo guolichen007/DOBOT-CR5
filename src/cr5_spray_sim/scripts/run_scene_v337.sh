@@ -245,7 +245,7 @@ cleanup() {
     fi
 
     # 清理 session 文件
-    rm -f "/tmp/cr5_spray_v337_env"
+    rm -f "/tmp/cr5_spray_v337_current.env"
 
     # 释放锁
     flock -u 9 2>/dev/null || true
@@ -273,7 +273,7 @@ find_available_port() {
     return 1
 }
 
-# ---- Phase A: Master 启动 + 进程审计 ----
+# ---- Phase A1/A2: Master 端口选择 + 启动 ----
 start_master() {
     local ros_port gz_port
 
@@ -298,14 +298,14 @@ start_master() {
         fi
     else
         # Headless 非 isolated: 用共享 roscore (不启动自己的)
-        echo "[$(date +%H:%M:%S)] Phase A: using shared roscore"
+        echo "[$(date +%H:%M:%S)] Phase A1: using shared roscore"
         return 0
     fi
 
     export ROS_MASTER_URI="http://localhost:${ros_port}"
     export GAZEBO_MASTER_URI="http://localhost:${gz_port}"
 
-    echo "[$(date +%H:%M:%S)] Phase A: starting roscore (port $ros_port)..."
+    echo "[$(date +%H:%M:%S)] Phase A2: starting roscore (port $ros_port)..."
     roscore -p "$ros_port" &
     ROS_MASTER_PID=$!
     sleep 3
@@ -315,19 +315,44 @@ start_master() {
         exit 1
     fi
     echo "[$(date +%H:%M:%S)] roscore ready (pid=$ROS_MASTER_PID)"
+
+    # V4: 写入当前会话环境文件
+    write_session_env
+}
+
+write_session_env() {
+    local ENV_FILE="/tmp/cr5_spray_v337_current.env"
+    cat > "$ENV_FILE" <<EOF
+source /opt/ros/noetic/setup.bash
+source "$WS_DIR/devel/setup.bash"
+
+export ROS_MASTER_URI="$ROS_MASTER_URI"
+export GAZEBO_MASTER_URI="$GAZEBO_MASTER_URI"
+export GAZEBO_RESOURCE_PATH="$GAZEBO_RESOURCE_PATH"
+export GAZEBO_MODEL_PATH="$GAZEBO_MODEL_PATH"
+
+export CR5_SPRAY_SESSION_ID="$SESSION_ID"
+export CR5_SPRAY_BRANCH="$GIT_BRANCH"
+export CR5_SPRAY_HEAD="$GIT_SHA"
+export CR5_SPRAY_LOG_DIR="$LOG_DIR"
+export CR5_SPRAY_WS="$WS_DIR"
+EOF
+    chmod 600 "$ENV_FILE"
+    echo "[$(date +%H:%M:%S)] session env written: $ENV_FILE"
 }
 
 run_audit() {
     # 非 isolated 模式才做审计 (isolated 用随机端口，冲突几率极低)
+    # V4: audit 在 roscore 启动前运行，直接用 python3 而非 rosrun
     if $ISOLATED; then
-        echo "[$(date +%H:%M:%S)] Phase A: skipping audit (isolated mode)"
+        echo "[$(date +%H:%M:%S)] Phase A0: skipping audit (isolated mode)"
         echo "SIM_PROCESS_PREFLIGHT_PASS"
         return 0
     fi
 
-    echo "[$(date +%H:%M:%S)] Phase A: auditing simulation processes..."
+    echo "[$(date +%H:%M:%S)] Phase A0: auditing old simulation processes..."
     local audit_ret=0
-    rosrun cr5_spray_sim audit_sim_processes_v337.py $($GUI && echo "--gui") || audit_ret=$?
+    python3 "$SCRIPT_DIR/audit_sim_processes_v337.py" $($GUI && echo "--gui") || audit_ret=$?
 
     if [[ $audit_ret -ne 0 ]]; then
         echo "ERROR: SIM_PROCESS_PREFLIGHT_FAIL"
@@ -479,11 +504,13 @@ degraded_failure() {
 # 主流程
 # ====================================================================
 
-# Phase A: Master + Audit
+# V4: Phase A0 先审计旧进程, Phase A1 再选端口, Phase A2 启动 roscore
+run_audit
+
+# Phase A1/A2: 端口选择 + Master 启动
 if $ISOLATED || $GUI; then
     start_master
 fi
-run_audit
 
 # Phase B: 启动 paused 场景
 launch_scene
@@ -534,6 +561,9 @@ echo "  CAMERA_DEPTH_3_OF_3_PASS     ✓"
 echo "  SPRAY_SIGNAL_PASS            ✓"
 echo ""
 echo "  Session ACTIVE — Ctrl+C to exit"
+echo ""
+echo "  Connect another terminal with:"
+echo "    source /tmp/cr5_spray_v337_current.env"
 echo ""
 echo "========================================="
 
