@@ -69,7 +69,7 @@
           -J joint4 0.0 -J joint5 0.0 -J joint6 0.0"
     respawn="false" output="screen"/>
 
-  <!-- CR5 controllers (V3.3.3: Gazebo paused 时直接启动, 不再 --stopped) -->
+  <!-- CR5 controllers (V3.3.3: Gazebo paused 时直接启动, 不再使用 stopped 模式) -->
   <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
   <node name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
     args="joint_state_controller arm_controller"
