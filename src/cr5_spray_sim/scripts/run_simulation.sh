@@ -135,15 +135,15 @@ require_file() {
     fi
 }
 if [[ "$OBJECT" == "calibration_target" ]]; then
-    require_file "$PKG_DIR/media/materials/scripts/cr5_calibration_target.material"
-    require_file "$PKG_DIR/media/materials/textures/charuco_front.png"
-    require_file "$PKG_DIR/media/materials/textures/charuco_left_v1.png"
-    require_file "$PKG_DIR/media/materials/textures/charuco_back_v1.png"
-    require_file "$PKG_DIR/media/materials/textures/apriltag_right_v1.png"
-    require_file "$PKG_DIR/media/materials/textures/apriltag_top_v1.png"
+    require_file "$PKG_DIR/models/calibration_target/materials/scripts/calibration_target.material"
+    require_file "$PKG_DIR/models/calibration_target/materials/textures/charuco_front.png"
+    require_file "$PKG_DIR/models/calibration_target/materials/textures/charuco_left.png"
+    require_file "$PKG_DIR/models/calibration_target/materials/textures/charuco_back.png"
+    require_file "$PKG_DIR/models/calibration_target/materials/textures/apriltag_right.png"
+    require_file "$PKG_DIR/models/calibration_target/materials/textures/apriltag_top.png"
     echo "GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH"
     echo "Calibration media tree:"
-    find "$PKG_DIR/media/materials" -maxdepth 2 -type f -printf '  %p\n' | sort
+    find "$PKG_DIR/models/calibration_target/materials" -maxdepth 2 -type f -printf '  %p\n' | sort
 fi
 
 # ---- Session 设置 ----
