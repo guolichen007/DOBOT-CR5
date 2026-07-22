@@ -16,8 +16,7 @@
       ├── calibration_target_top_frame
       └── calibration_target_back_frame
 
-  启动方式:
-    bash src/cr5_spray_sim/scripts/run_simulation.sh --gui --object=calibration_target --profile=quality
+  启动方式: bash src/cr5_spray_sim/scripts/run_simulation.sh (参见 README)
 -->
 <launch>
   <arg name="gui" default="false"/>
