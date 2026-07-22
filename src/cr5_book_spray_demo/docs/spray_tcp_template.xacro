@@ -1,0 +1,10 @@
+<!-- TEMPLATE ONLY. Replace all PLACEHOLDER values after measurement/calibration.
+     Include this in the current CR5 URDF/Xacro only once. -->
+<link name="spray_tcp"/>
+<joint name="Link6_to_spray_tcp" type="fixed">
+  <parent link="Link6"/>
+  <child link="spray_tcp"/>
+  <!-- meters and radians -->
+  <origin xyz="PLACEHOLDER_X PLACEHOLDER_Y PLACEHOLDER_Z"
+          rpy="PLACEHOLDER_R PLACEHOLDER_P PLACEHOLDER_Y"/>
+</joint>

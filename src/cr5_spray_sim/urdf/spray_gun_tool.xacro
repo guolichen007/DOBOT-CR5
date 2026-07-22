@@ -1,0 +1,113 @@
+<?xml version="1.0"?>
+<!--
+  Spray Gun Tool V3: mounted on CR5 Link6.
+  Structure:
+    spray_gun_mount → spray_gun_body → spray_nozzle_frame
+    +Z of spray_nozzle_frame points toward spray surface.
+    Semi-transparent spray cone visual for debugging.
+-->
+<robot name="spray_gun_tool" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <material name="gun_body_dark">
+    <color rgba="0.15 0.15 0.18 1"/>
+  </material>
+  <material name="gun_nozzle_metal">
+    <color rgba="0.55 0.50 0.45 1"/>
+  </material>
+  <material name="spray_cone_transparent">
+    <color rgba="0.3 0.6 1.0 0.25"/>
+  </material>
+
+  <!-- Mount on Link6 -->
+  <link name="spray_gun_mount">
+    <inertial>
+      <mass value="0.3"/>
+      <inertia ixx="0.0005" ixy="0" ixz="0" iyy="0.0005" iyz="0" izz="0.0003"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.015" rpy="0 0 0"/>
+      <geometry><box size="0.04 0.04 0.03"/></geometry>
+      <material name="gun_body_dark"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.015" rpy="0 0 0"/>
+      <geometry><box size="0.04 0.04 0.03"/></geometry>
+    </collision>
+  </link>
+  <joint name="link6_to_gun_mount" type="fixed">
+    <parent link="Link6"/>
+    <child link="spray_gun_mount"/>
+    <origin xyz="0 0 0.06" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Gun body -->
+  <link name="spray_gun_body">
+    <inertial>
+      <mass value="0.5"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.0005"/>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.018" length="0.08"/></geometry>
+      <material name="gun_body_dark"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.04" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.018" length="0.08"/></geometry>
+    </collision>
+  </link>
+  <joint name="gun_mount_to_body" type="fixed">
+    <parent link="spray_gun_mount"/>
+    <child link="spray_gun_body"/>
+    <origin xyz="0 0 0.03" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Nozzle -->
+  <link name="spray_nozzle">
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.015" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.008" length="0.03"/></geometry>
+      <material name="gun_nozzle_metal"/>
+    </visual>
+  </link>
+  <joint name="body_to_nozzle" type="fixed">
+    <parent link="spray_gun_body"/>
+    <child link="spray_nozzle"/>
+    <origin xyz="0 0 0.095" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Spray nozzle frame: +Z points toward surface -->
+  <link name="spray_nozzle_frame"/>
+  <joint name="nozzle_to_frame" type="fixed">
+    <parent link="spray_nozzle"/>
+    <child link="spray_nozzle_frame"/>
+    <origin xyz="0 0 0.03" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Spray cone visual (semi-transparent, for debugging) -->
+  <link name="spray_cone_visual">
+    <inertial>
+      <mass value="0.001"/>
+      <inertia ixx="0.000001" ixy="0" ixz="0" iyy="0.000001" iyz="0" izz="0.000001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.075" rpy="0 0 0"/>
+      <geometry>
+        <!-- Approximate cone as stacked cylinders -->
+        <cylinder radius="0.005" length="0.15"/>
+      </geometry>
+      <material name="spray_cone_transparent"/>
+    </visual>
+  </link>
+  <joint name="nozzle_to_cone" type="fixed">
+    <parent link="spray_nozzle_frame"/>
+    <child link="spray_cone_visual"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
+</robot>

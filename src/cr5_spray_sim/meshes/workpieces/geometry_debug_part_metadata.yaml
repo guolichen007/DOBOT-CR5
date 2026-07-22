@@ -1,0 +1,8 @@
+bbox_m:
+  x: 0.28
+  y: 0.18
+  z: 0.4
+description: Legacy two-block debug target for basic geometry verification
+features:
+- two_block_asymmetric
+name: geometry_debug_part

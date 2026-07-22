@@ -1,0 +1,4 @@
+# Execution is deliberately disabled by default.
+allow_execution: false
+execution_token: CR5_BOOK_DRY_RUN_EXECUTE
+execute_confirmation_param: /book_demo/confirm_execute

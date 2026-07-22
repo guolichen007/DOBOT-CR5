@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<robot name="spray_object" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find cr5_spray_sim)/urdf/hanging_object.xacro"/>
+  <xacro:arg name="object_type" default="flat_panel"/>
+  <xacro:arg name="object_yaw_deg" default="0"/>
+  <link name="world"/>
+  <xacro:hanging_object parent_link="world"
+    object_type="$(arg object_type)"
+    yaw_deg="$(arg object_yaw_deg)"/>
+</robot>

@@ -1,0 +1,41 @@
+<launch>
+  <!-- ============================================================ -->
+  <!-- d455_camera.launch                                           -->
+  <!-- 项目专用 D455 相机启动文件                                      -->
+  <!-- 只 include 上游 rs_camera.launch 并传递已验证参数               -->
+  <!-- ============================================================ -->
+
+  <!-- D455 序列号（允许命令行覆盖） -->
+  <arg name="serial_no" default="311322304396"/>
+
+  <!-- 相机名称（对应 tf_prefix 和 namespace） -->
+  <arg name="camera" default="camera"/>
+
+  <!-- 启用对齐深度（书本识别必须） -->
+  <arg name="align_depth" default="true"/>
+
+  <!-- 启用同步模式 -->
+  <arg name="enable_sync" default="true"/>
+
+  <!-- 不启用点云（书本识别不需要） -->
+  <arg name="enable_pointcloud" default="false"/>
+
+  <!-- 启用彩色和深度 -->
+  <arg name="enable_color" default="true"/>
+  <arg name="enable_depth" default="true"/>
+
+  <!-- 禁用 confidence（D455 不支持） -->
+  <arg name="enable_confidence" default="false"/>
+
+  <!-- Include 上游 rs_camera.launch -->
+  <include file="$(find realsense2_camera)/launch/rs_camera.launch">
+    <arg name="serial_no" value="$(arg serial_no)"/>
+    <arg name="camera" value="$(arg camera)"/>
+    <arg name="align_depth" value="$(arg align_depth)"/>
+    <arg name="enable_sync" value="$(arg enable_sync)"/>
+    <arg name="enable_pointcloud" value="$(arg enable_pointcloud)"/>
+    <arg name="enable_color" value="$(arg enable_color)"/>
+    <arg name="enable_depth" value="$(arg enable_depth)"/>
+    <arg name="enable_confidence" value="$(arg enable_confidence)"/>
+  </include>
+</launch>

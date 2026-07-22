@@ -1,0 +1,14 @@
+bbox_m:
+  x: 0.08
+  y: 0.45
+  z: 0.34
+description: Parametric curved panel simulating automotive body panel with bidirectional
+  curvature, flange, and stiffening rib
+features:
+- bidirectional_curvature
+- side_flange
+- stiffening_rib
+name: automotive_fender_panel
+parametric_formula: X(u,v)=0.030*u^2+0.018*v^2+0.012*sin(pi*u)*cos(pi*v/2), u,v in
+  [-1,1]
+thickness_mm: 12

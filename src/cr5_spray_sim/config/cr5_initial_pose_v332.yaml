@@ -1,0 +1,42 @@
+# CR5 初始姿态 V3.3.2
+# 六轴全零 = 直立姿态 (upright_zero)
+
+cr5_initial_pose:
+  name: "upright_zero"
+  joints:
+    joint1: 0.0
+    joint2: 0.0
+    joint3: 0.0
+    joint4: 0.0
+    joint5: 0.0
+    joint6: 0.0
+
+  # 初始化后关节角度偏差上限
+  tolerance_rad: 0.015
+
+  # 稳定监控偏差上限
+  monitor_tolerance_rad: 0.03
+
+  # 预期 frame 位置 (六轴全零时的近似值)
+  expected_frames:
+    Link6:
+      position: [0.0, -0.246, 1.047]
+      position_tolerance_m: 0.05
+      min_z_m: 0.80
+
+    spray_nozzle_frame:
+      position: [0.0, -0.371, 1.047]
+      position_tolerance_m: 0.06
+      min_z_m: 0.80
+
+  # 折叠判定阈值
+  folded_z_threshold_m: 0.30
+
+  # 地下判定
+  underground_limit_m: -0.03
+
+  # 监控时长
+  monitor_duration_s: 5.0
+
+  # base 漂移上限
+  max_drift_m: 0.001

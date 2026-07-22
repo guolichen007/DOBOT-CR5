@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- D455-like RGB-D Simulator Smoke Test -->
+  <arg name="gui" default="false" doc="Start Gazebo GUI"/>
+  <arg name="headless" default="false" doc="Run completely headless (no rendering)"/>
+  <arg name="paused" default="false" doc="Start Gazebo paused"/>
+
+  <!-- Ensure Gazebo can find our plugin library -->
+  <env name="GAZEBO_PLUGIN_PATH"
+       value="$(find realsense_gazebo_plugin)/../../../devel/lib:$(optenv GAZEBO_PLUGIN_PATH)" />
+
+  <!-- Process the camera xacro -->
+  <param name="robot_description"
+    command="$(find xacro)/xacro $(find realsense_gazebo_description)/urdf/d455_like_test.urdf.xacro"/>
+
+  <!-- Start Gazebo -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="$(arg headless)"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <!-- Spawn the camera model -->
+  <node name="spawn_camera" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param robot_description -model d455_like_test -x 0 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- Robot state publisher for TF -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+    respawn="false" output="screen">
+    <param name="publish_frequency" value="30.0"/>
+    <param name="use_sim_time" value="true"/>
+  </node>
+</launch>

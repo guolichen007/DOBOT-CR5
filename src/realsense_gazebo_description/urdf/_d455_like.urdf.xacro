@@ -1,0 +1,166 @@
+<?xml version="1.0"?>
+<!--
+  D455-like RGB-D Simulator URDF xacro
+  参数化的简化 RGB-D 相机模型。不是真实 D455 物理模型。
+  License: Apache 2.0
+-->
+<robot name="sensor_d455_like" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:include filename="$(find realsense_gazebo_description)/urdf/_d455_like.gazebo.xacro"/>
+
+  <xacro:macro name="sensor_d455_like" params="
+      parent
+      name:=camera
+      topics_ns:=camera
+
+      color_width:=640
+      color_height:=480
+      color_fps:=10
+      color_hfov_deg:=69.4
+      color_noise_mean:=0.0
+      color_noise_stddev:=0.007
+
+      depth_width:=640
+      depth_height:=480
+      depth_fps:=10
+      depth_hfov_deg:=69.4
+      depth_near:=0.15
+      depth_far:=10.0
+      depth_noise_mean:=0.0
+      depth_noise_stddev:=0.005
+
+      infra_width:=320
+      infra_height:=240
+      infra_fps:=10
+
+      align_depth:=false
+      enable_pointcloud:=false
+      visualize:=false
+      *origin
+  ">
+    <xacro:property name="M_PI" value="3.1415926535897931"/>
+
+    <!-- Camera body dimensions (approximate) -->
+    <xacro:property name="cam_body_width" value="0.025"/>
+    <xacro:property name="cam_body_height" value="0.025"/>
+    <xacro:property name="cam_body_depth" value="0.090"/>
+
+    <material name="${name}_gray">
+      <color rgba="0.3 0.3 0.3 1"/>
+    </material>
+
+    <!-- Mount joint to parent -->
+    <joint name="${name}_mount_joint" type="fixed">
+      <xacro:insert_block name="origin"/>
+      <parent link="${parent}"/>
+      <child link="${name}_link"/>
+    </joint>
+
+    <!-- Camera body link -->
+    <link name="${name}_link">
+      <inertial>
+        <mass value="0.05"/>
+        <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </inertial>
+      <visual>
+        <origin xyz="0 ${cam_body_height/2} 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${cam_body_width} ${cam_body_height} ${cam_body_depth}"/>
+        </geometry>
+        <material name="${name}_gray"/>
+      </visual>
+      <collision>
+        <origin xyz="0 ${cam_body_height/2} 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${cam_body_width} ${cam_body_height} ${cam_body_depth}"/>
+        </geometry>
+      </collision>
+    </link>
+
+    <!-- Color camera frame (ROS convention: +Z forward) -->
+    <joint name="${name}_color_joint" type="fixed">
+      <origin xyz="0 ${cam_body_height} ${cam_body_depth/2}" rpy="0 0 0"/>
+      <parent link="${name}_link"/>
+      <child link="${name}_color_frame"/>
+    </joint>
+    <link name="${name}_color_frame"/>
+
+    <!-- Color optical frame (ROS convention: +X right, +Y down, +Z forward) -->
+    <joint name="${name}_color_optical_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="${-M_PI/2} 0 ${-M_PI/2}"/>
+      <parent link="${name}_color_frame"/>
+      <child link="${name}_color_optical_frame"/>
+    </joint>
+    <link name="${name}_color_optical_frame"/>
+
+    <!-- Depth camera frame (same physical location as color for D455-like) -->
+    <joint name="${name}_depth_joint" type="fixed">
+      <origin xyz="0 ${cam_body_height} ${cam_body_depth/2}" rpy="0 0 0"/>
+      <parent link="${name}_link"/>
+      <child link="${name}_depth_frame"/>
+    </joint>
+    <link name="${name}_depth_frame"/>
+
+    <!-- Depth optical frame -->
+    <joint name="${name}_depth_optical_joint" type="fixed">
+      <origin xyz="0 0 0" rpy="${-M_PI/2} 0 ${-M_PI/2}"/>
+      <parent link="${name}_depth_frame"/>
+      <child link="${name}_depth_optical_frame"/>
+    </joint>
+    <link name="${name}_depth_optical_frame"/>
+
+    <!-- IR1 optical frame (required by plugin) -->
+    <joint name="${name}_ir1_optical_joint" type="fixed">
+      <origin xyz="0 ${cam_body_height} ${cam_body_depth/2}" rpy="0 0 0"/>
+      <parent link="${name}_link"/>
+      <child link="${name}_ir1_optical_frame"/>
+    </joint>
+    <link name="${name}_ir1_optical_frame"/>
+
+    <!-- IR2 optical frame (required by plugin) -->
+    <joint name="${name}_ir2_optical_joint" type="fixed">
+      <origin xyz="0 ${cam_body_height} ${cam_body_depth/2}" rpy="0 0 0"/>
+      <parent link="${name}_link"/>
+      <child link="${name}_ir2_optical_frame"/>
+    </joint>
+    <link name="${name}_ir2_optical_frame"/>
+
+    <!-- Gazebo sensors and plugin -->
+    <xacro:gazebo_d455_like
+      reference_link="${name}_link"
+      camera_name="${name}"
+      topics_ns="${topics_ns}"
+
+      depth_optical_frame="${name}_depth_optical_frame"
+      color_optical_frame="${name}_color_optical_frame"
+      infrared1_optical_frame="${name}_ir1_optical_frame"
+      infrared2_optical_frame="${name}_ir2_optical_frame"
+
+      color_width="${color_width}"
+      color_height="${color_height}"
+      color_fps="${color_fps}"
+      color_hfov_deg="${color_hfov_deg}"
+      color_noise_mean="${color_noise_mean}"
+      color_noise_stddev="${color_noise_stddev}"
+
+      depth_width="${depth_width}"
+      depth_height="${depth_height}"
+      depth_fps="${depth_fps}"
+      depth_hfov_deg="${depth_hfov_deg}"
+      depth_near="${depth_near}"
+      depth_far="${depth_far}"
+      depth_noise_mean="${depth_noise_mean}"
+      depth_noise_stddev="${depth_noise_stddev}"
+
+      infra_width="${infra_width}"
+      infra_height="${infra_height}"
+      infra_fps="${infra_fps}"
+
+      align_depth="${align_depth}"
+      enable_pointcloud="${enable_pointcloud}"
+      visualize="${visualize}"
+    />
+
+  </xacro:macro>
+</robot>

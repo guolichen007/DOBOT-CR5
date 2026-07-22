@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<robot name="gantry" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:include filename="$(find cr5_spray_sim)/urdf/gantry.xacro"/>
+  <link name="world"/>
+  <xacro:gantry parent_link="world"/>
+</robot>

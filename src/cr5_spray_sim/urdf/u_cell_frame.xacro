@@ -1,0 +1,108 @@
+<?xml version="1.0"?>
+<!--
+  U-Cell Frame V3: Open-front industrial spray station.
+  Structure:
+    2 rear posts (left/right)
+    1 top cross-beam connecting rear posts
+    1 central cantilever beam extending forward
+    1 hanging fixture mount point at cantilever tip
+    No front posts — open access for CR5 robot.
+
+  World position: center of rear beam at (1.00, 0, 0), base at Z=0.
+-->
+<robot name="u_cell_frame" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="rear_x" default="1.00"/>
+  <xacro:arg name="post_y" default="0.68"/>
+  <xacro:arg name="frame_height" default="1.72"/>
+  <xacro:arg name="cantilever_length" default="0.40"/>  <!-- forward from rear beam -->
+  <xacro:arg name="beam_size" default="0.05"/>
+
+  <xacro:property name="rx" value="$(arg rear_x)"/>
+  <xacro:property name="py" value="$(arg post_y)"/>
+  <xacro:property name="fh" value="$(arg frame_height)"/>
+  <xacro:property name="cl" value="$(arg cantilever_length)"/>
+  <xacro:property name="b" value="$(arg beam_size)"/>
+
+  <!-- Materials -->
+  <material name="ucell_frame_gray">
+    <color rgba="0.48 0.48 0.50 1"/>
+  </material>
+  <material name="ucell_cantilever_dark">
+    <color rgba="0.30 0.30 0.33 1"/>
+  </material>
+
+  <!-- Root link at rear beam center, ground level -->
+  <link name="u_cell_base">
+    <inertial>
+      <mass value="120.0"/>
+      <inertia ixx="60.0" ixy="0" ixz="0" iyy="60.0" iyz="0" izz="60.0"/>
+      <origin xyz="0 0 ${fh/2}" rpy="0 0 0"/>
+    </inertial>
+
+    <!-- ===== Rear-Left Post ===== -->
+    <visual name="post_rl">
+      <origin xyz="0 ${-py} ${fh/2}" rpy="0 0 0"/>
+      <geometry><box size="${b} ${b} ${fh}"/></geometry>
+      <material name="ucell_frame_gray"/>
+    </visual>
+    <collision name="post_rl_col">
+      <origin xyz="0 ${-py} ${fh/2}" rpy="0 0 0"/>
+      <geometry><box size="${b} ${b} ${fh}"/></geometry>
+    </collision>
+
+    <!-- ===== Rear-Right Post ===== -->
+    <visual name="post_rr">
+      <origin xyz="0 ${py} ${fh/2}" rpy="0 0 0"/>
+      <geometry><box size="${b} ${b} ${fh}"/></geometry>
+      <material name="ucell_frame_gray"/>
+    </visual>
+    <collision name="post_rr_col">
+      <origin xyz="0 ${py} ${fh/2}" rpy="0 0 0"/>
+      <geometry><box size="${b} ${b} ${fh}"/></geometry>
+    </collision>
+
+    <!-- ===== Rear Cross-Beam (along Y, at top) ===== -->
+    <visual name="beam_rear">
+      <origin xyz="0 0 ${fh - b/2}" rpy="0 0 0"/>
+      <geometry><box size="${b} ${py*2} ${b}"/></geometry>
+      <material name="ucell_frame_gray"/>
+    </visual>
+    <collision name="beam_rear_col">
+      <origin xyz="0 0 ${fh - b/2}" rpy="0 0 0"/>
+      <geometry><box size="${b} ${py*2} ${b}"/></geometry>
+    </collision>
+
+    <!-- ===== Central Cantilever (along -X, extending forward from rear beam) ===== -->
+    <visual name="cantilever">
+      <origin xyz="${-cl/2} 0 ${fh - b/2}" rpy="0 0 0"/>
+      <geometry><box size="${cl} ${b*0.8} ${b}"/></geometry>
+      <material name="ucell_cantilever_dark"/>
+    </visual>
+    <collision name="cantilever_col">
+      <origin xyz="${-cl/2} 0 ${fh - b/2}" rpy="0 0 0"/>
+      <geometry><box size="${cl} ${b*0.8} ${b}"/></geometry>
+    </collision>
+
+    <!-- ===== Hanger Mount (small bracket at cantilever tip) ===== -->
+    <visual name="hanger_mount">
+      <origin xyz="${-cl} 0 ${fh - b*1.8}" rpy="0 0 0"/>
+      <geometry><box size="${b*1.2} ${b*1.2} ${b*1.2}"/></geometry>
+      <material name="ucell_cantilever_dark"/>
+    </visual>
+
+    <!-- ===== Base Plates (feet) ===== -->
+    <visual name="foot_rl">
+      <origin xyz="0 ${-py} 0.015" rpy="0 0 0"/>
+      <geometry><box size="0.22 0.15 0.03"/></geometry>
+      <material name="ucell_frame_gray"/>
+    </visual>
+    <visual name="foot_rr">
+      <origin xyz="0 ${py} 0.015" rpy="0 0 0"/>
+      <geometry><box size="0.22 0.15 0.03"/></geometry>
+      <material name="ucell_frame_gray"/>
+    </visual>
+  </link>
+
+  <gazebo><static>true</static></gazebo>
+</robot>

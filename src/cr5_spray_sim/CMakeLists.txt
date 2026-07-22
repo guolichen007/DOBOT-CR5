@@ -1,0 +1,72 @@
+cmake_minimum_required(VERSION 3.5)
+project(cr5_spray_sim)
+
+find_package(catkin REQUIRED)
+
+catkin_package()
+
+# Python package — cr5_spray_sim.aruco_compat
+catkin_python_setup()
+
+# Resource directories
+install(DIRECTORY launch
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(DIRECTORY urdf
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(DIRECTORY config
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(DIRECTORY worlds
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(DIRECTORY rviz
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(DIRECTORY models
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+# Python scripts — 标定与仿真核心
+catkin_install_python(PROGRAMS
+  # 相机与对象
+  scripts/spawn_fixed_cameras.py
+  scripts/control_object_yaw.py
+  scripts/publish_object_pose.py
+  # 场景引导
+  scripts/audit_sim_processes.py
+  scripts/bootstrap_controllers.py
+  scripts/initialize_robot_pose.py
+  scripts/hold_robot_zero.py
+  scripts/wait_scene_models.py
+  scripts/wait_controllers_running.py
+  scripts/capture_scene_snapshot.py
+  # 场景检查
+  scripts/check_scene_geometry.py
+  scripts/check_scene_runtime.py
+  scripts/check_runtime_signals.py
+  scripts/check_sim_clock.py
+  # 喷涂
+  scripts/spray_simulator.py
+  # 标定目标
+  scripts/publish_calibration_target_frames.py
+  scripts/validate_calibration_target_geometry.py
+  scripts/validate_calibration_visibility.py
+  scripts/estimate_camera_extrinsics.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+# Shell tools
+install(PROGRAMS
+  scripts/run_simulation.sh
+  scripts/use_simulation_session.sh
+  scripts/run_in_simulation_session.sh
+  scripts/validate_calibration_texture.sh
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)

@@ -1,0 +1,137 @@
+<?xml version="1.0"?>
+<!--
+  DOBOT CR5 三相机喷涂仿真与标定系统 — 正式仿真入口.
+
+  坐标系:
+    +X: 朝向目标正面 (ChArUco)
+    +Y: 朝向目标左侧
+    +Z: 向上
+
+  TF 树:
+    world → dummy_link → base_link → ... → Link6 → spray_nozzle_frame
+    world → object_frame → calibration_target_frame
+      ├── calibration_target_front_frame
+      ├── calibration_target_left_frame
+      ├── calibration_target_right_frame
+      ├── calibration_target_top_frame
+      └── calibration_target_back_frame
+
+  启动方式:
+    bash src/cr5_spray_sim/scripts/run_simulation.sh --gui --object=calibration_target --profile=quality
+-->
+<launch>
+  <arg name="gui" default="false"/>
+  <arg name="headless" default="false"/>
+  <arg name="paused" default="true" doc="paused 启动，模型 spawn + 零位验证后再 unpause"/>
+  <arg name="spawn_controllers" default="false" doc="由 bootstrap 脚本顺序启动"/>
+  <arg name="object_type" default="calibration_target"
+       doc="calibration_target|motor_housing_cylinder|rectangular_housing"/>
+  <arg name="camera_profile" default="vm" doc="vm|quality"/>
+  <arg name="enable_spray_tool" default="true" doc="Include spray gun on CR5 flange"/>
+  <arg name="enable_spray_sim" default="false" doc="Run spray control + paint patch nodes"/>
+  <arg name="enable_paint_patches" default="false" doc="Generate surface paint patches in Gazebo"/>
+  <arg name="robot_gravity" default="false" doc="Passed to xacro: CR5 Link gravity"/>
+
+  <!-- ===== Load Configs ===== -->
+  <rosparam file="$(find cr5_spray_sim)/config/spray_sim_v33.yaml" command="load" ns="spray_simulator_v33"/>
+
+  <!-- ===== Generate Descriptions ===== -->
+  <param name="robot_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/cr5_sim.urdf.xacro
+             enable_spray_tool:=$(arg enable_spray_tool)
+             robot_gravity:=$(arg robot_gravity)"/>
+
+  <param name="goalpost_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/simple_goalpost_frame_v31.xacro"/>
+
+  <param name="pedestal_fl_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro"/>
+  <param name="pedestal_fr_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro"/>
+  <param name="camera_profile" value="$(arg camera_profile)"/>
+
+  <!-- ===== Start Gazebo ===== -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="paused" value="$(arg paused)"/>
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="$(arg headless)"/>
+    <arg name="world_name" value="$(find cr5_spray_sim)/worlds/cr5_industrial_spray_cell.world"/>
+  </include>
+
+  <!-- ===== Spawn Models ===== -->
+
+  <!-- CR5 robot -->
+  <node name="spawn_cr5" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param robot_description -model cr5_robot -x 0 -y 0 -z 0
+          -J joint1 0.0 -J joint2 0.0 -J joint3 0.0
+          -J joint4 0.0 -J joint5 0.0 -J joint6 0.0"
+    respawn="false" output="screen"/>
+
+  <!-- CR5 controllers -->
+  <rosparam file="$(find cr5_spray_sim)/config/cr5_gazebo_controllers.yaml" command="load"/>
+  <node if="$(arg spawn_controllers)" name="cr5_controller_spawner" pkg="controller_manager" type="spawner"
+    args="joint_state_controller arm_controller"
+    respawn="false" output="screen"/>
+
+  <!-- Robot state publisher -->
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"
+    respawn="false" output="screen">
+    <param name="publish_frequency" value="30.0"/>
+    <remap from="robot_description" to="robot_description"/>
+  </node>
+
+  <!-- 标定目标内部 TF (StaticTransformBroadcaster) -->
+  <node if="$(eval object_type == 'calibration_target')"
+    name="publish_calibration_target_frames" pkg="cr5_spray_sim"
+    type="publish_calibration_target_frames.py" respawn="false" output="screen"/>
+
+  <!-- Goalpost frame -->
+  <node name="spawn_goalpost" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param goalpost_description -model simple_goalpost_frame -x 0.68 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- Calibration Target: 自包含 SDF 模型 -->
+  <node if="$(eval object_type == 'calibration_target')"
+    name="spawn_calibration_target" pkg="gazebo_ros" type="spawn_model"
+    args="-sdf -file $(find cr5_spray_sim)/models/calibration_target/model.sdf
+          -model simple_hanging_workpiece -x 0.56 -y 0 -z 0.98"
+    respawn="false" output="screen"/>
+
+  <!-- Camera pedestals -->
+  <node name="spawn_pedestal_fl" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param pedestal_fl_description -model pedestal_fl -x -0.28 -y -0.68 -z 0"
+    respawn="false" output="screen"/>
+  <node name="spawn_pedestal_fr" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param pedestal_fr_description -model pedestal_fr -x -0.28 -y 0.68 -z 0"
+    respawn="false" output="screen"/>
+  <node name="spawn_pedestal_rear" pkg="gazebo_ros" type="spawn_model"
+    args="-urdf -param pedestal_fl_description -model pedestal_rear -x 1.36 -y 0 -z 0"
+    respawn="false" output="screen"/>
+
+  <!-- Three fixed cameras -->
+  <node name="spawn_fixed_cameras" pkg="cr5_spray_sim"
+    type="spawn_fixed_cameras.py" output="screen">
+    <param name="camera_profile" value="$(arg camera_profile)"/>
+  </node>
+
+  <!-- Object yaw control -->
+  <node name="control_object_yaw" pkg="cr5_spray_sim"
+    type="control_object_yaw.py" output="screen"/>
+
+  <!-- Object pose TF -->
+  <node name="publish_object_pose" pkg="cr5_spray_sim"
+    type="publish_object_pose.py" output="screen"/>
+
+  <!-- TF Bridge: world → dummy_link (identity) -->
+  <node name="world_to_dummy_link_tf" pkg="tf2_ros" type="static_transform_publisher"
+    args="0 0 0 0 0 0 1 world dummy_link"
+    respawn="false" output="screen"/>
+
+  <!-- Spray Control (disabled by default for calibration mode) -->
+  <node if="$(arg enable_spray_sim)" name="spray_simulator"
+    pkg="cr5_spray_sim" type="spray_simulator.py" output="screen" required="true">
+    <param name="object_type" value="$(arg object_type)"/>
+    <param name="enable_paint_patches" value="$(arg enable_paint_patches)"/>
+  </node>
+
+</launch>

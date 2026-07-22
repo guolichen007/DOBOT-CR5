@@ -1,0 +1,36 @@
+# CR5 Spray Simulator V3.3 Configuration
+# 从 V3.2 移植，修正参数和注释
+
+# 喷涂参数
+update_rate_hz: 20.0              # 喷涂更新频率
+nominal_standoff_m: 0.18          # 名义喷涂距离
+min_standoff_m: 0.10              # 最小喷涂距离
+max_standoff_m: 0.25              # 最大喷涂距离
+cone_half_angle_deg: 15.0         # 喷涂锥半角
+max_incidence_angle_deg: 45.0     # 最大入射角
+auto_off_timeout_s: 0.25          # 连续丢失目标后自动关枪
+
+# 目标
+target_model: "simple_hanging_workpiece"  # Gazebo 模型名
+target_frame: "object_frame"              # 目标 TF frame (由 publish_object_pose 发布)
+
+# Paint Patch 参数
+paint:
+  patch_radius_m: 0.012           # 单个 patch 半径
+  voxel_size_m: 0.010             # 体素合并尺寸
+  max_patches: 2000               # 最大 patch 数量
+  surface_offset_m: 0.0008        # patch 偏离表面距离 (防 z-fighting)
+  paint_color: [0.10, 0.35, 0.75, 1.0]  # 喷漆颜色 RGBA
+  base_color: [0.85, 0.85, 0.85, 1.0]   # 未喷涂表面颜色
+
+# 工件几何参数 (用于命中检测)
+motor_housing_cylinder:
+  type: cylinder
+  radius: 0.06
+  height: 0.15
+
+rectangular_housing:
+  type: box
+  x: 0.10
+  y: 0.08
+  z: 0.15

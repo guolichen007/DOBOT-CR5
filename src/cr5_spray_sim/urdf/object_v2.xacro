@@ -1,0 +1,124 @@
+<?xml version="1.0"?>
+<!--
+  Object V2.2: Fixed workpiece with demo colors.
+  World position applied by spawn_model pose.
+  No ros_control. Yaw via set_model_state.
+
+  Types:
+    flat_panel         — thin plate 0.30×0.02×0.30
+    cylinder_part      — cylinder r=0.10 h=0.35
+    block_combo_part   — big block 0.28×0.18×0.30 + small block 0.10×0.08×0.10
+-->
+<robot name="spray_object" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="object_type" default="block_combo_part"/>
+  <xacro:property name="type" value="$(arg object_type)"/>
+
+  <!-- Demo color palette -->
+  <material name="obj_main_blue">   <!-- big block / main body -->
+    <color rgba="0.10 0.35 0.75 1"/>
+  </material>
+  <material name="obj_accent_orange"><!-- small block / direction feature -->
+    <color rgba="0.92 0.45 0.08 1"/>
+  </material>
+  <material name="obj_wire_dark">   <!-- suspension wire -->
+    <color rgba="0.18 0.18 0.20 1"/>
+  </material>
+  <material name="obj_flat_gray">   <!-- flat_panel fallback -->
+    <color rgba="0.55 0.55 0.60 1"/>
+  </material>
+  <material name="obj_cylinder_teal"><!-- cylinder fallback -->
+    <color rgba="0.15 0.55 0.55 1"/>
+  </material>
+
+  <!-- Object frame at geometric center (local origin) -->
+  <link name="object_frame"/>
+
+  <!-- ===== flat_panel ===== -->
+  <xacro:if value="${type == 'flat_panel'}">
+    <link name="object_body">
+      <inertial><mass value="0.5"/><inertia ixx="0.005" ixy="0" ixz="0" iyy="0.005" iyz="0" izz="0.005"/></inertial>
+      <visual><geometry><box size="0.30 0.02 0.30"/></geometry><material name="obj_flat_gray"/></visual>
+      <collision><geometry><box size="0.30 0.02 0.30"/></geometry></collision>
+    </link>
+  </xacro:if>
+
+  <!-- ===== cylinder_part ===== -->
+  <xacro:if value="${type == 'cylinder_part'}">
+    <link name="object_body">
+      <inertial><mass value="1.0"/><inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.005"/></inertial>
+      <visual><origin xyz="0 0 0.175" rpy="0 0 0"/><geometry><cylinder radius="0.10" length="0.35"/></geometry><material name="obj_cylinder_teal"/></visual>
+      <collision><origin xyz="0 0 0.175" rpy="0 0 0"/><geometry><cylinder radius="0.10" length="0.35"/></geometry></collision>
+    </link>
+  </xacro:if>
+
+  <!-- ===== block_combo_part: big block + small block ===== -->
+  <xacro:if value="${type == 'block_combo_part'}">
+    <link name="object_body">
+      <inertial>
+        <mass value="1.2"/>
+        <!-- Combined inertia estimated for two blocks -->
+        <inertia ixx="0.015" ixy="0" ixz="0" iyy="0.012" iyz="0" izz="0.010"/>
+        <origin xyz="0.02 0.0 0.14" rpy="0 0 0"/>
+      </inertial>
+
+      <!-- Big block: main body (blue) -->
+      <!-- size: 0.28(X) × 0.18(Y) × 0.30(Z), center at z=0.15 -->
+      <visual name="big_block">
+        <origin xyz="0 0 0.15" rpy="0 0 0"/>
+        <geometry><box size="0.28 0.18 0.30"/></geometry>
+        <material name="obj_main_blue"/>
+      </visual>
+      <collision name="big_block_col">
+        <origin xyz="0 0 0.15" rpy="0 0 0"/>
+        <geometry><box size="0.28 0.18 0.30"/></geometry>
+      </collision>
+
+      <!-- Small block: direction feature (orange), attached to top-right-front -->
+      <!-- size: 0.10(X) × 0.08(Y) × 0.10(Z) -->
+      <!-- Position: front-right top corner of big block -->
+      <visual name="small_block">
+        <origin xyz="0.09 0.07 0.32" rpy="0 0 0"/>
+        <geometry><box size="0.10 0.08 0.10"/></geometry>
+        <material name="obj_accent_orange"/>
+      </visual>
+      <collision name="small_block_col">
+        <origin xyz="0.09 0.07 0.32" rpy="0 0 0"/>
+        <geometry><box size="0.10 0.08 0.10"/></geometry>
+      </collision>
+    </link>
+  </xacro:if>
+
+  <!-- ===== asymmetric_part_v2 (legacy) ===== -->
+  <xacro:if value="${type == 'asymmetric_part_v2'}">
+    <link name="object_body">
+      <inertial><mass value="0.8"/><inertia ixx="0.008" ixy="0" ixz="0" iyy="0.008" iyz="0" izz="0.005"/><origin xyz="0.03 0.01 0.08" rpy="0 0 0"/></inertial>
+      <visual name="base_block"><origin xyz="0 0 0.08" rpy="0 0 0"/><geometry><box size="0.20 0.15 0.16"/></geometry><material name="obj_main_blue"/></visual>
+      <visual name="side_wing"><origin xyz="0.12 0 0.06" rpy="0 0 0.3"/><geometry><box size="0.18 0.10 0.12"/></geometry><material name="obj_accent_orange"/></visual>
+      <visual name="top_nub"><origin xyz="0.02 -0.04 0.17" rpy="0 0 0"/><geometry><cylinder radius="0.04" length="0.06"/></geometry><material name="obj_accent_orange"/></visual>
+      <visual name="front_notch"><origin xyz="-0.08 0.05 0.04" rpy="0 0 0"/><geometry><box size="0.05 0.06 0.08"/></geometry><material name="obj_main_blue"/></visual>
+      <collision name="base_block_col"><origin xyz="0 0 0.08" rpy="0 0 0"/><geometry><box size="0.20 0.15 0.16"/></geometry></collision>
+      <collision name="side_wing_col"><origin xyz="0.12 0 0.06" rpy="0 0 0.3"/><geometry><box size="0.18 0.10 0.12"/></geometry></collision>
+    </link>
+  </xacro:if>
+
+  <joint name="object_frame_to_body" type="fixed">
+    <parent link="object_frame"/>
+    <child link="object_body"/>
+  </joint>
+
+  <!-- Visual suspension wire (dark, from object_frame up to gantry eyelet) -->
+  <link name="object_wire">
+    <inertial><mass value="0.01"/><inertia ixx="0.00001" ixy="0" ixz="0" iyy="0.00001" iyz="0" izz="0.00001"/></inertial>
+    <visual>
+      <origin xyz="0 0 -0.10" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.003" length="0.20"/></geometry>
+      <material name="obj_wire_dark"/>
+    </visual>
+  </link>
+  <joint name="object_frame_to_wire" type="fixed">
+    <parent link="object_frame"/><child link="object_wire"/>
+  </joint>
+
+  <gazebo><static>true</static></gazebo>
+</robot>

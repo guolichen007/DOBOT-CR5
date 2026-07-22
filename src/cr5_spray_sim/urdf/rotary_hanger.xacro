@@ -1,0 +1,123 @@
+<?xml version="1.0"?>
+<!--
+  Rotary Hanger Fixture V3: 1-DOF yaw rotation for workpiece presentation.
+  Structure:
+    hanger_mount  — fixed top bracket (attached to U-cell cantilever tip)
+    hanger_yaw_joint — revolute, Z axis, position-controlled
+    hanger_rotor  — rotating vertical bar
+    hanger_grip   — workpiece clamp at bottom
+
+  The workpiece model is spawned separately; its pose is synced
+  to the hanger_rotor pose by object_pose_controller.
+-->
+<robot name="rotary_hanger" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="rotor_length" default="0.25"/>
+  <xacro:arg name="bar_size" default="0.03"/>
+
+  <xacro:property name="rl" value="$(arg rotor_length)"/>
+  <xacro:property name="bs" value="$(arg bar_size)"/>
+
+  <material name="hanger_mount_gray">
+    <color rgba="0.30 0.30 0.33 1"/>
+  </material>
+  <material name="hanger_rotor_dark">
+    <color rgba="0.22 0.22 0.25 1"/>
+  </material>
+  <material name="hanger_grip_gray">
+    <color rgba="0.45 0.45 0.48 1"/>
+  </material>
+
+  <!-- Fixed mount bracket -->
+  <link name="hanger_mount">
+    <inertial>
+      <mass value="5.0"/>
+      <inertia ixx="0.05" ixy="0" ixz="0" iyy="0.05" iyz="0" izz="0.01"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 -0.03" rpy="0 0 0"/>
+      <geometry><box size="0.08 0.08 0.06"/></geometry>
+      <material name="hanger_mount_gray"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.03" rpy="0 0 0"/>
+      <geometry><box size="0.08 0.08 0.06"/></geometry>
+    </collision>
+  </link>
+
+  <!-- Revolute yaw joint -->
+  <joint name="hanger_yaw_joint" type="revolute">
+    <parent link="hanger_mount"/>
+    <child link="hanger_rotor"/>
+    <origin xyz="0 0 -0.06" rpy="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-6.2832" upper="6.2832" effort="10" velocity="1.0"/>
+    <dynamics damping="0.5" friction="0.2"/>
+  </joint>
+
+  <!-- Rotating bar -->
+  <link name="hanger_rotor">
+    <inertial>
+      <mass value="2.0"/>
+      <inertia ixx="0.01" ixy="0" ixz="0" iyy="0.01" iyz="0" izz="0.002"/>
+      <origin xyz="0 0 ${-rl/2}" rpy="0 0 0"/>
+    </inertial>
+
+    <!-- Vertical bar -->
+    <visual name="rotor_bar">
+      <origin xyz="0 0 ${-rl/2}" rpy="0 0 0"/>
+      <geometry><box size="${bs*0.8} ${bs*0.8} ${rl}"/></geometry>
+      <material name="hanger_rotor_dark"/>
+    </visual>
+    <collision name="rotor_bar_col">
+      <origin xyz="0 0 ${-rl/2}" rpy="0 0 0"/>
+      <geometry><box size="${bs*0.8} ${bs*0.8} ${rl}"/></geometry>
+    </collision>
+
+    <!-- Workpiece grip/clamp at bottom of rotor -->
+    <visual name="grip">
+      <origin xyz="0 0 ${-rl + bs*0.5}" rpy="0 0 0"/>
+      <geometry><box size="${bs*2} ${bs*1.5} ${bs}"/></geometry>
+      <material name="hanger_grip_gray"/>
+    </visual>
+    <collision name="grip_col">
+      <origin xyz="0 0 ${-rl + bs*0.5}" rpy="0 0 0"/>
+      <geometry><box size="${bs*2} ${bs*1.5} ${bs}"/></geometry>
+    </collision>
+
+    <!-- Index marks at 0°/90°/180°/270° on rotor bar -->
+    <visual name="index_0">
+      <origin xyz="${bs*0.8} 0 ${-rl/2}" rpy="0 0 0"/>
+      <geometry><cylinder radius="${bs*0.3}" length="${bs*0.2}"/></geometry>
+      <material name="hanger_grip_gray"/>
+    </visual>
+  </link>
+
+  <!-- Anti-sway guide ring (visual only, at mid-height) -->
+  <link name="hanger_guide">
+    <inertial>
+      <mass value="0.5"/>
+      <inertia ixx="0.001" ixy="0" ixz="0" iyy="0.001" iyz="0" izz="0.001"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${bs*2}" length="${bs*0.5}"/>
+      </geometry>
+      <material name="hanger_mount_gray"/>
+    </visual>
+  </link>
+  <joint name="guide_to_mount" type="fixed">
+    <parent link="hanger_mount"/>
+    <child link="hanger_guide"/>
+    <origin xyz="0 0 ${-rl/2}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Gazebo: yaw joint position controller -->
+  <gazebo>
+    <plugin name="hanger_yaw_controller" filename="libgazebo_ros_control.so">
+      <robotNamespace>/rotary_hanger</robotNamespace>
+    </plugin>
+  </gazebo>
+
+</robot>

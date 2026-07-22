@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="utf-8"?>
+<COLLADA xmlns="http://www.collada.org/2005/11/COLLADASchema" version="1.4.1">
+  <asset>
+    <contributor><author>V4</author></contributor>
+    <created>2026-07-22</created>
+    <unit name="meter" meter="1.0"/>
+    <up_axis>Z_UP</up_axis>
+  </asset>
+
+  <library_geometries>
+    <geometry id="panel_unit_geom" name="panel_unit_geom">
+      <mesh>
+        <!--
+          1×1 m 平面在 XY 平面, 中心在原点.
+          UV 严格 (0,0) → (1,1), 无 repeat/裁剪.
+          双面: 正面 (+Z) 和背面 (-Z) 各两个三角形.
+        -->
+        <source id="panel_positions" name="position">
+          <float_array id="panel_positions_array" count="12">
+            -0.5 -0.5 0.0
+             0.5 -0.5 0.0
+             0.5  0.5 0.0
+            -0.5  0.5 0.0
+          </float_array>
+          <technique_common>
+            <accessor source="#panel_positions_array" count="4" stride="3">
+              <param name="X" type="float"/>
+              <param name="Y" type="float"/>
+              <param name="Z" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+
+        <source id="panel_normals" name="normal">
+          <float_array id="panel_normals_array" count="6">
+            0 0 1
+            0 0 -1
+          </float_array>
+          <technique_common>
+            <accessor source="#panel_normals_array" count="2" stride="3">
+              <param name="NX" type="float"/>
+              <param name="NY" type="float"/>
+              <param name="NZ" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+
+        <source id="panel_uvs" name="uv">
+          <float_array id="panel_uvs_array" count="8">
+            0.0 0.0
+            1.0 0.0
+            1.0 1.0
+            0.0 1.0
+          </float_array>
+          <technique_common>
+            <accessor source="#panel_uvs_array" count="4" stride="2">
+              <param name="S" type="float"/>
+              <param name="T" type="float"/>
+            </accessor>
+          </technique_common>
+        </source>
+
+        <vertices id="panel_vertices">
+          <input semantic="POSITION" source="#panel_positions"/>
+        </vertices>
+
+        <!-- 正面三角形 (CCW, +Z normal) -->
+        <triangles material="front_material" count="2">
+          <input semantic="VERTEX" source="#panel_vertices" offset="0"/>
+          <input semantic="NORMAL" source="#panel_normals" offset="1"/>
+          <input semantic="TEXCOORD" source="#panel_uvs" offset="2"/>
+          <p>
+            0 0 0  1 0 1  2 0 2
+            0 0 0  2 0 2  3 0 3
+          </p>
+        </triangles>
+
+        <!-- 背面三角形 (CW, -Z normal, 反向 winding) -->
+        <triangles material="back_material" count="2">
+          <input semantic="VERTEX" source="#panel_vertices" offset="0"/>
+          <input semantic="NORMAL" source="#panel_normals" offset="1"/>
+          <input semantic="TEXCOORD" source="#panel_uvs" offset="2"/>
+          <p>
+            0 1 0  2 1 2  1 1 1
+            0 1 0  3 1 3  2 1 2
+          </p>
+        </triangles>
+      </mesh>
+    </geometry>
+  </library_geometries>
+
+  <library_visual_scenes>
+    <visual_scene id="Scene" name="Scene">
+      <node id="panel" name="panel">
+        <instance_geometry url="#panel_unit_geom"/>
+      </node>
+    </visual_scene>
+  </library_visual_scenes>
+
+  <scene>
+    <instance_visual_scene url="#Scene"/>
+  </scene>
+</COLLADA>

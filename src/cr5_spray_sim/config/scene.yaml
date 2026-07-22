@@ -1,0 +1,58 @@
+# CR5 Spray Demo Scene Configuration
+# 单一配置源，不要在其他文件中硬编码这些值
+
+world:
+  coordinate_convention:
+    description: "world frame: +X从CR5指向吊挂物, +Y为CR5左侧, +Z向上"
+    x_forward: "toward object"
+    y_left: "CR5 left side"
+    z_up: "upward"
+
+cr5_base:
+  position: {x: 0.0, y: 0.0, z: 0.0}
+  orientation: {r: 0.0, p: 0.0, y: 0.0}
+
+gantry:
+  enabled: true
+  frame_id: "gantry_frame"
+  dimensions:
+    width: 1.6      # 框架总宽 (Y方向)
+    height: 1.9     # 框架总高 (Z方向)
+    depth: 0.05     # 立柱/横梁厚度
+    crossbeam_height: 1.8  # 横梁高度
+  position: {x: 0.70, y: 0.0, z: 0.0}
+
+hanging_object:
+  object_frame_id: "object_frame"
+  center_position: {x: 0.65, y: 0.0, z: 0.9}
+  dimensions: {x: 0.30, y: 0.30, z: 0.45}
+  default_yaw_deg: 0
+  supported_yaws_deg: [0, 90, 180, 270]
+  suspension:
+    type: "fixed"          # "fixed" or "pendulum"
+    wire_length: 0.3
+    wire_diameter: 0.005
+    attachment_point: {x: 0.70, y: 0.0, z: 1.8}  # 吊点
+
+cameras:
+  # 算法不得硬编码相机数量，所有相机通过 yaml 定义
+  acquisition_mode: "ideal"  # "ideal" or "realistic"
+  frame_rate: 10            # 静态采集低频优先
+  config_paths:
+    ideal: "camera_layout_ideal.yaml"
+    realistic: "camera_layout_realistic.yaml"
+
+test_objects:
+  flat_panel:
+    description: "平面/轻微圆角面，用于基础喷涂路径"
+    dimensions: {x: 0.30, y: 0.02, z: 0.30}
+    color: "0.7 0.7 0.7 1"
+  cylinder_part:
+    description: "圆柱或带曲率表面"
+    radius: 0.10
+    height: 0.35
+    color: "0.5 0.5 0.7 1"
+  asymmetric_part:
+    description: "非对称复杂件"
+    color: "0.6 0.6 0.5 1"
+    # mesh: "package://cr5_spray_sim/models/asymmetric_part.stl"

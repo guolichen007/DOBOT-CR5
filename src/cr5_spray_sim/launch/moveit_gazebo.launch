@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<launch>
+  <!-- MoveIt + Gazebo Integration: 真执行（非 fake） -->
+  <arg name="gui" default="false"/>
+  <arg name="headless" default="false"/>
+  <arg name="paused" default="false"/>
+  <arg name="execute" default="false" doc="Enable real trajectory execution in Gazebo"/>
+
+  <!-- Load SIM URDF (not real URDF) -->
+  <param name="robot_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/cr5_sim.urdf.xacro"/>
+
+  <!-- Load SRDF (reuse existing) -->
+  <param name="robot_description_semantic"
+    textfile="$(find cr5_moveit)/config/cr5_robot.srdf"/>
+
+  <!-- Load kinematics (reuse existing) -->
+  <group ns="robot_description_kinematics">
+    <rosparam command="load" file="$(find cr5_moveit)/config/kinematics.yaml"/>
+  </group>
+
+  <!-- Load MoveIt controller config BEFORE move_group starts -->
+  <rosparam file="$(find cr5_spray_sim)/config/moveit_gazebo_controllers.yaml"
+    command="load" ns="/move_group"/>
+
+  <!-- Start Gazebo + spawn CR5 + controllers -->
+  <include file="$(find cr5_spray_sim)/launch/cr5_only_gazebo.launch">
+    <arg name="gui" value="$(arg gui)"/>
+    <arg name="headless" value="$(arg headless)"/>
+    <arg name="paused" value="$(arg paused)"/>
+  </include>
+
+  <!-- MoveIt: use SimpleControllerManager (not fake) -->
+  <include file="$(find cr5_moveit)/launch/move_group.launch">
+    <arg name="allow_trajectory_execution" value="true"/>
+    <arg name="fake_execution" value="false"/>
+    <arg name="info" value="true"/>
+  </include>
+
+  <!-- Safety check node: verify /use_sim_time and no dobot_bringup before allowing execution -->
+  <node name="execution_safety_check" pkg="cr5_spray_sim"
+    type="execution_safety_check.py" output="screen"
+    if="$(arg execute)">
+    <param name="simulation_confirm" value="GAZEBO_ONLY"/>
+  </node>
+
+</launch>
