@@ -23,6 +23,7 @@
   <arg name="enable_spray_tool" default="true" doc="Include spray gun on CR5 flange"/>
   <arg name="enable_spray_sim" default="true" doc="Run spray control + paint patch nodes"/>
   <arg name="enable_paint_patches" default="true" doc="Generate surface paint patches in Gazebo"/>
+  <arg name="physics_mode" default="stable" doc="stable|gravity. stable=CR5 Link1~Link6 gravity disabled"/>
 
   <!-- ===== Load Configs ===== -->
 
@@ -32,9 +33,11 @@
   <!-- ===== Generate Descriptions ===== -->
 
   <!-- CR5 with spray gun (enable_spray_tool controls xacro conditional) -->
+  <!-- V3.3.5: robot_gravity=true only for gravity mode -->
   <param name="robot_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/cr5_sim.urdf.xacro
-             enable_spray_tool:=$(arg enable_spray_tool)"/>
+             enable_spray_tool:=$(arg enable_spray_tool)
+             robot_gravity:=$(eval true if arg('physics_mode') == 'gravity' else false)"/>
 
   <!-- Simple Goalpost Frame V3.1 -->
   <param name="goalpost_description"

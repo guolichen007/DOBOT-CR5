@@ -15,6 +15,9 @@
   <xacro:arg name="sim_damping" default="0.5"/>
   <xacro:arg name="sim_friction" default="0.1"/>
   <xacro:arg name="enable_spray_tool" default="true"/>
+  <xacro:arg name="robot_gravity" default="false"/>
+  <!-- V3.3.5: robot_gravity=false → CR5 Link1~Link6 无重力 (stable 模式)
+                robot_gravity=true  → 真实重力 (experimental 模式) -->
 
   <!-- V3.3.1: 喷枪 visual macro (需在 Link6 之前 include) -->
   <xacro:if value="$(arg enable_spray_tool)">
@@ -77,6 +80,11 @@
     </collision>
   </link>
 
+  <!-- V3.3.5: stable 模式关闭重力, 不改 mass/COM/inertia -->
+  <gazebo reference="Link1">
+    <gravity>$(arg robot_gravity)</gravity>
+  </gazebo>
+
   <joint name="joint1" type="revolute">
     <origin xyz="0 0 0.147" rpy="0 0 0"/>
     <parent link="base_link"/>
@@ -102,6 +110,10 @@
       <geometry><mesh filename="package://dobot_description/meshes/cr5/Link2.dae"/></geometry>
     </collision>
   </link>
+
+  <gazebo reference="Link2">
+    <gravity>$(arg robot_gravity)</gravity>
+  </gazebo>
 
   <joint name="joint2" type="revolute">
     <origin xyz="0 0 0" rpy="1.5708 1.5708 0"/>
@@ -129,6 +141,10 @@
     </collision>
   </link>
 
+  <gazebo reference="Link3">
+    <gravity>$(arg robot_gravity)</gravity>
+  </gazebo>
+
   <joint name="joint3" type="revolute">
     <origin xyz="-0.427 0 0" rpy="0 0 0"/>
     <parent link="Link2"/>
@@ -155,6 +171,10 @@
     </collision>
   </link>
 
+  <gazebo reference="Link4">
+    <gravity>$(arg robot_gravity)</gravity>
+  </gazebo>
+
   <joint name="joint4" type="revolute">
     <origin xyz="-0.357 0 0.141" rpy="0 0 -1.5708"/>
     <parent link="Link3"/>
@@ -180,6 +200,10 @@
       <geometry><mesh filename="package://dobot_description/meshes/cr5/Link5.dae"/></geometry>
     </collision>
   </link>
+
+  <gazebo reference="Link5">
+    <gravity>$(arg robot_gravity)</gravity>
+  </gazebo>
 
   <joint name="joint5" type="revolute">
     <origin xyz="0 -0.116 0" rpy="1.5708 0 0"/>
@@ -211,6 +235,10 @@
       <xacro:spray_gun_v331_visuals prefix="spray"/>
     </xacro:if>
   </link>
+
+  <gazebo reference="Link6">
+    <gravity>$(arg robot_gravity)</gravity>
+  </gazebo>
 
   <joint name="joint6" type="revolute">
     <origin xyz="0 0.105 0" rpy="-1.5708 0 0"/>
