@@ -233,7 +233,7 @@ def gazebo_truth(tf_buf, optical_frame):
         return None
 
 
-def process_camera(cam_name, tf_buf, output_dir):
+def process_camera(cam_name, tf_buf, output_dir, truth_source="none"):
     """处理单台相机."""
     rospy.loginfo("=== %s ===", cam_name)
     topics = CAMERAS[cam_name]
@@ -309,24 +309,25 @@ def process_camera(cam_name, tf_buf, output_dir):
                 **stats,
             })
 
-    # Gazebo 真值对比
-    truth = gazebo_truth(tf_buf, optical_frame)
-    results["gazebo_truth"] = truth
-    if truth and results["solutions"]:
-        best = min(results["solutions"], key=lambda s: s.get("rmse_px", 99))
-        if best.get("tvec_camera_target"):
-            t_sol = np.array(best["tvec_camera_target"])
-            t_truth = np.array([truth["tx"], truth["ty"], truth["tz"]])
-            results["translation_error_m"] = float(np.linalg.norm(t_sol - t_truth))
-            # 旋转误差
-            from tf.transformations import quaternion_matrix
-            if best.get("rvec_camera_target"):
-                R_sol, _ = cv2.Rodrigues(np.array(best["rvec_camera_target"]))
-                T_truth = quaternion_matrix([truth["qx"], truth["qy"], truth["qz"], truth["qw"]])
-                R_diff = R_sol.T @ T_truth[:3, :3]
-                trace = np.trace(R_diff)
-                angle = math.acos(max(-1.0, min(1.0, (trace - 1) / 2.0)))
-                results["rotation_error_deg"] = round(float(angle * 180 / math.pi), 4)
+    # Gazebo 真值对比 (仅在 --truth-source gazebo 时)
+    if truth_source == "gazebo":
+        truth = gazebo_truth(tf_buf, optical_frame)
+        results["gazebo_truth"] = truth
+        if truth and results["solutions"]:
+            best = min(results["solutions"], key=lambda s: s.get("rmse_px", 99))
+            if best.get("tvec_camera_target"):
+                t_sol = np.array(best["tvec_camera_target"])
+                t_truth = np.array([truth["tx"], truth["ty"], truth["tz"]])
+                results["translation_error_m"] = float(np.linalg.norm(t_sol - t_truth))
+                # 旋转误差
+                from tf.transformations import quaternion_matrix
+                if best.get("rvec_camera_target"):
+                    R_sol, _ = cv2.Rodrigues(np.array(best["rvec_camera_target"]))
+                    T_truth = quaternion_matrix([truth["qx"], truth["qy"], truth["qz"], truth["qw"]])
+                    R_diff = R_sol.T @ T_truth[:3, :3]
+                    trace = np.trace(R_diff)
+                    angle = math.acos(max(-1.0, min(1.0, (trace - 1) / 2.0)))
+                    results["rotation_error_deg"] = round(float(angle * 180 / math.pi), 4)
 
     # 保存
     cv2.imwrite(os.path.join(output_dir, f"{cam_name}.png"), cv_img)
@@ -339,6 +340,9 @@ def process_camera(cam_name, tf_buf, output_dir):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="artifacts/calibration_target")
+    parser.add_argument("--truth-source", default="none",
+                        choices=["none", "gazebo"],
+                        help="none: PnP only (default); gazebo: also compare with Gazebo TF truth")
     args = parser.parse_args(rospy.myargv()[1:])
 
     rospy.init_node("calibrate_three_fixed_cameras", anonymous=True, log_level=rospy.WARN)
@@ -353,7 +357,7 @@ def main():
     all_results = {"opencv_capability": aruco_compat.get_opencv_info()}
     per_camera_pass = {}
     for cam_name in sorted(CAMERAS.keys()):
-        cr = process_camera(cam_name, tf_buf, args.output)
+        cr = process_camera(cam_name, tf_buf, args.output, args.truth_source)
         all_results[cam_name] = cr
         # Per-camera: must have at least one passing solution
         solutions = cr.get("solutions", []) if isinstance(cr, dict) else []
@@ -380,10 +384,15 @@ def main():
     with open(os.path.join(args.output, "reprojection_report.json"), "w") as f:
         json.dump(reproj, f, indent=2)
 
-    truth_d = {cn: cr.get("gazebo_truth") for cn, cr in all_results.items()
-               if isinstance(cr, dict)}
-    with open(os.path.join(args.output, "gazebo_truth_comparison.json"), "w") as f:
-        json.dump(truth_d, f, indent=2)
+    if args.truth_source == "gazebo":
+        truth_d = {cn: cr.get("gazebo_truth") for cn, cr in all_results.items()
+                   if isinstance(cr, dict)}
+        with open(os.path.join(args.output, "gazebo_truth_comparison.json"), "w") as f:
+            json.dump(truth_d, f, indent=2)
+        all_results["truth_source"] = "gazebo"
+    else:
+        all_results["truth_source"] = "none"
+        all_results["truth_comparison"] = "unavailable"
 
     summary = {
         "per_camera_pass": per_camera_pass,
