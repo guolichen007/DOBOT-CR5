@@ -1,6 +1,0 @@
-int32 index
-int32 addr
-int32 count
-string[] valType
----
-int32 res
