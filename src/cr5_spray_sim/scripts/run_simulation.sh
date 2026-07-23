@@ -358,13 +358,16 @@ run_audit() {
         return 0
     fi
 
-    echo "[$(date +%H:%M:%S)] Phase A0: auditing old simulation processes..."
+    echo "[$(date +%H:%M:%S)] Phase A0: cleaning old simulation processes..."
+    python3 "$SCRIPT_DIR/audit_sim_processes.py" --cleanup $($GUI && echo "--gui") || true
+
+    echo "[$(date +%H:%M:%S)] Phase A0: auditing..."
     local audit_ret=0
     python3 "$SCRIPT_DIR/audit_sim_processes.py" $($GUI && echo "--gui") || audit_ret=$?
 
     if [[ $audit_ret -ne 0 ]]; then
         echo "ERROR: SIM_PROCESS_PREFLIGHT_FAIL"
-        echo "Close the previous session with Ctrl+C, wait a few seconds, and retry."
+        echo "If this persists, run:  rm -f /tmp/cr5_spray_demo.lock /tmp/cr5_spray_simulation.env"
         exit 1
     fi
     echo "[$(date +%H:%M:%S)] SIM_PROCESS_PREFLIGHT_PASS"
