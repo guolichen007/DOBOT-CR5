@@ -79,6 +79,9 @@ cr5_test_logs/
 id_rsa*
 id_ed25519*
 
+# Local machine configuration (secret IPs, serials)
+/config/local.yaml
+
 # Task prompts (local only)
 CLAUDE_DESKTOP_EXECUTION_PROMPT.md
 .venv-spray/
