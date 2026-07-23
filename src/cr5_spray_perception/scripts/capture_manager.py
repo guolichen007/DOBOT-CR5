@@ -185,6 +185,10 @@ class CaptureManager:
         self.max_camera_info_skew_s = rospy.get_param(
             "~max_camera_info_skew_s", 0.030)
 
+        # ── 外参版本参数 ──
+        self.extrinsics_file = rospy.get_param("~extrinsics_file", "")
+        self.require_extrinsics = rospy.get_param("~require_extrinsics", False)
+
         if not self.camera_names:
             rospy.logerr("capture_manager: camera_names is empty!")
             sys.exit(1)
@@ -236,6 +240,7 @@ class CaptureManager:
         # Compute config SHA256 for manifest
         self._cfg_sha = self._compute_config_sha()
         self._git_sha = self._compute_git_sha()
+        self._extrinsics_meta = self._load_extrinsics_meta()
 
         # Write initial manifest
         self._write_manifest(0)
@@ -342,6 +347,118 @@ class CaptureManager:
                 "simulation_scene_yaml_sha256": "N/A",
                 "calibration_target_yaml_sha256": "N/A",
             }
+
+    # ------------------------------------------------------------------
+    # 外参版本元数据
+    # ------------------------------------------------------------------
+
+    def _load_extrinsics_meta(self):
+        """加载外参文件并提取版本元数据.
+
+        未配置外参时返回默认结构.
+        require_extrinsics=true 但文件缺失/无效时节点启动失败.
+        """
+        if not self.extrinsics_file:
+            return {
+                "configured": False,
+                "required": self.require_extrinsics,
+            }
+
+        abs_path = os.path.abspath(os.path.expanduser(self.extrinsics_file))
+
+        if not os.path.isfile(abs_path):
+            msg = (f"extrinsics_file configured but not found: {abs_path}")
+            if self.require_extrinsics:
+                rospy.logerr("FATAL: %s", msg)
+                sys.exit(1)
+            rospy.logwarn("%s — continuing without extrinsics version", msg)
+            return {
+                "configured": True,
+                "required": self.require_extrinsics,
+                "file": abs_path,
+                "error": "file not found",
+            }
+
+        sha = _sha256_file(abs_path)
+
+        # 解析 YAML
+        try:
+            with open(abs_path, "r") as f:
+                ext_yaml = yaml.safe_load(f)
+        except Exception as e:
+            msg = f"Failed to parse extrinsics file {abs_path}: {e}"
+            if self.require_extrinsics:
+                rospy.logerr("FATAL: %s", msg)
+                sys.exit(1)
+            rospy.logwarn("%s", msg)
+            return {
+                "configured": True,
+                "required": self.require_extrinsics,
+                "file": abs_path,
+                "sha256": sha,
+                "error": f"parse failed: {e}",
+            }
+
+        # 提取契约字段
+        if ext_yaml is None:
+            ext_yaml = {}
+
+        meta = {
+            "configured": True,
+            "required": self.require_extrinsics,
+            "file": abs_path,
+            "sha256": sha,
+            "schema_version": ext_yaml.get("schema_version", 1),
+            "calibration_id": ext_yaml.get("calibration_id", "unknown"),
+            "generated_at": ext_yaml.get("generated_at", "unknown"),
+            "method": ext_yaml.get("method", "unknown"),
+            "target_frame": ext_yaml.get("target_frame", "calibration_target_frame"),
+        }
+
+        # 提取相机→frame 映射
+        cameras_meta = ext_yaml.get("cameras", {})
+        if cameras_meta:
+            meta["cameras"] = {
+                cam: {
+                    "optical_frame": info.get("optical_frame", "unknown"),
+                }
+                for cam, info in cameras_meta.items()
+            }
+
+        # 提取坐标方向契约
+        contract = ext_yaml.get("transform_contract", {})
+        if contract:
+            meta["transform_contract"] = {
+                "primary_transform": contract.get("primary_transform", "T_target_camera"),
+                "inverse_transform": contract.get("inverse_transform", "T_camera_target"),
+                "primary_equation": contract.get(
+                    "primary_equation", "p_target = T_target_camera @ p_camera"),
+                "inverse_equation": contract.get(
+                    "inverse_equation", "p_camera = T_camera_target @ p_target"),
+            }
+        else:
+            # 未声明契约时提供默认约定
+            meta["transform_contract"] = {
+                "primary_transform": "T_target_camera",
+                "inverse_transform": "T_camera_target",
+                "primary_equation": "p_target = T_target_camera @ p_camera",
+                "inverse_equation": "p_camera = T_camera_target @ p_target",
+            }
+
+        # 验证若 require_extrinsics=true，必须包含三台相机
+        if self.require_extrinsics:
+            expected_cams = set(self.camera_names)
+            found_cams = set(meta.get("cameras", {}).keys())
+            missing = expected_cams - found_cams
+            if missing:
+                rospy.logerr(
+                    "FATAL: require_extrinsics=true but extrinsics file "
+                    "missing cameras: %s", sorted(missing))
+                sys.exit(1)
+
+        rospy.loginfo("Extrinsics meta loaded: file=%s sha256=%s... method=%s",
+                      abs_path, sha[:12], meta.get("method"))
+        return meta
 
     # ------------------------------------------------------------------
     # 服务
@@ -717,6 +834,10 @@ class CaptureManager:
         # 配置文件 SHA256
         if self._cfg_sha:
             manifest.update(self._cfg_sha)
+
+        # 外参版本
+        if self._extrinsics_meta:
+            manifest["extrinsics"] = self._extrinsics_meta
 
         # 每相机详情
         if per_camera_detail:
