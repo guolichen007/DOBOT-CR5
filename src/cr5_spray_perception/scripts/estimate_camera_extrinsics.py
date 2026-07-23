@@ -200,8 +200,19 @@ def get_face_tf(tf_buf, face_frame):
         return None, None
 
 
-def rvec_tvec_to_cam_target(rvec, tvec, face_frame, tf_buf):
-    """将 face-local PnP 转成 camera→target."""
+def compose_T_camera_target_from_face_pnp(rvec, tvec, face_frame, tf_buf):
+    """
+    将 face-local PnP 结果组合为 T_camera_target.
+
+    数学关系:
+      p_camera = T_camera_face @ p_face
+      p_face = inv(T_target_face) @ p_target
+      ∴ p_camera = T_camera_face @ inv(T_target_face) @ p_target
+      ∴ T_camera_target = T_camera_face @ inv(T_target_face)
+
+    Returns:
+      (T_camera_target_4x4, T_target_camera_4x4) 或 (None, None)
+    """
     R_cam_face, _ = cv2.Rodrigues(rvec)
     T_cam_face = np.eye(4)
     T_cam_face[:3, :3] = R_cam_face
@@ -212,29 +223,168 @@ def rvec_tvec_to_cam_target(rvec, tvec, face_frame, tf_buf):
         return None, None
 
     from tf.transformations import quaternion_matrix
-    T_target_face = quaternion_matrix([face_quat[0], face_quat[1], face_quat[2], face_quat[3]])
+    T_target_face = quaternion_matrix([face_quat[0], face_quat[1],
+                                        face_quat[2], face_quat[3]])
     T_target_face[:3, 3] = face_pos
 
-    T_cam_target = T_cam_face @ np.linalg.inv(T_target_face)
-    rvec_ct = cv2.Rodrigues(T_cam_target[:3, :3])[0]
-    tvec_ct = T_cam_target[:3, 3]
-    return rvec_ct.flatten().tolist(), tvec_ct.flatten().tolist()
+    # T_camera_target: 将 target 坐标系中的点转到 camera 坐标系
+    T_camera_target = T_cam_face @ np.linalg.inv(T_target_face)
+    # T_target_camera: 将 camera 坐标系中的点转到 target 坐标系
+    T_target_camera = np.linalg.inv(T_camera_target)
+
+    return T_camera_target, T_target_camera
+
+
+def invert_transform(T):
+    """计算 4x4 逆矩阵."""
+    return np.linalg.inv(T)
+
+
+def rvec_tvec_from_44(T):
+    """从 4x4 矩阵提取 rvec, tvec."""
+    rvec = cv2.Rodrigues(T[:3, :3])[0]
+    tvec = T[:3, 3]
+    return rvec.flatten().tolist(), tvec.flatten().tolist()
 
 
 def gazebo_truth(tf_buf, optical_frame):
-    """optical_frame → calibration_target_frame."""
+    """
+    查询 Gazebo TF truth.
+
+    lookup_transform(optical_frame, "calibration_target_frame") 返回:
+      T_camera_target (source→target 方向: optical_frame→target)
+
+    Returns:
+      {
+        "T_camera_target_tx/ty/tz/qx/qy/qz/qw": ...,
+        "T_target_camera_4x4": ...
+      }
+    """
     try:
         ts = tf_buf.lookup_transform(
-            optical_frame, "calibration_target_frame", rospy.Time(0), rospy.Duration(3.0))
+            optical_frame, "calibration_target_frame",
+            rospy.Time(0), rospy.Duration(3.0))
         t = ts.transform.translation
         q = ts.transform.rotation
-        return {"tx": t.x, "ty": t.y, "tz": t.z, "qx": q.x, "qy": q.y, "qz": q.z, "qw": q.w}
+
+        from tf.transformations import quaternion_matrix
+        T_cam_target = quaternion_matrix([q.x, q.y, q.z, q.w])
+        T_cam_target[:3, 3] = [t.x, t.y, t.z]
+
+        T_target_cam = np.linalg.inv(T_cam_target)
+        rvec_tc, tvec_tc = rvec_tvec_from_44(T_target_cam)
+
+        return {
+            # T_camera_target (optical_frame → target)
+            "T_camera_target_tx": t.x, "T_camera_target_ty": t.y,
+            "T_camera_target_tz": t.z,
+            "T_camera_target_qx": q.x, "T_camera_target_qy": q.y,
+            "T_camera_target_qz": q.z, "T_camera_target_qw": q.w,
+            "T_camera_target_4x4": T_cam_target.tolist(),
+            # T_target_camera (target → optical_frame)
+            "T_target_camera_tvec": tvec_tc,
+            "T_target_camera_rvec": rvec_tc,
+            "T_target_camera_4x4": T_target_cam.tolist(),
+            # 坐标方向说明
+            "transform_contract": {
+                "T_camera_target_equation": "p_camera = T_camera_target @ p_target",
+                "T_target_camera_equation": "p_target = T_target_camera @ p_camera",
+                "T_target_camera_equals_inv_T_camera_target": True,
+            },
+        }
     except Exception:
         return None
 
 
+def select_best_solution(solutions):
+    """
+    从多候选解中选择最优 PnP 初值.
+
+    优先级:
+      1. stats.pass == True (RMSE <= MAX_REPROJ)
+      2. 满足 inlier 门限
+      3. reprojection RMSE 最小
+      4. RMSE 接近时优先 inlier_ratio 更高
+
+    Returns:
+      (best_solution, selection_reason, all_candidates_ranked)
+    """
+    if not solutions:
+        return None, "no solutions", []
+
+    # 1. 只考虑 pass=True
+    passing = [s for s in solutions if s.get("pass", False)]
+    if not passing:
+        # 如果没有 pass 的, fallback 到 RMSE 最小的
+        ranked = sorted(solutions, key=lambda s: s.get("rmse_px", 999))
+        return ranked[0], "no pass — fallback to min RMSE", ranked
+
+    # 2. inlier 门限
+    n_pts = max(s.get("n_pts", 0) for s in passing)
+    min_inliers = max(4, int(n_pts * 0.6))
+    sufficient = [s for s in passing if s.get("inliers", 0) >= min_inliers]
+    if not sufficient:
+        sufficient = passing  # 放宽门限
+
+    # 3. 按 RMSE 排序
+    ranked = sorted(sufficient, key=lambda s: s.get("rmse_px", 999))
+
+    # 4. RMSE 接近时看 inlier_ratio
+    best = ranked[0]
+    best_rmse = best.get("rmse_px", 999)
+    close_thresh = best_rmse * 1.2  # 20% 范围内视为接近
+    close_candidates = [s for s in ranked if s.get("rmse_px", 999) <= close_thresh]
+
+    if len(close_candidates) > 1:
+        # 在 RMSE 接近的候选中选 inlier_ratio 最高的
+        best = max(close_candidates, key=lambda s: (
+            s.get("inliers", 0) / max(s.get("n_pts", 1), 1)))
+
+    reason = (
+        f"selected from {len(solutions)} candidates "
+        f"({len(passing)} pass, {len(sufficient)} sufficient inliers), "
+        f"best RMSE={best.get('rmse_px', -1):.4f}px, "
+        f"panel={best.get('panel', 'unknown')}"
+    )
+    return best, reason, ranked
+
+
+def compute_transform_errors(T_camera_target_est, T_camera_target_truth):
+    """
+    在同一方向下计算平移和旋转误差.
+
+    Args:
+      T_camera_target_est: 4x4 估计值 (PnP)
+      T_camera_target_truth: 4x4 真值 (Gazebo TF)
+
+    Returns:
+      {
+        translation_error_m, translation_error_mm,
+        rotation_error_rad, rotation_error_deg,
+      }
+    """
+    t_est = T_camera_target_est[:3, 3]
+    t_truth = T_camera_target_truth[:3, 3]
+    trans_err_m = float(np.linalg.norm(t_est - t_truth))
+
+    R_est = T_camera_target_est[:3, :3]
+    R_truth = T_camera_target_truth[:3, :3]
+    R_diff = R_est @ R_truth.T
+    trace = np.trace(R_diff)
+    angle = math.acos(max(-1.0, min(1.0, (trace - 1.0) / 2.0)))
+
+    return {
+        "translation_error_m": round(trans_err_m, 6),
+        "translation_error_mm": round(trans_err_m * 1000.0, 3),
+        "rotation_error_rad": round(float(angle), 6),
+        "rotation_error_deg": round(float(angle * 180.0 / math.pi), 4),
+        "condition": "||t_est - t_truth||; R_diff = R_est @ R_truth.T, "
+                      "angle = acos((trace(R_diff)-1)/2)",
+    }
+
+
 def process_camera(cam_name, tf_buf, output_dir, truth_source="none"):
-    """处理单台相机."""
+    """处理单台相机 — V4 双方向外参 + 多候选解选择."""
     rospy.loginfo("=== %s ===", cam_name)
     topics = CAMERAS[cam_name]
     bridge = CvBridge()
@@ -256,12 +406,23 @@ def process_camera(cam_name, tf_buf, output_dir, truth_source="none"):
     optical_frame = info_msg.header.frame_id
 
     if not optical_frame.endswith("_color_optical_frame"):
-        rospy.logwarn("%s: optical_frame=%s (expected *_color_optical_frame)", cam_name, optical_frame)
+        rospy.logwarn("%s: optical_frame=%s (expected *_color_optical_frame)",
+                      cam_name, optical_frame)
 
-    results = {"camera": cam_name, "optical_frame": optical_frame,
-               "K": K.tolist(), "D": D.tolist(), "solutions": []}
+    results = {
+        "camera": cam_name,
+        "optical_frame": optical_frame,
+        "K": K.tolist(),
+        "D": D.tolist(),
+        "solutions": [],
+        "transform_contract": {
+            "T_camera_target_equation": "p_camera = T_camera_target @ p_target",
+            "T_target_camera_equation": "p_target = T_target_camera @ p_camera",
+            "T_target_camera_equals_inv_T_camera_target": True,
+        },
+    }
 
-    # ChArUco faces
+    # ── ChArUco faces ──
     for fk in ["front", "left", "back"]:
         obj_pts, img_pts = detect_charuco_face(gray, K, D, fk)
         if obj_pts is None:
@@ -269,65 +430,112 @@ def process_camera(cam_name, tf_buf, output_dir, truth_source="none"):
         rvec, tvec, stats = solve_pnp(obj_pts, img_pts, K, D)
         if rvec is not None:
             ff = CHARUCO_FACES[fk]["face_frame"]
-            rvec_ct, tvec_ct = rvec_tvec_to_cam_target(rvec, tvec, ff, tf_buf)
-            results["solutions"].append({
+            T_ct, T_tc = compose_T_camera_target_from_face_pnp(
+                rvec, tvec, ff, tf_buf)
+            sol = {
                 "panel": fk, "type": "charuco",
                 "rvec_camera_face": rvec.flatten().tolist(),
                 "tvec_camera_face": tvec.flatten().tolist(),
-                "rvec_camera_target": rvec_ct,
-                "tvec_camera_target": tvec_ct,
                 **stats,
-            })
+            }
+            if T_ct is not None:
+                rvec_ct, tvec_ct = rvec_tvec_from_44(T_ct)
+                rvec_tc, tvec_tc = rvec_tvec_from_44(T_tc)
+                sol.update({
+                    "T_camera_target_rvec": rvec_ct,
+                    "T_camera_target_tvec": tvec_ct,
+                    "T_camera_target_4x4": T_ct.tolist(),
+                    "T_target_camera_rvec": rvec_tc,
+                    "T_target_camera_tvec": tvec_tc,
+                    "T_target_camera_4x4": T_tc.tolist(),
+                })
+            results["solutions"].append(sol)
 
-    # AprilTag right
+    # ── AprilTag right ──
     obj_pts, img_pts = detect_apriltag_face(gray, "right")
     if obj_pts is not None:
         rvec, tvec, stats = solve_pnp(obj_pts, img_pts, K, D)
         if rvec is not None:
-            rvec_ct, tvec_ct = rvec_tvec_to_cam_target(rvec, tvec, APRILTAG_RIGHT["face_frame"], tf_buf)
-            results["solutions"].append({
+            T_ct, T_tc = compose_T_camera_target_from_face_pnp(
+                rvec, tvec, APRILTAG_RIGHT["face_frame"], tf_buf)
+            sol = {
                 "panel": "right", "type": "apriltag",
                 "rvec_camera_face": rvec.flatten().tolist(),
                 "tvec_camera_face": tvec.flatten().tolist(),
-                "rvec_camera_target": rvec_ct,
-                "tvec_camera_target": tvec_ct,
                 **stats,
-            })
+            }
+            if T_ct is not None:
+                rvec_ct, tvec_ct = rvec_tvec_from_44(T_ct)
+                rvec_tc, tvec_tc = rvec_tvec_from_44(T_tc)
+                sol.update({
+                    "T_camera_target_rvec": rvec_ct,
+                    "T_camera_target_tvec": tvec_ct,
+                    "T_camera_target_4x4": T_ct.tolist(),
+                    "T_target_camera_rvec": rvec_tc,
+                    "T_target_camera_tvec": tvec_tc,
+                    "T_target_camera_4x4": T_tc.tolist(),
+                })
+            results["solutions"].append(sol)
 
-    # AprilTag top
+    # ── AprilTag top ──
     obj_pts, img_pts = detect_apriltag_face(gray, "top")
     if obj_pts is not None:
         rvec, tvec, stats = solve_pnp(obj_pts, img_pts, K, D)
         if rvec is not None:
-            rvec_ct, tvec_ct = rvec_tvec_to_cam_target(rvec, tvec, APRILTAG_TOP["face_frame"], tf_buf)
-            results["solutions"].append({
+            T_ct, T_tc = compose_T_camera_target_from_face_pnp(
+                rvec, tvec, APRILTAG_TOP["face_frame"], tf_buf)
+            sol = {
                 "panel": "top", "type": "apriltag",
                 "rvec_camera_face": rvec.flatten().tolist(),
                 "tvec_camera_face": tvec.flatten().tolist(),
-                "rvec_camera_target": rvec_ct,
-                "tvec_camera_target": tvec_ct,
                 **stats,
-            })
+            }
+            if T_ct is not None:
+                rvec_ct, tvec_ct = rvec_tvec_from_44(T_ct)
+                rvec_tc, tvec_tc = rvec_tvec_from_44(T_tc)
+                sol.update({
+                    "T_camera_target_rvec": rvec_ct,
+                    "T_camera_target_tvec": tvec_ct,
+                    "T_camera_target_4x4": T_ct.tolist(),
+                    "T_target_camera_rvec": rvec_tc,
+                    "T_target_camera_tvec": tvec_tc,
+                    "T_target_camera_4x4": T_tc.tolist(),
+                })
+            results["solutions"].append(sol)
 
-    # Gazebo 真值对比 (仅在 --truth-source gazebo 时)
+    # ── 多候选解选择 ──
+    best, reason, ranked = select_best_solution(results["solutions"])
+    if best is not None:
+        results["selected_solution"] = best
+        results["selection_reason"] = reason
+        results["all_solutions_ranked"] = [
+            {"panel": s.get("panel"), "rmse_px": s.get("rmse_px"),
+             "inliers": s.get("inliers"), "pass": s.get("pass")}
+            for s in ranked
+        ]
+
+    # ── Gazebo 真值对比 (同方向 T_camera_target) ──
     if truth_source == "gazebo":
         truth = gazebo_truth(tf_buf, optical_frame)
         results["gazebo_truth"] = truth
-        if truth and results["solutions"]:
-            best = min(results["solutions"], key=lambda s: s.get("rmse_px", 99))
-            if best.get("tvec_camera_target"):
-                t_sol = np.array(best["tvec_camera_target"])
-                t_truth = np.array([truth["tx"], truth["ty"], truth["tz"]])
-                results["translation_error_m"] = float(np.linalg.norm(t_sol - t_truth))
-                # 旋转误差
-                from tf.transformations import quaternion_matrix
-                if best.get("rvec_camera_target"):
-                    R_sol, _ = cv2.Rodrigues(np.array(best["rvec_camera_target"]))
-                    T_truth = quaternion_matrix([truth["qx"], truth["qy"], truth["qz"], truth["qw"]])
-                    R_diff = R_sol.T @ T_truth[:3, :3]
-                    trace = np.trace(R_diff)
-                    angle = math.acos(max(-1.0, min(1.0, (trace - 1) / 2.0)))
-                    results["rotation_error_deg"] = round(float(angle * 180 / math.pi), 4)
+
+        if truth and best is not None and best.get("T_camera_target_4x4"):
+            T_ct_est = np.array(best["T_camera_target_4x4"])
+            T_ct_truth = np.array(truth["T_camera_target_4x4"])
+
+            errors = compute_transform_errors(T_ct_est, T_ct_truth)
+            results["truth_errors"] = errors
+
+            # 分级评定
+            mm = errors["translation_error_mm"]
+            deg = errors["rotation_error_deg"]
+            if mm <= 10 and deg <= 0.5:
+                grade = "PASS"
+            elif mm <= 20 and deg <= 1.0:
+                grade = "WARN"
+            else:
+                grade = "FAIL"
+            results["truth_grade"] = grade
 
     # 保存
     cv2.imwrite(os.path.join(output_dir, f"{cam_name}.png"), cv_img)
@@ -354,7 +562,12 @@ def main():
     tf_listener = tf2_ros.TransformListener(tf_buf)
     rospy.sleep(1.5)
 
-    all_results = {"opencv_capability": aruco_compat.get_opencv_info()}
+    all_results = {
+        "opencv_capability": aruco_compat.get_opencv_info(),
+        "capture_mode": "online_debug",
+        "capture_mode_note": "非严格同步采集, color+CameraInfo 独立 wait_for_message. "
+                            "正式外参估计建议使用 CaptureManager 批量采集数据.",
+    }
     per_camera_pass = {}
     for cam_name in sorted(CAMERAS.keys()):
         cr = process_camera(cam_name, tf_buf, args.output, args.truth_source)
@@ -362,7 +575,7 @@ def main():
         # Per-camera: must have at least one passing solution
         solutions = cr.get("solutions", []) if isinstance(cr, dict) else []
         per_camera_pass[cam_name] = any(
-            s.get("pass", False) and s.get("tvec_camera_target") is not None
+            s.get("pass", False) and s.get("T_camera_target_tvec") is not None
             for s in solutions
         )
 

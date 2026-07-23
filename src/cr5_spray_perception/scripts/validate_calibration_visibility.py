@@ -178,22 +178,45 @@ def process_camera(cam_name, output_dir):
             annotated = aruco_compat.draw_detected_markers(annotated, mc, mi)
         cv2.imwrite(os.path.join(output_dir, f"{cam_name}_annotated.png"), annotated)
 
-        # depth 统计
+        # depth 统计 (encoding 感知, 转换为米)
         try:
             depth_img = bridge.imgmsg_to_cv2(depth_msg, desired_encoding="passthrough")
-            d_arr = np.asarray(depth_img, dtype=np.float32)
-            finite = np.isfinite(d_arr) & (d_arr > 0)
+            depth_encoding = getattr(depth_msg, "encoding", "unknown")
+            depth_dtype = str(depth_img.dtype)
+
+            # 编码感知深度→米转换
+            if depth_encoding in ("16UC1", "mono16") or depth_img.dtype == np.uint16:
+                depth_m = depth_img.astype(np.float64) / 1000.0
+                depth_scale_to_m = 0.001
+                depth_unit = "mm"
+            elif depth_encoding in ("32FC1",) or depth_img.dtype in (np.float32, np.float64):
+                depth_m = depth_img.astype(np.float64)
+                depth_scale_to_m = 1.0
+                depth_unit = "m"
+            else:
+                rospy.logwarn("%s: unknown depth encoding=%s dtype=%s — raw values may be wrong",
+                              cam_name, depth_encoding, depth_dtype)
+                depth_m = depth_img.astype(np.float64)
+                depth_scale_to_m = "unknown"
+                depth_unit = "unknown"
+
+            finite = np.isfinite(depth_m) & (depth_m > 0)
             depth_stats = {
-                "nonzero_pct": round(float(finite.sum() / d_arr.size * 100), 2),
-                "finite_pct": round(float(np.isfinite(d_arr).sum() / d_arr.size * 100), 2),
-                "min_m": float(np.min(d_arr[finite])) if finite.any() else -1,
-                "median_m": float(np.median(d_arr[finite])) if finite.any() else -1,
-                "max_m": float(np.max(d_arr[finite])) if finite.any() else -1,
+                "encoding": depth_encoding,
+                "dtype": depth_dtype,
+                "scale_to_m": depth_scale_to_m,
+                "depth_unit": depth_unit,
+                "nonzero_pct": round(float(np.sum(depth_m > 0) / depth_m.size * 100), 2),
+                "finite_pct": round(float(np.isfinite(depth_m).sum() / depth_m.size * 100), 2),
+                "min_m": round(float(np.min(depth_m[finite])), 4) if finite.any() else -1,
+                "median_m": round(float(np.median(depth_m[finite])), 4) if finite.any() else -1,
+                "max_m": round(float(np.max(depth_m[finite])), 4) if finite.any() else -1,
             }
             with open(os.path.join(output_dir, f"{cam_name}_depth_stats.json"), "w") as f:
                 json.dump(depth_stats, f, indent=2)
-        except Exception:
-            pass
+            cam_result["depth_stats"] = depth_stats
+        except Exception as e:
+            rospy.logwarn("%s: depth stats failed: %s", cam_name, e)
 
     rospy.loginfo("%s: faces=%s %s", cam_name, complete, "PASS" if cam_result["pass"] else "FAIL")
     return cam_result
@@ -258,7 +281,12 @@ def main():
     aruco_compat.log_capability()
 
     os.makedirs(args.output, exist_ok=True)
-    results = {"opencv_capability": aruco_compat.get_opencv_info()}
+    results = {
+        "opencv_capability": aruco_compat.get_opencv_info(),
+        "capture_mode": "online_debug",
+        "capture_mode_note": "非严格同步采集, color+camera_info 独立 wait_for_message, "
+                            "depth 为附加统计. 正式验收建议使用 CaptureManager offline 模式.",
+    }
 
     all_pass = True
     for cam_name in sorted(CAMERAS.keys()):
