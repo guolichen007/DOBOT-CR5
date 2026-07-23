@@ -1,0 +1,16 @@
+# CR5 本地配置文件模板
+# 复制此文件为 config/local.yaml 并填入实际值
+# config/local.yaml 不会被提交到 Git
+
+workspace: "<WORKSPACE>"
+
+robot:
+  control_box_ip: "<CR5_CONTROL_BOX_IP>"
+
+cameras:
+  cam_front_left:
+    serial: "<D455_SERIAL_FRONT_LEFT>"
+  cam_front_right:
+    serial: "<D455_SERIAL_FRONT_RIGHT>"
+  cam_rear:
+    serial: "<D455_SERIAL_REAR>"

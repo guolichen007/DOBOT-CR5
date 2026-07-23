@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-V3.1 Object Yaw: 使用 set_model_state 旋转整个吊件模型。
+Object Yaw: 使用 set_model_state 旋转整个吊件模型。
 模型名: simple_hanging_workpiece
 """
 import math
@@ -19,7 +19,7 @@ class ObjectYawV31:
 
         self.model_name = rospy.get_param("~model_name", "simple_hanging_workpiece")
         self.obj_pos = rospy.get_param("~object_position",
-                                       {"x": 0.56, "y": 0.0, "z": 0.98})
+                                       {"x": 0.68, "y": 0.0, "z": 0.98})
         self.current_yaw_rad = 0.0
 
         rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)
@@ -28,7 +28,7 @@ class ObjectYawV31:
         self.yaw_pub = rospy.Publisher("/spray_demo/object_yaw", Float64, queue_size=1)
         rospy.Service("/spray_demo/set_object_yaw", Trigger, self.handle)
 
-        rospy.loginfo("Object yaw V3.1 ready (model=%s, via set_model_state)",
+        rospy.loginfo("Object yaw ready (model=%s, via set_model_state)",
                       self.model_name)
 
     def handle(self, req):

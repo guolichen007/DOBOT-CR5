@@ -42,23 +42,17 @@ catkin_install_python(PROGRAMS
   # 场景引导
   scripts/audit_sim_processes.py
   scripts/bootstrap_controllers.py
-  scripts/initialize_robot_pose.py
-  scripts/hold_robot_zero.py
   scripts/wait_scene_models.py
-  scripts/wait_controllers_running.py
   scripts/capture_scene_snapshot.py
   # 场景检查
   scripts/check_scene_geometry.py
   scripts/check_scene_runtime.py
   scripts/check_runtime_signals.py
-  scripts/check_sim_clock.py
   # 喷涂
   scripts/spray_simulator.py
-  # 标定目标
+  # 标定目标 (仿真模型职责)
   scripts/publish_calibration_target_frames.py
   scripts/validate_calibration_target_geometry.py
-  scripts/validate_calibration_visibility.py
-  scripts/estimate_camera_extrinsics.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

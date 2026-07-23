@@ -20,8 +20,8 @@
 # --isolated 用于 headless 自动测试
 #
 # 用法:
-#   bash run_simulation.sh --gui --object=motor_housing_cylinder
-#   bash run_simulation.sh --isolated --object=motor_housing_cylinder  # headless
+#   bash run_simulation.sh --gui --object=calibration_target
+#   bash run_simulation.sh --isolated --object=calibration_target  # headless
 # ============================================================================
 set -euo pipefail
 
@@ -29,11 +29,11 @@ set -euo pipefail
 GUI=false
 HEADLESS=true
 ISOLATED=false
-OBJECT="motor_housing_cylinder"
+OBJECT="calibration_target"
 PROFILE="vm"
 PHYSICS_MODE="stable"
-ENABLE_SPRAY_SIM=true
-ENABLE_PAINT_PATCHES=true
+ENABLE_SPRAY_SIM=false
+ENABLE_PAINT_PATCHES=false
 STRICT=false
 VERBOSE=false
 
@@ -61,7 +61,7 @@ CR5 Multi-Camera Calibration Simulation
 选项:
   --gui               启动 Gazebo GUI (默认 headless)
   --isolated          使用独立 roscore + 随机端口 (用于 headless 批量测试)
-  --object TYPE       motor_housing_cylinder | rectangular_housing
+  --object TYPE       calibration_target | motor_housing_cylinder | rectangular_housing (默认: calibration_target)
   --profile PROFILE   vm | quality (默认: vm)
   --physics-mode MODE stable | gravity (默认: stable)
   --strict            健康检查失败后自动退出 (用于自动测试)
@@ -71,10 +71,10 @@ CR5 Multi-Camera Calibration Simulation
   -h, --help          显示此帮助
 
 示例:
-  # GUI 默认固定端口
-  bash run_simulation.sh --gui --object=motor_housing_cylinder
-  # Headless 自动测试 (随机端口)
-  bash run_simulation.sh --isolated --strict
+  # GUI 标定仿真 (默认固定端口)
+  bash run_simulation.sh --gui --object=calibration_target
+  # Headless 批量标定 (随机端口)
+  bash run_simulation.sh --isolated --object=calibration_target --strict
 EOF
     exit 0
 }
@@ -358,13 +358,16 @@ run_audit() {
         return 0
     fi
 
-    echo "[$(date +%H:%M:%S)] Phase A0: auditing old simulation processes..."
+    echo "[$(date +%H:%M:%S)] Phase A0: cleaning old simulation processes..."
+    python3 "$SCRIPT_DIR/audit_sim_processes.py" --cleanup $($GUI && echo "--gui") || true
+
+    echo "[$(date +%H:%M:%S)] Phase A0: auditing..."
     local audit_ret=0
     python3 "$SCRIPT_DIR/audit_sim_processes.py" $($GUI && echo "--gui") || audit_ret=$?
 
     if [[ $audit_ret -ne 0 ]]; then
         echo "ERROR: SIM_PROCESS_PREFLIGHT_FAIL"
-        echo "Close the previous session with Ctrl+C, wait a few seconds, and retry."
+        echo "If this persists, run:  rm -f /tmp/cr5_spray_demo.lock /tmp/cr5_spray_simulation.env"
         exit 1
     fi
     echo "[$(date +%H:%M:%S)] SIM_PROCESS_PREFLIGHT_PASS"

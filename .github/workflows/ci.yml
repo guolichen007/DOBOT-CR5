@@ -1,0 +1,122 @@
+name: DOBOT-CR5 CI
+
+on:
+  push:
+    branches: [main, develop/multi-camera-calibration]
+  pull_request:
+    branches: [main, develop/multi-camera-calibration]
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ── Job 1: Markdown 链接检查 ──────────────────────────────────
+  markdown-link-check:
+    name: Markdown Link Check
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check Markdown links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          use-verbose-mode: "yes"
+          config-file: ".github/workflows/mlc_config.json"
+
+  # ── Job 2: catkin-build ──────────────────────────────────────
+  catkin-build:
+    name: Catkin Build (ROS Noetic)
+    runs-on: ubuntu-20.04
+    container:
+      image: ros:noetic-ros-core-focal
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          path: "src/DOBOT-CR5"
+
+      - name: Install system dependencies
+        run: |
+          set -euo pipefail
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-catkin-tools \
+            python3-rosdep \
+            python3-numpy \
+            python3-yaml \
+            python3-opencv \
+            libgazebo11-dev \
+            ros-noetic-gazebo-ros-pkgs \
+            ros-noetic-gazebo-ros-control \
+            ros-noetic-moveit \
+            ros-noetic-tf2-ros \
+            ros-noetic-cv-bridge \
+            ros-noetic-image-transport \
+            ros-noetic-camera-info-manager
+
+      - name: Initialize rosdep
+        run: |
+          set -euo pipefail
+          rosdep update
+          rosdep install --from-paths src --ignore-src -r -y
+
+      - name: Catkin build
+        run: |
+          set -euo pipefail
+          . /opt/ros/noetic/setup.sh
+          catkin_make
+
+  # ── Job 3: asset-contract-tests ──────────────────────────────
+  asset-contract-tests:
+    name: Asset Contract Tests
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Python dependencies
+        run: |
+          set -euo pipefail
+          pip3 install pyyaml
+
+      - name: Run calibration asset contract tests
+        run: |
+          set -euo pipefail
+          python3 src/cr5_spray_sim/tests/test_calibration_assets.py
+
+      - name: Run scene config tests
+        run: |
+          set -euo pipefail
+          python3 src/cr5_spray_sim/tests/test_scene_config.py
+
+      - name: Run camera geometry tests
+        run: |
+          set -euo pipefail
+          python3 src/cr5_spray_sim/tests/test_camera_geometry.py
+
+      - name: Run runtime contract tests
+        run: |
+          set -euo pipefail
+          python3 src/cr5_spray_sim/tests/test_runtime_contract.py
+
+      - name: Verify 7-package contract
+        run: |
+          set -euo pipefail
+          fail=0
+          packages=(
+            dobot_bringup dobot_description cr5_moveit
+            cr5_spray_sim cr5_spray_perception
+            realsense_gazebo_description realsense_gazebo_plugin
+          )
+          for pkg in "${packages[@]}"; do
+            if [ -f "src/$pkg/CMakeLists.txt" ]; then
+              echo "OK: src/$pkg"
+            else
+              echo "FAIL: src/$pkg/CMakeLists.txt missing"; fail=1
+            fi
+          done
+          if [ -d "src/cr5_spray_planning" ]; then
+            echo "FAIL: cr5_spray_planning should not exist"; fail=1
+          else
+            echo "OK: cr5_spray_planning correctly removed"
+          fi
+          if [ "$fail" -ne 0 ]; then exit 1; fi

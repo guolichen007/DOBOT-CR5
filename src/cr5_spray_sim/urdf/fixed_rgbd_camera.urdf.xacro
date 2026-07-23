@@ -1,0 +1,123 @@
+<?xml version="1.0"?>
+<!--
+  Fixed RGB-D Camera URDF xacro — 无底座独立相机模型。
+  用于 spawn_fixed_cameras.py 生成 Gazebo 相机。
+  参数通过 xacro 命令行传入。
+-->
+<robot name="$(arg name)" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:arg name="name" default="camera"/>
+  <xacro:arg name="color_width" default="424"/>
+  <xacro:arg name="color_height" default="240"/>
+  <xacro:arg name="depth_width" default="424"/>
+  <xacro:arg name="depth_height" default="240"/>
+  <xacro:arg name="fps" default="5"/>
+  <xacro:arg name="color_hfov" default="1.2112585"/>
+  <xacro:arg name="depth_hfov" default="1.2112585"/>
+
+  <material name="$(arg name)_body"><color rgba="0.25 0.25 0.25 1"/></material>
+  <material name="$(arg name)_lens"><color rgba="0.05 0.05 0.05 1"/></material>
+  <material name="$(arg name)_axis"><color rgba="1 0.15 0.15 1"/></material>
+  <material name="$(arg name)_up_mark"><color rgba="0.15 0.7 0.15 1"/></material>
+
+  <link name="$(arg name)_link">
+    <inertial>
+      <mass value="0.05"/>
+      <inertia ixx="0.0001" ixy="0" ixz="0" iyy="0.0001" iyz="0" izz="0.0001"/>
+    </inertial>
+    <visual name="body">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry><box size="0.03 0.09 0.025"/></geometry>
+      <material name="$(arg name)_body"/>
+    </visual>
+    <visual name="lens">
+      <origin xyz="0.015 0 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder radius="0.010" length="0.004"/></geometry>
+      <material name="$(arg name)_lens"/>
+    </visual>
+    <visual name="axis">
+      <origin xyz="0.025 0 0" rpy="0 1.5708 0"/>
+      <geometry><cylinder radius="0.002" length="0.05"/></geometry>
+      <material name="$(arg name)_axis"/>
+    </visual>
+    <visual name="up_dot">
+      <origin xyz="0 0 0.013" rpy="0 0 0"/>
+      <geometry><cylinder radius="0.004" length="0.003"/></geometry>
+      <material name="$(arg name)_up_mark"/>
+    </visual>
+  </link>
+
+  <link name="$(arg name)_color_optical_frame"/>
+  <joint name="$(arg name)_color_optical_joint" type="fixed">
+    <parent link="$(arg name)_link"/>
+    <child link="$(arg name)_color_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+
+  <link name="$(arg name)_depth_optical_frame"/>
+  <joint name="$(arg name)_depth_optical_joint" type="fixed">
+    <parent link="$(arg name)_link"/>
+    <child link="$(arg name)_depth_optical_frame"/>
+    <origin xyz="0 0 0" rpy="-1.5708 0 -1.5708"/>
+  </joint>
+
+  <gazebo reference="$(arg name)_link">
+    <self_collide>0</self_collide>
+    <sensor name="$(arg name)color" type="camera">
+      <camera name="$(arg name)">
+        <horizontal_fov>$(arg color_hfov)</horizontal_fov>
+        <image>
+          <width>$(arg color_width)</width>
+          <height>$(arg color_height)</height>
+          <format>RGB_INT8</format>
+        </image>
+        <clip><near>0.15</near><far>10.0</far></clip>
+        <noise><type>gaussian</type><mean>0.0</mean><stddev>0.007</stddev></noise>
+      </camera>
+      <always_on>1</always_on>
+      <update_rate>$(arg fps)</update_rate>
+      <visualize>false</visualize>
+    </sensor>
+    <sensor name="$(arg name)depth" type="depth">
+      <camera name="$(arg name)">
+        <horizontal_fov>$(arg depth_hfov)</horizontal_fov>
+        <image>
+          <width>$(arg depth_width)</width>
+          <height>$(arg depth_height)</height>
+          <format>R_FLOAT32</format>
+        </image>
+        <clip><near>0.15</near><far>10.0</far></clip>
+        <noise><type>gaussian</type><mean>0.0</mean><stddev>0.005</stddev></noise>
+      </camera>
+      <always_on>1</always_on>
+      <update_rate>$(arg fps)</update_rate>
+      <visualize>false</visualize>
+    </sensor>
+    <sensor name="$(arg name)ired1" type="camera">
+      <camera name="$(arg name)">
+        <horizontal_fov>1.48702</horizontal_fov>
+        <image><width>160</width><height>120</height><format>L_INT8</format></image>
+        <clip><near>0.15</near><far>10.0</far></clip>
+      </camera>
+      <always_on>1</always_on><update_rate>2</update_rate><visualize>false</visualize>
+    </sensor>
+    <sensor name="$(arg name)ired2" type="camera">
+      <camera name="$(arg name)">
+        <horizontal_fov>1.48702</horizontal_fov>
+        <image><width>160</width><height>120</height><format>L_INT8</format></image>
+        <clip><near>0.15</near><far>10.0</far></clip>
+      </camera>
+      <always_on>1</always_on><update_rate>2</update_rate><visualize>false</visualize>
+    </sensor>
+  </gazebo>
+
+  <gazebo>
+    <plugin name="$(arg name)" filename="librealsense_gazebo_plugin.so">
+      <prefix>$(arg name)</prefix>
+      <colorFrameName>$(arg name)_color_optical_frame</colorFrameName>
+      <depthFrameName>$(arg name)_depth_optical_frame</depthFrameName>
+    </plugin>
+  </gazebo>
+
+  <gazebo><static>true</static></gazebo>
+</robot>

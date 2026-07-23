@@ -4,7 +4,7 @@ CR5 Calibration Scene Geometry Absolute Check.
 
 在 paused 状态下验证所有模型绝对坐标，并设置 CR5 零位。
 
-1. 读取 config/scene_v31.yaml 作为唯一真值
+1. 读取 config/simulation_scene.yaml 作为唯一真值
 2. 验证每个模型绝对位置 (位置 ≤ 2mm, 姿态 ≤ 0.2°)
 3. 验证静态模型 is_static=true
 4. 调用 /gazebo/set_model_configuration 设 CR5 六轴零位
@@ -36,11 +36,11 @@ from gazebo_msgs.srv import (
 )
 from tf.transformations import euler_from_quaternion
 
-# ---- 从 scene_v31.yaml 派生的唯一真值 ----
+# ---- 从 simulation_scene.yaml 派生的唯一真值 ----
 EXPECTED_POSITIONS = {
     "cr5_robot":                  (0.0,   0.0,  0.0),
     "simple_goalpost_frame":      (0.68,  0.0,  0.0),
-    "simple_hanging_workpiece":   (0.56,  0.0,  0.98),
+    "simple_hanging_workpiece":   (0.68,  0.0,  0.98),
     "pedestal_fl":                (-0.28, -0.68, 0.0),
     "pedestal_fr":                (-0.28,  0.68, 0.0),
     "pedestal_rear":              (1.36,  0.0,  0.0),
@@ -74,20 +74,20 @@ SKIP_ORIENTATION_CHECK = {"cam_front_left", "cam_front_right", "cam_rear"}
 
 
 def load_expected():
-    """从 scene_v31.yaml 加载并验证期望坐标."""
+    """从 simulation_scene.yaml 加载并验证期望坐标."""
     try:
         rp = rospkg.RosPack()
         config_path = os.path.join(
-            rp.get_path("cr5_spray_sim"), "config", "scene_v31.yaml")
+            rp.get_path("cr5_spray_sim"), "config", "simulation_scene.yaml")
     except Exception:
         config_path = os.path.join(
-            os.path.dirname(__file__), "..", "config", "scene_v31.yaml")
+            os.path.dirname(__file__), "..", "config", "simulation_scene.yaml")
 
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
     # 从 YAML 验证坐标一致性
-    cam_cfg = config.get("cameras_v31", {})
+    cam_cfg = config.get("cameras", {})
     for cam in cam_cfg.get("cameras", []):
         name = cam["name"]
         yaml_pos = (cam["position"]["x"], cam["position"]["y"], cam["position"]["z"])

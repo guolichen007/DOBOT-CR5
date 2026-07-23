@@ -1,0 +1,100 @@
+<?xml version="1.0"?>
+<!--
+  Simple Goalpost Frame: 两柱 + 顶梁 + 地脚。
+  前方完全开放，CR5 从 -X 方向接近。
+  不使用悬臂，不使用 U 型结构。
+
+  尺寸:
+    框架 X: 0.68 (spawn 位置)
+    立柱 Y: ±0.62
+    高度: 1.65m
+    顶梁长度(Y): 1.28m
+    型材截面: 0.05m
+
+  单一 static model，root link 在 (0,0,0) 局部坐标。
+  World pose 由 spawn_model 的 -x -y -z 参数设置。
+-->
+<robot name="simple_goalpost_frame" xmlns:xacro="http://ros.org/wiki/xacro">
+
+  <xacro:property name="post_y" value="0.62"/>
+  <xacro:property name="height" value="1.65"/>
+  <xacro:property name="beam_len_y" value="1.28"/>
+  <xacro:property name="profile" value="0.05"/>
+  <xacro:property name="base_sx" value="0.24"/>
+  <xacro:property name="base_sy" value="0.18"/>
+  <xacro:property name="base_sz" value="0.025"/>
+
+  <material name="frame_light_gray">
+    <color rgba="0.52 0.52 0.54 1"/>
+  </material>
+  <material name="base_dark_gray">
+    <color rgba="0.30 0.30 0.33 1"/>
+  </material>
+
+  <link name="frame_base">
+    <inertial>
+      <mass value="80.0"/>
+      <inertia ixx="20.0" ixy="0" ixz="0" iyy="15.0" iyz="0" izz="25.0"/>
+      <origin xyz="0 0 ${height/2}" rpy="0 0 0"/>
+    </inertial>
+
+    <!-- 左立柱 -->
+    <visual name="left_post">
+      <origin xyz="0 ${-post_y} ${height/2}" rpy="0 0 0"/>
+      <geometry><box size="${profile} ${profile} ${height}"/></geometry>
+      <material name="frame_light_gray"/>
+    </visual>
+    <collision name="left_post_col">
+      <origin xyz="0 ${-post_y} ${height/2}" rpy="0 0 0"/>
+      <geometry><box size="${profile} ${profile} ${height}"/></geometry>
+    </collision>
+
+    <!-- 右立柱 -->
+    <visual name="right_post">
+      <origin xyz="0 ${post_y} ${height/2}" rpy="0 0 0"/>
+      <geometry><box size="${profile} ${profile} ${height}"/></geometry>
+      <material name="frame_light_gray"/>
+    </visual>
+    <collision name="right_post_col">
+      <origin xyz="0 ${post_y} ${height/2}" rpy="0 0 0"/>
+      <geometry><box size="${profile} ${profile} ${height}"/></geometry>
+    </collision>
+
+    <!-- 顶部横梁 (沿 Y 连接两立柱) -->
+    <visual name="top_beam">
+      <origin xyz="0 0 ${height - profile/2}" rpy="0 0 0"/>
+      <geometry><box size="${profile} ${beam_len_y} ${profile}"/></geometry>
+      <material name="frame_light_gray"/>
+    </visual>
+    <collision name="top_beam_col">
+      <origin xyz="0 0 ${height - profile/2}" rpy="0 0 0"/>
+      <geometry><box size="${profile} ${beam_len_y} ${profile}"/></geometry>
+    </collision>
+
+    <!-- 左地脚板 -->
+    <visual name="left_base_plate">
+      <origin xyz="0 ${-post_y} ${base_sz/2}" rpy="0 0 0"/>
+      <geometry><box size="${base_sx} ${base_sy} ${base_sz}"/></geometry>
+      <material name="base_dark_gray"/>
+    </visual>
+    <collision name="left_base_col">
+      <origin xyz="0 ${-post_y} ${base_sz/2}" rpy="0 0 0"/>
+      <geometry><box size="${base_sx} ${base_sy} ${base_sz}"/></geometry>
+    </collision>
+
+    <!-- 右地脚板 -->
+    <visual name="right_base_plate">
+      <origin xyz="0 ${post_y} ${base_sz/2}" rpy="0 0 0"/>
+      <geometry><box size="${base_sx} ${base_sy} ${base_sz}"/></geometry>
+      <material name="base_dark_gray"/>
+    </visual>
+    <collision name="right_base_col">
+      <origin xyz="0 ${post_y} ${base_sz/2}" rpy="0 0 0"/>
+      <geometry><box size="${base_sx} ${base_sy} ${base_sz}"/></geometry>
+    </collision>
+
+  </link>
+
+  <gazebo><static>true</static></gazebo>
+
+</robot>

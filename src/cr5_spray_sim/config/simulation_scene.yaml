@@ -1,0 +1,87 @@
+# CR5 三相机标定仿真 — 场景配置 (唯一真值)
+# 门架 + 标定目标 + 三台固定相机 + 基座
+# 所有世界级位姿以此文件为唯一来源，禁止在其他位置硬编码
+
+cr5_base:
+  position: {x: 0.0, y: 0.0, z: 0.0}
+
+simple_goalpost_frame:
+  center_x: 0.68
+  post_y: [-0.62, 0.62]
+  height: 1.65
+  top_beam_length_y: 1.28
+  profile_size: 0.05
+  base_plate: [0.24, 0.18, 0.025]
+  color_frame: [0.52, 0.52, 0.54, 1.0]
+
+simple_hanging_workpiece:
+  # 工件中心, X=0.68 对齐门架横梁 (CR5 工作半径内)
+  position: {x: 0.68, y: 0.0, z: 0.98}
+  default_type: motor_housing_cylinder
+  types:
+    motor_housing_cylinder:
+      axis: Y
+      body: {length_y: 0.36, radius: 0.105}
+      left_end_cap: {length_y: 0.035, radius: 0.115}
+      right_end_cap: {length_y: 0.045, radius: 0.115}
+      shaft: {length_y: 0.055, radius: 0.040}
+      hanger_points_y: [-0.12, 0.12]
+      spreader_bar_z: 0.67
+      max_axis_m: 0.50
+    rectangular_housing:
+      main_box: {size_x: 0.18, size_y: 0.36, size_z: 0.26}
+      top_box: {size_x: 0.10, size_y: 0.12, size_z: 0.07, offset_y: 0.07, offset_z: 0.165}
+      hanger_points_y: [-0.12, 0.12]
+      spreader_bar_z: 0.67
+      max_axis_m: 0.50
+
+cameras:
+  # 目标：工件中心
+  target: {x: 0.68, y: 0.0, z: 0.98}
+
+  # VM profile: 低分辨率快速刷新
+  vm_profile:
+    color_width: 424
+    color_height: 240
+    depth_width: 424
+    depth_height: 240
+    fps: 5
+
+  # Quality profile: 标准分辨率
+  quality_profile:
+    color_width: 640
+    color_height: 480
+    depth_width: 640
+    depth_height: 480
+    fps: 10
+
+  cameras:
+    # 前左相机 (直接坐标，不通过球面优化)
+    - name: cam_front_left
+      position: {x: -0.18, y: -0.68, z: 1.22}
+      roll_offset_deg: 0.0
+      keep_horizon: true
+      description: "前方左侧，距目标约1.03m"
+
+    # 前右相机 (与左对称)
+    - name: cam_front_right
+      position: {x: -0.18, y: 0.68, z: 1.22}
+      roll_offset_deg: 0.0
+      keep_horizon: true
+      description: "前方右侧，距目标约1.03m"
+
+    # 后相机 (正后方)
+    - name: cam_rear
+      position: {x: 1.46, y: 0.0, z: 1.18}
+      roll_offset_deg: 0.0
+      keep_horizon: true
+      description: "正后方，距目标约0.94m"
+
+  # 图像质量验收阈值
+  image_acceptance:
+    min_horizontal_fill_pct: 20
+    max_horizontal_fill_pct: 50
+    min_vertical_fill_pct: 25
+    max_vertical_fill_pct: 55
+    max_center_deviation_pct: 15
+    max_frame_occlusion_pct: 5
