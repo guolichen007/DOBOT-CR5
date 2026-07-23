@@ -73,172 +73,50 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Verify calibration PNG assets
+      - name: Install Python dependencies
         run: |
           set -euo pipefail
-          TEXTURES_DIR="src/cr5_spray_sim/models/calibration_target/materials/textures"
-          echo "Checking calibration marker PNG integrity..."
-          if [ ! -d "$TEXTURES_DIR" ]; then
-            echo "FAIL: textures directory not found: $TEXTURES_DIR"
-            exit 1
-          fi
-          png_count=$(find "$TEXTURES_DIR" -name "*.png" | wc -l)
-          if [ "$png_count" -lt 5 ]; then
-            echo "FAIL: expected >= 5 PNG files, found $png_count"
-            exit 1
-          fi
-          cd "$TEXTURES_DIR"
-          for png in *.png; do
-            if [ ! -f "$png" ]; then continue; fi
-            sha=$(sha256sum "$png" | cut -d' ' -f1)
-            size=$(stat -c%s "$png" 2>/dev/null || echo 0)
-            echo "  $png  SHA256=$sha  size=$size"
-            # PNG magic bytes check
-            if ! head -c 4 "$png" | grep -q $'\x89PNG'; then
-              echo "FAIL: $png is not a valid PNG"
-              exit 1
-            fi
-            if [ "$size" -eq 0 ]; then
-              echo "FAIL: $png is empty"
-              exit 1
-            fi
-          done
-          echo "PASS: $png_count calibration PNG files verified"
+          pip3 install pyyaml
 
-      - name: Verify camera config YAML
+      - name: Run calibration asset contract tests
         run: |
           set -euo pipefail
-          fail=0
+          python3 src/cr5_spray_sim/tests/test_calibration_assets.py
 
-          check_file() {
-            local path="$1"
-            local desc="$2"
-            if [ -f "$path" ]; then
-              echo "PASS: $desc"
-            else
-              echo "FAIL: $desc — $path not found"
-              fail=1
-            fi
-          }
-
-          check_file "src/realsense_gazebo_description/config/d455_like_default.yaml" \
-            "d455_like_default.yaml"
-          check_file "src/cr5_spray_sim/config/simulation_scene.yaml" \
-            "simulation_scene.yaml (main simulation scene config)"
-          check_file "src/cr5_spray_sim/config/camera_layout_ideal.yaml" \
-            "camera_layout_ideal.yaml"
-          check_file "src/cr5_spray_sim/config/camera_layout_realistic.yaml" \
-            "camera_layout_realistic.yaml"
-
-          if [ "$fail" -ne 0 ]; then exit 1; fi
-
-      - name: Verify SDF/material
+      - name: Run scene config tests
         run: |
           set -euo pipefail
-          fail=0
+          python3 src/cr5_spray_sim/tests/test_scene_config.py
 
-          check_file() {
-            if [ -f "$1" ]; then echo "PASS: $2"; else echo "FAIL: $2 missing"; fail=1; fi
-          }
-
-          check_file "src/cr5_spray_sim/models/calibration_target/model.sdf" \
-            "calibration_target model.sdf"
-          check_file "src/cr5_spray_sim/models/calibration_target/model.config" \
-            "calibration_target model.config"
-
-          if [ "$fail" -ne 0 ]; then exit 1; fi
-
-      - name: Verify three-camera config (cam_front_left / cam_front_right / cam_rear)
+      - name: Run camera geometry tests
         run: |
           set -euo pipefail
-          SCRIPT="src/cr5_spray_sim/scripts/spawn_fixed_cameras.py"
-          SCENE="src/cr5_spray_sim/config/simulation_scene.yaml"
-          fail=0
+          python3 src/cr5_spray_sim/tests/test_camera_geometry.py
 
-          for cam in cam_front_left cam_front_right cam_rear; do
-            if grep -q "$cam" "$SCENE"; then
-              echo "PASS: $cam defined in simulation_scene.yaml"
-            else
-              echo "FAIL: $cam not found in simulation_scene.yaml"
-              fail=1
-            fi
-          done
+      - name: Run runtime contract tests
+        run: |
+          set -euo pipefail
+          python3 src/cr5_spray_sim/tests/test_runtime_contract.py
 
-          if [ "$fail" -ne 0 ]; then exit 1; fi
-
-      - name: Verify CMake install targets (7 packages)
+      - name: Verify 7-package contract
         run: |
           set -euo pipefail
           fail=0
           packages=(
-            dobot_bringup
-            dobot_description
-            cr5_moveit
-            cr5_spray_sim
-            cr5_spray_perception
-            realsense_gazebo_description
-            realsense_gazebo_plugin
+            dobot_bringup dobot_description cr5_moveit
+            cr5_spray_sim cr5_spray_perception
+            realsense_gazebo_description realsense_gazebo_plugin
           )
-
           for pkg in "${packages[@]}"; do
             if [ -f "src/$pkg/CMakeLists.txt" ]; then
-              echo "OK: src/$pkg/CMakeLists.txt"
+              echo "OK: src/$pkg"
             else
-              echo "FAIL: src/$pkg/CMakeLists.txt missing"
-              fail=1
+              echo "FAIL: src/$pkg/CMakeLists.txt missing"; fail=1
             fi
           done
-
-          # Verify cr5_spray_planning is NOT present
           if [ -d "src/cr5_spray_planning" ]; then
-            echo "FAIL: cr5_spray_planning should not exist (removed per engineering cleanup)"
-            fail=1
+            echo "FAIL: cr5_spray_planning should not exist"; fail=1
           else
             echo "OK: cr5_spray_planning correctly removed"
           fi
-
           if [ "$fail" -ne 0 ]; then exit 1; fi
-
-      - name: Verify runtime topics contract
-        run: |
-          set -euo pipefail
-          echo "Checking color/depth topic expectations..."
-          SCRIPT="src/cr5_spray_sim/scripts/spawn_fixed_cameras.py"
-          fail=0
-
-          for topic_suffix in "color/image_raw" "depth/image_rect_raw"; do
-            if grep -q "$topic_suffix" "$SCRIPT"; then
-              echo "PASS: $topic_suffix contract found"
-            else
-              echo "FAIL: $topic_suffix contract not found"
-              fail=1
-            fi
-          done
-
-          if [ "$fail" -ne 0 ]; then exit 1; fi
-
-      - name: Run Python unit tests
-        run: |
-          set -euo pipefail
-          TESTS_DIR="src/cr5_spray_sim/tests"
-          fail=0
-
-          for test in test_camera_geometry.py test_runtime_contract.py \
-            test_scene_config.py test_calibration_assets.py; do
-            echo ""
-            echo "=== Running: $test ==="
-            if python3 "$TESTS_DIR/$test"; then
-              echo "PASS: $test"
-            else
-              echo "FAIL: $test"
-              fail=1
-            fi
-          done
-
-          if [ "$fail" -ne 0 ]; then
-            echo ""
-            echo "Some unit tests FAILED"
-            exit 1
-          fi
-          echo ""
-          echo "All unit tests PASSED"
