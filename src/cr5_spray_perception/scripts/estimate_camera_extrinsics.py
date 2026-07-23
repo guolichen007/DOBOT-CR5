@@ -10,7 +10,7 @@ import rospy, tf2_ros
 from sensor_msgs.msg import Image, CameraInfo
 from cv_bridge import CvBridge
 from cv2 import aruco
-from cr5_spray_sim import aruco_compat
+from cr5_spray_perception import aruco_compat
 
 CAMERAS = {
     "cam_front_left": {

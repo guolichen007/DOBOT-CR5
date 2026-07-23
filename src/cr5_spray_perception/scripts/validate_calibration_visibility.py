@@ -12,7 +12,7 @@ from cv_bridge import CvBridge
 from cv2 import aruco
 
 # 导入兼容层
-from cr5_spray_sim import aruco_compat
+from cr5_spray_perception import aruco_compat
 
 CAMERAS = {
     "cam_front_left": {

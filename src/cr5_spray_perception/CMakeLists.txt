@@ -5,6 +5,9 @@ find_package(catkin REQUIRED)
 
 catkin_package()
 
+# Python package — cr5_spray_perception.aruco_compat
+catkin_python_setup()
+
 install(DIRECTORY launch config
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
