@@ -17,9 +17,9 @@ bash scripts/run_simulation.sh --gui --object=calibration_target --profile=quali
 
 | 相机 | Color | Depth |
 |------|-------|-------|
-| cam_front_left | `/cam_front_left/color/image_raw` | `/cam_front_left/depth/image_rect_raw` |
-| cam_front_right | `/cam_front_right/color/image_raw` | `/cam_front_right/depth/image_rect_raw` |
-| cam_rear | `/cam_rear/color/image_raw` | `/cam_rear/depth/image_rect_raw` |
+| cam_front_left | `/cam_front_left/camera/color/image_raw` | `/cam_front_left/camera/depth/image_raw` |
+| cam_front_right | `/cam_front_right/camera/color/image_raw` | `/cam_front_right/camera/depth/image_raw` |
+| cam_rear | `/cam_rear/camera/color/image_raw` | `/cam_rear/camera/depth/image_raw` |
 
 ## 配置
 

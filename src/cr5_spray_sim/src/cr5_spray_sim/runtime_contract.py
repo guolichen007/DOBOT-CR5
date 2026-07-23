@@ -9,21 +9,21 @@ import sys
 EXPECTED_CAMERAS = ["cam_front_left", "cam_front_right", "cam_rear"]
 
 EXPECTED_COLOR_TOPICS = [
-    "/cam_front_left/color/image_raw",
-    "/cam_front_right/color/image_raw",
-    "/cam_rear/color/image_raw",
+    "/cam_front_left/camera/color/image_raw",
+    "/cam_front_right/camera/color/image_raw",
+    "/cam_rear/camera/color/image_raw",
 ]
 
 EXPECTED_DEPTH_TOPICS = [
-    "/cam_front_left/depth/image_rect_raw",
-    "/cam_front_right/depth/image_rect_raw",
-    "/cam_rear/depth/image_rect_raw",
+    "/cam_front_left/camera/depth/image_raw",
+    "/cam_front_right/camera/depth/image_raw",
+    "/cam_rear/camera/depth/image_raw",
 ]
 
 EXPECTED_CAMERA_INFO_TOPICS = [
-    "/cam_front_left/color/camera_info",
-    "/cam_front_right/color/camera_info",
-    "/cam_rear/color/camera_info",
+    "/cam_front_left/camera/color/camera_info",
+    "/cam_front_right/camera/color/camera_info",
+    "/cam_rear/camera/color/camera_info",
 ]
 
 # 标定目标 TF 帧
@@ -81,9 +81,9 @@ def check_camera_contract(camera_names=None):
     result = {}
     for cam in camera_names:
         result[cam] = {
-            "color": f"/{cam}/color/image_raw" in existing,
-            "depth": f"/{cam}/depth/image_rect_raw" in existing,
-            "info": f"/{cam}/color/camera_info" in existing,
+            "color": f"/{cam}/camera/color/image_raw" in existing,
+            "depth": f"/{cam}/camera/depth/image_raw" in existing,
+            "info": f"/{cam}/camera/color/camera_info" in existing,
         }
     return result
 

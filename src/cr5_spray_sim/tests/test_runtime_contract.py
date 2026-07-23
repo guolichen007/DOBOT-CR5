@@ -26,14 +26,14 @@ def test_three_cameras():
 
 def test_color_topics_match_cameras():
     for cam in EXPECTED_CAMERAS:
-        color_topic = f"/{cam}/color/image_raw"
+        color_topic = f"/{cam}/camera/color/image_raw"
         assert color_topic in EXPECTED_COLOR_TOPICS, \
             f"Missing color topic: {color_topic}"
 
 
 def test_depth_topics_match_cameras():
     for cam in EXPECTED_CAMERAS:
-        depth_topic = f"/{cam}/depth/image_rect_raw"
+        depth_topic = f"/{cam}/camera/depth/image_raw"
         assert depth_topic in EXPECTED_DEPTH_TOPICS, \
             f"Missing depth topic: {depth_topic}"
 
