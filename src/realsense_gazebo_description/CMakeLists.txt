@@ -60,7 +60,3 @@ install(DIRECTORY launch
 install(DIRECTORY config
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
-
-install(PROGRAMS scripts/d455_like_smoke_test.py
-  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-)
