@@ -3,9 +3,9 @@
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from runtime_contract import (
+from cr5_spray_sim.runtime_contract import (
     EXPECTED_CAMERAS,
     EXPECTED_COLOR_TOPICS,
     EXPECTED_DEPTH_TOPICS,

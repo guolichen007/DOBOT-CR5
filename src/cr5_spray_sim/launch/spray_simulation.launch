@@ -81,7 +81,7 @@
 
   <!-- 标定目标内部 TF (StaticTransformBroadcaster) -->
   <node if="$(eval object_type == 'calibration_target')"
-    name="publish_calibration_target_frames" pkg="cr5_spray_perception"
+    name="publish_calibration_target_frames" pkg="cr5_spray_sim"
     type="publish_calibration_target_frames.py" respawn="false" output="screen"/>
 
   <!-- Goalpost frame -->

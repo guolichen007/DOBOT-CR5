@@ -16,38 +16,38 @@ def load_config(name):
         return yaml.safe_load(f)
 
 
-def test_scene_v31_exists():
-    """scene_v31.yaml 必须存在且包含 cameras_v31 key."""
-    cfg = load_config("scene_v31.yaml")
-    assert cfg is not None, "scene_v31.yaml not found"
-    assert "cameras_v31" in cfg, "Missing cameras_v31 key"
+def test_simulation_scene_exists():
+    """simulation_scene.yaml 必须存在且包含 cameras key."""
+    cfg = load_config("simulation_scene.yaml")
+    assert cfg is not None, "simulation_scene.yaml not found"
+    assert "cameras" in cfg, "Missing cameras key"
 
 
-def test_scene_v31_three_cameras():
-    """scene_v31.yaml 必须定义 3 台固定相机."""
-    cfg = load_config("scene_v31.yaml")
+def test_simulation_scene_three_cameras():
+    """simulation_scene.yaml 必须定义 3 台固定相机."""
+    cfg = load_config("simulation_scene.yaml")
     assert cfg is not None
-    cameras = cfg["cameras_v31"]["cameras"]
+    cameras = cfg["cameras"]["cameras"]
     assert len(cameras) == 3, f"Expected 3 cameras, got {len(cameras)}"
     names = [c["name"] for c in cameras]
     for expected in ["cam_front_left", "cam_front_right", "cam_rear"]:
         assert expected in names, f"Camera {expected} not in {names}"
 
 
-def test_scene_v31_target_defined():
-    """scene_v31.yaml 必须定义标定目标位姿."""
-    cfg = load_config("scene_v31.yaml")
+def test_simulation_scene_target_defined():
+    """simulation_scene.yaml 必须定义标定目标位姿."""
+    cfg = load_config("simulation_scene.yaml")
     assert cfg is not None
-    target = cfg["cameras_v31"]["target"]
+    target = cfg["cameras"]["target"]
     for axis in ["x", "y", "z"]:
         assert axis in target, f"target missing {axis}"
 
 
-def test_scene_v31_profiles():
-    """scene_v31.yaml 必须定义 vm_profile 和 quality_profile."""
-    cfg = load_config("scene_v31.yaml")
+def test_simulation_scene_profiles():
+    """simulation_scene.yaml 必须定义 vm_profile 和 quality_profile."""
+    cfg = load_config("simulation_scene.yaml")
     assert cfg is not None
-    c = cfg["cameras_v31"]
+    c = cfg["cameras"]
     assert "vm_profile" in c, "Missing vm_profile"
     assert "quality_profile" in c, "Missing quality_profile"
     assert c["quality_profile"]["color_width"] >= 640

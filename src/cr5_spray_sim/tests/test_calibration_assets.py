@@ -71,7 +71,7 @@ def test_spawn_script_references():
     if os.path.isfile(spawn_script):
         with open(spawn_script, "r") as f:
             content = f.read()
-        assert "cam_front_left" in content or "scene_v31" in content, \
+        assert "cam_front_left" in content or "simulation_scene" in content, \
             "spawn script missing camera/scene reference"
 
 

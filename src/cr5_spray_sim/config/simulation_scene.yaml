@@ -35,7 +35,7 @@ simple_hanging_workpiece:
       spreader_bar_z: 0.67
       max_axis_m: 0.50
 
-cameras_v31:
+cameras:
   # 目标：工件中心
   target: {x: 0.56, y: 0.0, z: 0.98}
 

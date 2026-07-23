@@ -53,9 +53,9 @@ catkin_install_python(PROGRAMS
   scripts/check_runtime_signals.py
   # 喷涂
   scripts/spray_simulator.py
-  # 工程化工具库
-  scripts/camera_geometry.py
-  scripts/runtime_contract.py
+  # 标定目标 (仿真模型职责)
+  scripts/publish_calibration_target_frames.py
+  scripts/validate_calibration_target_geometry.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

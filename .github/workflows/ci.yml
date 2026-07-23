@@ -123,8 +123,8 @@ jobs:
 
           check_file "src/realsense_gazebo_description/config/d455_like_default.yaml" \
             "d455_like_default.yaml"
-          check_file "src/cr5_spray_sim/config/scene_v31.yaml" \
-            "scene_v31.yaml (main simulation scene config)"
+          check_file "src/cr5_spray_sim/config/simulation_scene.yaml" \
+            "simulation_scene.yaml (main simulation scene config)"
           check_file "src/cr5_spray_sim/config/camera_layout_ideal.yaml" \
             "camera_layout_ideal.yaml"
           check_file "src/cr5_spray_sim/config/camera_layout_realistic.yaml" \
@@ -152,14 +152,14 @@ jobs:
         run: |
           set -euo pipefail
           SCRIPT="src/cr5_spray_sim/scripts/spawn_fixed_cameras.py"
-          SCENE="src/cr5_spray_sim/config/scene_v31.yaml"
+          SCENE="src/cr5_spray_sim/config/simulation_scene.yaml"
           fail=0
 
           for cam in cam_front_left cam_front_right cam_rear; do
             if grep -q "$cam" "$SCENE"; then
-              echo "PASS: $cam defined in scene_v31.yaml"
+              echo "PASS: $cam defined in simulation_scene.yaml"
             else
-              echo "FAIL: $cam not found in scene_v31.yaml"
+              echo "FAIL: $cam not found in simulation_scene.yaml"
               fail=1
             fi
           done

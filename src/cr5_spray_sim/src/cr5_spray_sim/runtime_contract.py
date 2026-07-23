@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Runtime contract validation — 验证 ROS 话题、TF 帧、相机流的运行时约定。
 

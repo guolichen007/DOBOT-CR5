@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Camera geometry utilities — look-at, FOV coverage, projection.
 

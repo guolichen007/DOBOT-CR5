@@ -3,11 +3,11 @@
 
 import sys
 import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import math
 import numpy as np
-from camera_geometry import (
+from cr5_spray_sim.camera_geometry import (
     compute_camera_look_at,
     compute_distance,
     estimate_fov_coverage,

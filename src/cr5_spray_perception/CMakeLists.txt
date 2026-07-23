@@ -10,9 +10,7 @@ install(DIRECTORY launch config
 )
 
 install(PROGRAMS
-  # 标定目标与验证
-  scripts/publish_calibration_target_frames.py
-  scripts/validate_calibration_target_geometry.py
+  # 标定感知 — 可见性验证与外参估计
   scripts/validate_calibration_visibility.py
   scripts/estimate_camera_extrinsics.py
   # 下一阶段：三相机同步采集入口
