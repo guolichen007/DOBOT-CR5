@@ -93,7 +93,7 @@
   <node if="$(eval object_type == 'calibration_target')"
     name="spawn_calibration_target" pkg="gazebo_ros" type="spawn_model"
     args="-sdf -file $(find cr5_spray_sim)/models/calibration_target/model.sdf
-          -model simple_hanging_workpiece -x 0.56 -y 0 -z 0.98"
+          -model simple_hanging_workpiece -x 0.68 -y 0 -z 0.98"
     respawn="false" output="screen"/>
 
   <!-- Camera pedestals -->

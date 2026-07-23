@@ -1,6 +1,6 @@
-# CR5 Spray Demo V3.1 Scene Configuration
-# 简单吊件 + 两柱门架 + 三相机直接坐标
-# 不使用 STL，不使用 ros_control 挂具
+# CR5 三相机标定仿真 — 场景配置 (唯一真值)
+# 门架 + 标定目标 + 三台固定相机 + 基座
+# 所有世界级位姿以此文件为唯一来源，禁止在其他位置硬编码
 
 cr5_base:
   position: {x: 0.0, y: 0.0, z: 0.0}

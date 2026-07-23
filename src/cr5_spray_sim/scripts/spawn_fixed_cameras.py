@@ -162,7 +162,7 @@ class FixedCameraSpawner:
             rospy.logerr("No cameras in simulation_scene.yaml!")
             return
 
-        self.target = profiles.get("target", {"x": 0.56, "y": 0, "z": 0.98})
+        self.target = profiles.get("target", {"x": 0.68, "y": 0, "z": 0.98})
         tgt = [self.target["x"], self.target["y"], self.target["z"]]
 
         rospy.loginfo("Camera target: (%.3f, %.3f, %.3f)", *tgt)

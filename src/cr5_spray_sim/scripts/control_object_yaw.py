@@ -19,7 +19,7 @@ class ObjectYawV31:
 
         self.model_name = rospy.get_param("~model_name", "simple_hanging_workpiece")
         self.obj_pos = rospy.get_param("~object_position",
-                                       {"x": 0.56, "y": 0.0, "z": 0.98})
+                                       {"x": 0.68, "y": 0.0, "z": 0.98})
         self.current_yaw_rad = 0.0
 
         rospy.wait_for_service("/gazebo/set_model_state", timeout=30.0)

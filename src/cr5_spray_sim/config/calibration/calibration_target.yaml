@@ -21,7 +21,7 @@ target:
   - 0.14
   panel_gap_m: 0.001
   hanger_y_m: 0.115
-  spreader_center_z_m: 0.62
+  spreader_center_z_m: 0.605
   spreader_size_m:
   - 0.03
   - 0.3
@@ -31,9 +31,9 @@ target:
     type: two_rope
     requirement: rigid target body; ropes only suspend the target
   cable_bottom_z_m: 0.12
-  cable_top_z_m: 0.605
-  cable_length_m: 0.485
-  cable_center_z_m: 0.3625
+  cable_top_z_m: 0.590
+  cable_length_m: 0.470
+  cable_center_z_m: 0.355
 opencv:
   generator_version: 4.13.0
   charuco_dictionary: DICT_5X5_1000
