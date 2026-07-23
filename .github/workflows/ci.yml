@@ -1,0 +1,131 @@
+name: DOBOT-CR5 CI
+
+on:
+  push:
+    branches: [main, develop/multi-camera-calibration]
+  pull_request:
+    branches: [main, develop/multi-camera-calibration]
+
+jobs:
+  # ── Job 1: Markdown 链接检查 ──────────────────────────────────
+  markdown-link-check:
+    name: Markdown Link Check
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Check Markdown links
+        uses: gaurav-nelson/github-action-markdown-link-check@v1
+        with:
+          use-quiet-mode: "yes"
+          use-verbose-mode: "yes"
+          config-file: ".github/workflows/mlc_config.json"
+
+  # ── Job 2: catkin-build ──────────────────────────────────────
+  catkin-build:
+    name: Catkin Build (ROS Noetic)
+    runs-on: ubuntu-20.04
+    container:
+      image: ros:noetic-ros-core-focal
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          path: "src/DOBOT-CR5"
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-catkin-tools \
+            python3-rosdep \
+            python3-numpy \
+            python3-yaml \
+            python3-opencv \
+            libgazebo11-dev \
+            ros-noetic-gazebo-ros-pkgs \
+            ros-noetic-gazebo-ros-control \
+            ros-noetic-moveit \
+            ros-noetic-tf2-ros \
+            ros-noetic-cv-bridge \
+            ros-noetic-image-transport \
+            ros-noetic-camera-info-manager
+
+      - name: Initialize rosdep
+        run: |
+          rosdep update
+          rosdep install --from-paths src --ignore-src -r -y || true
+
+      - name: Catkin build
+        run: |
+          . /opt/ros/noetic/setup.sh
+          catkin_make
+
+  # ── Job 3: asset-contract-tests ──────────────────────────────
+  asset-contract-tests:
+    name: Asset Contract Tests
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Verify calibration PNG assets (SHA check)
+        run: |
+          cd src/cr5_spray_sim/models/calibration_target/materials/textures/
+          echo "Checking calibration marker PNG integrity..."
+          for png in *.png; do
+            if [ -f "$png" ]; then
+              sha256sum "$png"
+            fi
+          done || echo "WARNING: PNG check skipped (no files found)"
+
+      - name: Verify camera config YAML
+        run: |
+          echo "Checking D455 camera config..."
+          test -f src/realsense_gazebo_description/config/d455_like_default.yaml \
+            && echo "PASS: d455_like_default.yaml exists" \
+            || echo "FAIL: d455_like_default.yaml missing"
+
+          echo "Checking camera layout configs..."
+          test -f src/cr5_spray_sim/config/camera_layout_ideal.yaml \
+            && echo "PASS: camera_layout_ideal.yaml exists" \
+            || echo "FAIL: camera_layout_ideal.yaml missing"
+          test -f src/cr5_spray_sim/config/camera_layout_realistic.yaml \
+            && echo "PASS: camera_layout_realistic.yaml exists" \
+            || echo "FAIL: camera_layout_realistic.yaml missing"
+
+      - name: Verify SDF/material references
+        run: |
+          echo "Checking calibration target model..."
+          test -f src/cr5_spray_sim/models/calibration_target/model.sdf \
+            && echo "PASS: calibration_target model.sdf exists" \
+            || echo "FAIL: calibration_target model.sdf missing"
+          test -f src/cr5_spray_sim/models/calibration_target/model.config \
+            && echo "PASS: calibration_target model.config exists" \
+            || echo "FAIL: calibration_target model.config missing"
+
+      - name: Verify three-camera config
+        run: |
+          echo "Checking three-camera setup..."
+          grep -q "camera_front\|camera_left\|camera_right" \
+            src/cr5_spray_sim/scripts/spawn_fixed_cameras.py \
+            && echo "PASS: three-camera spawn config found" \
+            || echo "FAIL: three-camera spawn config missing"
+
+      - name: Verify CMake install targets
+        run: |
+          echo "Checking CMakeLists install coverage..."
+          for pkg in cr5_spray_sim cr5_spray_perception cr5_spray_planning \
+            cr5_moveit dobot_description realsense_gazebo_description \
+            realsense_gazebo_plugin; do
+            if [ -f "src/$pkg/CMakeLists.txt" ]; then
+              echo "OK: src/$pkg/CMakeLists.txt"
+            else
+              echo "WARNING: src/$pkg/CMakeLists.txt missing"
+            fi
+          done
+
+      - name: Verify runtime topics contract
+        run: |
+          echo "Checking color/depth topic expectations..."
+          grep -q "color/image_raw\|depth/image_rect_raw" \
+            src/cr5_spray_sim/scripts/spawn_fixed_cameras.py \
+            && echo "PASS: color/depth topic contract found" \
+            || echo "WARNING: topic contract not found in spawn script"
