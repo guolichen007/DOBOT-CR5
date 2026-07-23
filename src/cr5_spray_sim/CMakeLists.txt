@@ -53,11 +53,6 @@ catkin_install_python(PROGRAMS
   scripts/check_runtime_signals.py
   # 喷涂
   scripts/spray_simulator.py
-  # 标定目标
-  scripts/publish_calibration_target_frames.py
-  scripts/validate_calibration_target_geometry.py
-  scripts/validate_calibration_visibility.py
-  scripts/estimate_camera_extrinsics.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

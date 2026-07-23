@@ -9,8 +9,11 @@ install(DIRECTORY launch config
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
 
-install(PROGRAMS scripts/capture_manager.py
-  scripts/reconstruct_tsdf.py
-  scripts/evaluate_reconstruction.py
+install(PROGRAMS
+  # 标定目标与验证
+  scripts/publish_calibration_target_frames.py
+  scripts/validate_calibration_target_geometry.py
+  scripts/validate_calibration_visibility.py
+  scripts/estimate_camera_extrinsics.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
