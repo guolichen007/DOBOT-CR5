@@ -18,6 +18,7 @@ import numpy as np
 from geometry_msgs.msg import Pose, Point, Quaternion
 from tf.transformations import quaternion_from_euler
 from gazebo_msgs.srv import SpawnModel
+from cr5_spray_sim.camera_geometry import compute_camera_look_at
 
 
 def load_scene_config():
@@ -33,102 +34,6 @@ def load_scene_config():
                 os.path.dirname(__file__), "..", "config", "simulation_scene.yaml")
     with open(config_path) as f:
         return yaml.safe_load(f)
-
-
-def compute_camera_look_at(cam_pos, target_pos, roll_offset_deg=0.0):
-    """
-    纯 Python 实现: 计算相机 look-at 的 roll/pitch/yaw.
-
-    返回 dict 包含:
-      roll, pitch, yaw: Gazebo camera link 姿态 (rad)
-      distance_m: 相机到目标距离
-      optical_z_angle_error_deg: 光学 +Z 偏离目标的角度
-      image_up_vs_world_up_deg: 图像上方向偏离世界 +Z 的角度
-    """
-    cam = np.array(cam_pos, dtype=np.float64)
-    tgt = np.array(target_pos, dtype=np.float64)
-
-    # Direction from camera to target
-    d = tgt - cam
-    dist = float(np.linalg.norm(d))
-    if dist < 1e-6:
-        return None
-    d = d / dist
-
-    # Camera link X should point at the target
-    cam_x = d
-    # Camera link Z should be as close to world Z as possible
-    world_z = np.array([0.0, 0.0, 1.0])
-    # cam_y = world_z × cam_x (normalized)
-    cam_y = np.cross(world_z, cam_x)
-    cam_y_norm = float(np.linalg.norm(cam_y))
-    if cam_y_norm < 1e-9:
-        cam_y = np.array([0.0, 1.0, 0.0])
-    else:
-        cam_y = cam_y / cam_y_norm
-    # cam_z = cam_x × cam_y
-    cam_z = np.cross(cam_x, cam_y)
-    cam_z_norm = float(np.linalg.norm(cam_z))
-    if cam_z_norm > 1e-9:
-        cam_z = cam_z / cam_z_norm
-
-    # Build rotation matrix R = [cam_x | cam_y | cam_z] (columns)
-    R = np.column_stack([cam_x, cam_y, cam_z])
-
-    # Extract Euler angles (ZYX convention used by Gazebo)
-    # R = Rz(yaw) * Ry(pitch) * Rx(roll)
-    # roll:  around X
-    # pitch: around Y
-    # yaw:   around Z
-    sy = math.sqrt(R[0, 0]**2 + R[1, 0]**2)
-    singular = sy < 1e-6
-
-    if not singular:
-        roll = math.atan2(R[2, 1], R[2, 2])
-        pitch = math.atan2(-R[2, 0], sy)
-        yaw = math.atan2(R[1, 0], R[0, 0])
-    else:
-        roll = math.atan2(-R[1, 2], R[1, 1])
-        pitch = math.atan2(-R[2, 0], sy)
-        yaw = 0.0
-
-    # Apply roll offset (around camera X axis)
-    roll += math.radians(roll_offset_deg)
-
-    # Compute optical Z angle error (how well optical +Z points to target)
-    # Optical +Z in world frame = R * optical_Z_local
-    # optical_Z_local = [0, 0, 1] in optical frame
-    # link → optical: rpy = (-π/2, 0, -π/2)
-    # R_optical_to_link rotates optical frame vectors to link frame
-    R_opt_to_link = np.array([
-        [0, 1, 0],
-        [0, 0, -1],
-        [-1, 0, 0],
-    ], dtype=np.float64)
-    # optical +Z in world = R * R_opt_to_link * [0,0,1]
-    opt_z_world = R @ R_opt_to_link @ np.array([0, 0, 1])
-    # angle between optical +Z and target direction
-    cos_angle = float(np.dot(opt_z_world, d))
-    cos_angle = max(-1.0, min(1.0, cos_angle))
-    opt_err = float(math.degrees(math.acos(cos_angle)))
-
-    # Image up direction error
-    # optical +Y (image up = -optical_Y) vs world +Z
-    opt_y_world = R @ R_opt_to_link @ np.array([0, 1, 0])
-    # image up = -optical_y
-    img_up = -opt_y_world
-    cos_up = float(np.dot(img_up, world_z))
-    cos_up = max(-1.0, min(1.0, cos_up))
-    up_err = float(math.degrees(math.acos(abs(cos_up))))
-
-    return {
-        "roll": float(roll),
-        "pitch": float(pitch),
-        "yaw": float(yaw),
-        "distance_m": dist,
-        "optical_z_angle_error_deg": opt_err,
-        "image_up_vs_world_up_deg": up_err,
-    }
 
 
 def get_camera_xacro_template():

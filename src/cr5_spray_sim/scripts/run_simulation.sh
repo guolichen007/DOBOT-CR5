@@ -20,8 +20,8 @@
 # --isolated 用于 headless 自动测试
 #
 # 用法:
-#   bash run_simulation.sh --gui --object=motor_housing_cylinder
-#   bash run_simulation.sh --isolated --object=motor_housing_cylinder  # headless
+#   bash run_simulation.sh --gui --object=calibration_target
+#   bash run_simulation.sh --isolated --object=calibration_target  # headless
 # ============================================================================
 set -euo pipefail
 
@@ -29,11 +29,11 @@ set -euo pipefail
 GUI=false
 HEADLESS=true
 ISOLATED=false
-OBJECT="motor_housing_cylinder"
+OBJECT="calibration_target"
 PROFILE="vm"
 PHYSICS_MODE="stable"
-ENABLE_SPRAY_SIM=true
-ENABLE_PAINT_PATCHES=true
+ENABLE_SPRAY_SIM=false
+ENABLE_PAINT_PATCHES=false
 STRICT=false
 VERBOSE=false
 
@@ -61,7 +61,7 @@ CR5 Multi-Camera Calibration Simulation
 选项:
   --gui               启动 Gazebo GUI (默认 headless)
   --isolated          使用独立 roscore + 随机端口 (用于 headless 批量测试)
-  --object TYPE       motor_housing_cylinder | rectangular_housing
+  --object TYPE       calibration_target | motor_housing_cylinder | rectangular_housing (默认: calibration_target)
   --profile PROFILE   vm | quality (默认: vm)
   --physics-mode MODE stable | gravity (默认: stable)
   --strict            健康检查失败后自动退出 (用于自动测试)
@@ -71,10 +71,10 @@ CR5 Multi-Camera Calibration Simulation
   -h, --help          显示此帮助
 
 示例:
-  # GUI 默认固定端口
-  bash run_simulation.sh --gui --object=motor_housing_cylinder
-  # Headless 自动测试 (随机端口)
-  bash run_simulation.sh --isolated --strict
+  # GUI 标定仿真 (默认固定端口)
+  bash run_simulation.sh --gui --object=calibration_target
+  # Headless 批量标定 (随机端口)
+  bash run_simulation.sh --isolated --object=calibration_target --strict
 EOF
     exit 0
 }

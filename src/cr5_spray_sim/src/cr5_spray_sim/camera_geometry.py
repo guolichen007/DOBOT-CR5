@@ -7,54 +7,10 @@ import math
 import numpy as np
 
 
-def compute_camera_look_at(cam_pos, target_pos, roll_offset_deg=0.0):
-    """计算相机朝向目标的旋转矩阵。
-
-    Args:
-        cam_pos: [x, y, z] 相机位置
-        target_pos: [x, y, z] 目标位置
-        roll_offset_deg: roll 偏移角度 (绕视线旋转)
-
-    Returns:
-        (rpy_rad, R_3x3): (roll, pitch, yaw) 弧度 + 旋转矩阵
-    """
-    cam = np.array(cam_pos, dtype=np.float64)
-    tgt = np.array(target_pos, dtype=np.float64)
-
-    # 视线方向: target → camera (归一化)
-    d_raw = cam - tgt
-    d_norm = float(np.linalg.norm(d_raw))
-    if d_norm < 1e-9:
-        raise ValueError(f"Camera at target position: {cam_pos}")
-    d = d_raw / d_norm
-
-    world_z = np.array([0.0, 0.0, 1.0])
-
-    # cam_x = 视线方向 (从相机指向目标的反方向)
-    cam_x = d
-
-    # cam_y = world_z × cam_x (归一化)
-    cam_y = np.cross(world_z, cam_x)
-    cam_y_norm = float(np.linalg.norm(cam_y))
-    if cam_y_norm < 1e-9:
-        # 视线平行于世界Z轴
-        cam_y = np.array([0.0, 1.0, 0.0])
-    else:
-        cam_y = cam_y / cam_y_norm
-
-    # cam_z = cam_x × cam_y
-    cam_z = np.cross(cam_x, cam_y)
-    cam_z_norm = float(np.linalg.norm(cam_z))
-    if cam_z_norm > 1e-9:
-        cam_z = cam_z / cam_z_norm
-
-    # 旋转矩阵 R = [cam_x | cam_y | cam_z]
-    R = np.column_stack([cam_x, cam_y, cam_z])
-
-    # 提取 RPY
+def _rpy_from_rotation(R):
+    """从 3×3 旋转矩阵提取 RPY (ZYX convention)."""
     sy = math.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
     singular = sy < 1e-6
-
     if not singular:
         roll = math.atan2(R[2, 1], R[2, 2])
         pitch = math.atan2(-R[2, 0], sy)
@@ -63,8 +19,89 @@ def compute_camera_look_at(cam_pos, target_pos, roll_offset_deg=0.0):
         roll = math.atan2(-R[1, 2], R[1, 1])
         pitch = math.atan2(-R[2, 0], sy)
         yaw = 0.0
+    return roll, pitch, yaw
 
-    return (roll, pitch, yaw), R
+
+def _look_at_rotation(cam_pos, target_pos):
+    """计算相机 Gazebo link 朝向目标的旋转矩阵.
+
+    Gazebo 约定: camera link +X = 镜头方向 (指向目标),
+    link +Z 尽量接近世界 +Z (保持水平).
+
+    Returns:
+        (R_3x3, direction_norm): 旋转矩阵 [cam_x|cam_y|cam_z] (列向量) + 单位视线方向
+    """
+    cam = np.array(cam_pos, dtype=np.float64)
+    tgt = np.array(target_pos, dtype=np.float64)
+    d_raw = tgt - cam  # 从相机指向目标
+    dist = float(np.linalg.norm(d_raw))
+    if dist < 1e-9:
+        raise ValueError(f"Camera at target position: {cam_pos}")
+    d = d_raw / dist
+
+    world_z = np.array([0.0, 0.0, 1.0])
+    cam_x = d
+    cam_y = np.cross(world_z, cam_x)
+    cam_y_norm = float(np.linalg.norm(cam_y))
+    if cam_y_norm < 1e-9:
+        cam_y = np.array([0.0, 1.0, 0.0])
+    else:
+        cam_y = cam_y / cam_y_norm
+    cam_z = np.cross(cam_x, cam_y)
+    cam_z_norm = float(np.linalg.norm(cam_z))
+    if cam_z_norm > 1e-9:
+        cam_z = cam_z / cam_z_norm
+
+    R = np.column_stack([cam_x, cam_y, cam_z])
+    return R, d, dist
+
+
+def compute_camera_look_at(cam_pos, target_pos, roll_offset_deg=0.0):
+    """计算相机朝向目标的姿态 (Gazebo camera link convention).
+
+    Args:
+        cam_pos: [x, y, z] 相机位置 (world)
+        target_pos: [x, y, z] 目标位置 (world)
+        roll_offset_deg: roll 偏移角度 (绕视线旋转)
+
+    Returns:
+        dict: {roll, pitch, yaw (rad), distance_m, R (3×3 matrix),
+               optical_z_angle_error_deg, image_up_vs_world_up_deg}
+    """
+    R, d, dist = _look_at_rotation(cam_pos, target_pos)
+    roll, pitch, yaw = _rpy_from_rotation(R)
+
+    # 应用 roll 偏移
+    roll += math.radians(roll_offset_deg)
+
+    # 光学 Z 轴误差 (光学 +Z = 拍摄方向)
+    R_opt_to_link = np.array([
+        [0, 1, 0],
+        [0, 0, -1],
+        [-1, 0, 0],
+    ], dtype=np.float64)
+    opt_z_world = R @ R_opt_to_link @ np.array([0, 0, 1])
+    cos_angle = float(np.dot(opt_z_world, d))
+    cos_angle = max(-1.0, min(1.0, cos_angle))
+    opt_err = float(math.degrees(math.acos(cos_angle)))
+
+    # 图像上方向 vs 世界上方向误差
+    opt_y_world = R @ R_opt_to_link @ np.array([0, 1, 0])
+    img_up = -opt_y_world
+    world_z = np.array([0.0, 0.0, 1.0])
+    cos_up = float(np.dot(img_up, world_z))
+    cos_up = max(-1.0, min(1.0, cos_up))
+    up_err = float(math.degrees(math.acos(abs(cos_up))))
+
+    return {
+        "roll": float(roll),
+        "pitch": float(pitch),
+        "yaw": float(yaw),
+        "distance_m": dist,
+        "R": R,
+        "optical_z_angle_error_deg": opt_err,
+        "image_up_vs_world_up_deg": up_err,
+    }
 
 
 def compute_distance(pos_a, pos_b):

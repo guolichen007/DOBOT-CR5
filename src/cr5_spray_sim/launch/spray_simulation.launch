@@ -32,7 +32,7 @@
   <arg name="robot_gravity" default="false" doc="Passed to xacro: CR5 Link gravity"/>
 
   <!-- ===== Load Configs ===== -->
-  <rosparam file="$(find cr5_spray_sim)/config/spray_sim_v33.yaml" command="load" ns="spray_simulator_v33"/>
+  <rosparam file="$(find cr5_spray_sim)/config/spray_simulation.yaml" command="load" ns="spray_simulator"/>
 
   <!-- ===== Generate Descriptions ===== -->
   <param name="robot_description"
@@ -41,7 +41,7 @@
              robot_gravity:=$(arg robot_gravity)"/>
 
   <param name="goalpost_description"
-    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/simple_goalpost_frame_v31.xacro"/>
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/goalpost_frame.xacro"/>
 
   <param name="pedestal_fl_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro"/>

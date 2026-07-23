@@ -42,10 +42,7 @@ catkin_install_python(PROGRAMS
   # 场景引导
   scripts/audit_sim_processes.py
   scripts/bootstrap_controllers.py
-  scripts/initialize_robot_pose.py
-  scripts/hold_robot_zero.py
   scripts/wait_scene_models.py
-  scripts/wait_controllers_running.py
   scripts/capture_scene_snapshot.py
   # 场景检查
   scripts/check_scene_geometry.py
