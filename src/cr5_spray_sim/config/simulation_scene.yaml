@@ -15,8 +15,8 @@ simple_goalpost_frame:
   color_frame: [0.52, 0.52, 0.54, 1.0]
 
 simple_hanging_workpiece:
-  # 工件中心, X=0.56 在 CR5 工作半径内 (留喷涂离面距离)
-  position: {x: 0.56, y: 0.0, z: 0.98}
+  # 工件中心, X=0.68 对齐门架横梁 (CR5 工作半径内)
+  position: {x: 0.68, y: 0.0, z: 0.98}
   default_type: motor_housing_cylinder
   types:
     motor_housing_cylinder:
@@ -37,7 +37,7 @@ simple_hanging_workpiece:
 
 cameras:
   # 目标：工件中心
-  target: {x: 0.56, y: 0.0, z: 0.98}
+  target: {x: 0.68, y: 0.0, z: 0.98}
 
   # VM profile: 低分辨率快速刷新
   vm_profile:

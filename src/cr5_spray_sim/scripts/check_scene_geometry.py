@@ -40,7 +40,7 @@ from tf.transformations import euler_from_quaternion
 EXPECTED_POSITIONS = {
     "cr5_robot":                  (0.0,   0.0,  0.0),
     "simple_goalpost_frame":      (0.68,  0.0,  0.0),
-    "simple_hanging_workpiece":   (0.56,  0.0,  0.98),
+    "simple_hanging_workpiece":   (0.68,  0.0,  0.98),
     "pedestal_fl":                (-0.28, -0.68, 0.0),
     "pedestal_fr":                (-0.28,  0.68, 0.0),
     "pedestal_rear":              (1.36,  0.0,  0.0),
