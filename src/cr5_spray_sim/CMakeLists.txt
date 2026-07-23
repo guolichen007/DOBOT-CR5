@@ -51,7 +51,6 @@ catkin_install_python(PROGRAMS
   scripts/check_scene_geometry.py
   scripts/check_scene_runtime.py
   scripts/check_runtime_signals.py
-  scripts/check_sim_clock.py
   # 喷涂
   scripts/spray_simulator.py
   # 标定目标
