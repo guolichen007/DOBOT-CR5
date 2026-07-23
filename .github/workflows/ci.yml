@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, develop/multi-camera-calibration]
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # ── Job 1: Markdown 链接检查 ──────────────────────────────────
   markdown-link-check:
@@ -33,6 +37,7 @@ jobs:
 
       - name: Install system dependencies
         run: |
+          set -euo pipefail
           apt-get update
           apt-get install -y --no-install-recommends \
             python3-catkin-tools \
@@ -51,11 +56,13 @@ jobs:
 
       - name: Initialize rosdep
         run: |
+          set -euo pipefail
           rosdep update
-          rosdep install --from-paths src --ignore-src -r -y || true
+          rosdep install --from-paths src --ignore-src -r -y
 
       - name: Catkin build
         run: |
+          set -euo pipefail
           . /opt/ros/noetic/setup.sh
           catkin_make
 
@@ -66,66 +73,172 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Verify calibration PNG assets (SHA check)
+      - name: Verify calibration PNG assets
         run: |
-          cd src/cr5_spray_sim/models/calibration_target/materials/textures/
+          set -euo pipefail
+          TEXTURES_DIR="src/cr5_spray_sim/models/calibration_target/materials/textures"
           echo "Checking calibration marker PNG integrity..."
+          if [ ! -d "$TEXTURES_DIR" ]; then
+            echo "FAIL: textures directory not found: $TEXTURES_DIR"
+            exit 1
+          fi
+          png_count=$(find "$TEXTURES_DIR" -name "*.png" | wc -l)
+          if [ "$png_count" -lt 5 ]; then
+            echo "FAIL: expected >= 5 PNG files, found $png_count"
+            exit 1
+          fi
+          cd "$TEXTURES_DIR"
           for png in *.png; do
-            if [ -f "$png" ]; then
-              sha256sum "$png"
+            if [ ! -f "$png" ]; then continue; fi
+            sha=$(sha256sum "$png" | cut -d' ' -f1)
+            size=$(stat -c%s "$png" 2>/dev/null || echo 0)
+            echo "  $png  SHA256=$sha  size=$size"
+            # PNG magic bytes check
+            if ! head -c 4 "$png" | grep -q $'\x89PNG'; then
+              echo "FAIL: $png is not a valid PNG"
+              exit 1
             fi
-          done || echo "WARNING: PNG check skipped (no files found)"
+            if [ "$size" -eq 0 ]; then
+              echo "FAIL: $png is empty"
+              exit 1
+            fi
+          done
+          echo "PASS: $png_count calibration PNG files verified"
 
       - name: Verify camera config YAML
         run: |
-          echo "Checking D455 camera config..."
-          test -f src/realsense_gazebo_description/config/d455_like_default.yaml \
-            && echo "PASS: d455_like_default.yaml exists" \
-            || echo "FAIL: d455_like_default.yaml missing"
+          set -euo pipefail
+          fail=0
 
-          echo "Checking camera layout configs..."
-          test -f src/cr5_spray_sim/config/camera_layout_ideal.yaml \
-            && echo "PASS: camera_layout_ideal.yaml exists" \
-            || echo "FAIL: camera_layout_ideal.yaml missing"
-          test -f src/cr5_spray_sim/config/camera_layout_realistic.yaml \
-            && echo "PASS: camera_layout_realistic.yaml exists" \
-            || echo "FAIL: camera_layout_realistic.yaml missing"
-
-      - name: Verify SDF/material references
-        run: |
-          echo "Checking calibration target model..."
-          test -f src/cr5_spray_sim/models/calibration_target/model.sdf \
-            && echo "PASS: calibration_target model.sdf exists" \
-            || echo "FAIL: calibration_target model.sdf missing"
-          test -f src/cr5_spray_sim/models/calibration_target/model.config \
-            && echo "PASS: calibration_target model.config exists" \
-            || echo "FAIL: calibration_target model.config missing"
-
-      - name: Verify three-camera config
-        run: |
-          echo "Checking three-camera setup..."
-          grep -q "camera_front\|camera_left\|camera_right" \
-            src/cr5_spray_sim/scripts/spawn_fixed_cameras.py \
-            && echo "PASS: three-camera spawn config found" \
-            || echo "FAIL: three-camera spawn config missing"
-
-      - name: Verify CMake install targets
-        run: |
-          echo "Checking CMakeLists install coverage..."
-          for pkg in cr5_spray_sim cr5_spray_perception cr5_spray_planning \
-            cr5_moveit dobot_description realsense_gazebo_description \
-            realsense_gazebo_plugin; do
-            if [ -f "src/$pkg/CMakeLists.txt" ]; then
-              echo "OK: src/$pkg/CMakeLists.txt"
+          check_file() {
+            local path="$1"
+            local desc="$2"
+            if [ -f "$path" ]; then
+              echo "PASS: $desc"
             else
-              echo "WARNING: src/$pkg/CMakeLists.txt missing"
+              echo "FAIL: $desc — $path not found"
+              fail=1
+            fi
+          }
+
+          check_file "src/realsense_gazebo_description/config/d455_like_default.yaml" \
+            "d455_like_default.yaml"
+          check_file "src/cr5_spray_sim/config/scene_v31.yaml" \
+            "scene_v31.yaml (main simulation scene config)"
+          check_file "src/cr5_spray_sim/config/camera_layout_ideal.yaml" \
+            "camera_layout_ideal.yaml"
+          check_file "src/cr5_spray_sim/config/camera_layout_realistic.yaml" \
+            "camera_layout_realistic.yaml"
+
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+
+      - name: Verify SDF/material
+        run: |
+          set -euo pipefail
+          fail=0
+
+          check_file() {
+            if [ -f "$1" ]; then echo "PASS: $2"; else echo "FAIL: $2 missing"; fail=1; fi
+          }
+
+          check_file "src/cr5_spray_sim/models/calibration_target/model.sdf" \
+            "calibration_target model.sdf"
+          check_file "src/cr5_spray_sim/models/calibration_target/model.config" \
+            "calibration_target model.config"
+
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+
+      - name: Verify three-camera config (cam_front_left / cam_front_right / cam_rear)
+        run: |
+          set -euo pipefail
+          SCRIPT="src/cr5_spray_sim/scripts/spawn_fixed_cameras.py"
+          SCENE="src/cr5_spray_sim/config/scene_v31.yaml"
+          fail=0
+
+          for cam in cam_front_left cam_front_right cam_rear; do
+            if grep -q "$cam" "$SCENE"; then
+              echo "PASS: $cam defined in scene_v31.yaml"
+            else
+              echo "FAIL: $cam not found in scene_v31.yaml"
+              fail=1
             fi
           done
 
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+
+      - name: Verify CMake install targets (7 packages)
+        run: |
+          set -euo pipefail
+          fail=0
+          packages=(
+            dobot_bringup
+            dobot_description
+            cr5_moveit
+            cr5_spray_sim
+            cr5_spray_perception
+            realsense_gazebo_description
+            realsense_gazebo_plugin
+          )
+
+          for pkg in "${packages[@]}"; do
+            if [ -f "src/$pkg/CMakeLists.txt" ]; then
+              echo "OK: src/$pkg/CMakeLists.txt"
+            else
+              echo "FAIL: src/$pkg/CMakeLists.txt missing"
+              fail=1
+            fi
+          done
+
+          # Verify cr5_spray_planning is NOT present
+          if [ -d "src/cr5_spray_planning" ]; then
+            echo "FAIL: cr5_spray_planning should not exist (removed per engineering cleanup)"
+            fail=1
+          else
+            echo "OK: cr5_spray_planning correctly removed"
+          fi
+
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+
       - name: Verify runtime topics contract
         run: |
+          set -euo pipefail
           echo "Checking color/depth topic expectations..."
-          grep -q "color/image_raw\|depth/image_rect_raw" \
-            src/cr5_spray_sim/scripts/spawn_fixed_cameras.py \
-            && echo "PASS: color/depth topic contract found" \
-            || echo "WARNING: topic contract not found in spawn script"
+          SCRIPT="src/cr5_spray_sim/scripts/spawn_fixed_cameras.py"
+          fail=0
+
+          for topic_suffix in "color/image_raw" "depth/image_rect_raw"; do
+            if grep -q "$topic_suffix" "$SCRIPT"; then
+              echo "PASS: $topic_suffix contract found"
+            else
+              echo "FAIL: $topic_suffix contract not found"
+              fail=1
+            fi
+          done
+
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+
+      - name: Run Python unit tests
+        run: |
+          set -euo pipefail
+          TESTS_DIR="src/cr5_spray_sim/tests"
+          fail=0
+
+          for test in test_camera_geometry.py test_runtime_contract.py \
+            test_scene_config.py test_calibration_assets.py; do
+            echo ""
+            echo "=== Running: $test ==="
+            if python3 "$TESTS_DIR/$test"; then
+              echo "PASS: $test"
+            else
+              echo "FAIL: $test"
+              fail=1
+            fi
+          done
+
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "Some unit tests FAILED"
+            exit 1
+          fi
+          echo ""
+          echo "All unit tests PASSED"
