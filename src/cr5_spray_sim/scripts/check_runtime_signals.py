@@ -345,6 +345,47 @@ class SignalChecker:
         except Exception as e:
             rospy.logwarn("Save frame %s/%s failed: %s", cam_name, img_type, e)
 
+    # ===== Camera TF =====
+    def check_camera_tf(self):
+        """检查三台固定相机的 optical frame TF 是否就绪.
+
+        需要 TF:
+          world → cam_front_left_color_optical_frame
+          world → cam_front_right_color_optical_frame
+          world → cam_rear_color_optical_frame
+          (depth 同理)
+        """
+        camera_optical_frames = [
+            "cam_front_left_color_optical_frame",
+            "cam_front_right_color_optical_frame",
+            "cam_rear_color_optical_frame",
+            "cam_front_left_depth_optical_frame",
+            "cam_front_right_depth_optical_frame",
+            "cam_rear_depth_optical_frame",
+        ]
+
+        try:
+            tf_buf = tf2_ros.Buffer()
+            tf2_ros.TransformListener(tf_buf)
+            rospy.sleep(1.5)
+
+            all_ok = True
+            for child_frame in camera_optical_frames:
+                try:
+                    ts = tf_buf.lookup_transform(
+                        "world", child_frame, rospy.Time(),
+                        timeout=rospy.Duration(5.0))
+                    t = ts.transform.translation
+                    rospy.loginfo("Camera TF world→%s OK: pos=(%.3f,%.3f,%.3f)",
+                                  child_frame, t.x, t.y, t.z)
+                except Exception as e:
+                    rospy.logerr("Camera TF world→%s FAILED: %s", child_frame, e)
+                    all_ok = False
+            return all_ok
+        except Exception as e:
+            rospy.logerr("Camera TF system error: %s", e)
+            return False
+
     # ===== Spray =====
     def check_spray(self):
         """检查 spray state topic + set_spray(false) 服务."""
@@ -381,10 +422,16 @@ def main():
     rospy.init_node("check_runtime_signals", anonymous=True,
                     log_level=rospy.WARN)
 
+    # 解析参数
     output_dir = None
+    require_spray = rospy.get_param("~require_spray", True)
     for i, arg in enumerate(sys.argv):
         if arg == "--output" and i + 1 < len(sys.argv):
             output_dir = sys.argv[i + 1]
+        elif arg == "--require-spray" and i + 1 < len(sys.argv):
+            require_spray = sys.argv[i + 1].lower() in ("true", "1", "yes")
+        elif arg == "--no-spray":
+            require_spray = False
 
     checker = SignalChecker()
     checker.set_output_dir(output_dir)
@@ -406,13 +453,26 @@ def main():
     # 4. Cameras
     results["cameras"] = checker.check_all_cameras()
 
-    # 5. Spray
-    results["spray"] = checker.check_spray()
-    sys.stderr.write("SPRAY_SIGNAL_PASS\n" if results["spray"] else "SPRAY_SIGNAL_FAIL\n")
+    # 5. Spray (可选, 标定模式跳过)
+    if require_spray:
+        results["spray"] = checker.check_spray()
+        sys.stderr.write("SPRAY_SIGNAL_PASS\n" if results["spray"] else "SPRAY_SIGNAL_FAIL\n")
+    else:
+        sys.stderr.write("SPRAY_SIGNAL_SKIPPED\n")
+        rospy.loginfo("spray check skipped (calibration mode)")
+
+    # 6. Camera TF (新增)
+    results["camera_tf"] = checker.check_camera_tf()
+    sys.stderr.write("CAMERA_TF_OK\n" if results["camera_tf"] else "CAMERA_TF_FAIL\n")
 
     sys.stderr.flush()
 
-    all_ok = all(results.values())
+    # 喷涂未启用时不计入 all_ok
+    check_keys = ["clock", "joint_states", "tf", "cameras", "camera_tf"]
+    if require_spray:
+        check_keys.append("spray")
+
+    all_ok = all(results.get(k, False) for k in check_keys)
     rospy.loginfo("Runtime signals: %s", results)
 
     if all_ok:
@@ -420,7 +480,7 @@ def main():
         sys.stderr.flush()
         sys.exit(0)
     else:
-        failed = [k for k, v in results.items() if not v]
+        failed = [k for k in check_keys if not results.get(k, False)]
         rospy.logerr("Runtime signals degraded: %s", failed)
         sys.stderr.write("RUNTIME_SIGNALS_DEGRADED\n")
         sys.stderr.flush()

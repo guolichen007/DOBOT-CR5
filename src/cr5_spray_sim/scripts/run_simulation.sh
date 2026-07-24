@@ -471,8 +471,14 @@ check_runtime() {
 
 check_signals() {
     echo "[$(date +%H:%M:%S)] Phase D2b: checking runtime signals..."
+    local spray_flag=""
+    if [[ "$ENABLE_SPRAY_SIM" != "true" ]]; then
+        spray_flag="--no-spray"
+        echo "  (spray sim disabled — spray signals will be skipped)"
+    fi
     rosrun cr5_spray_sim check_runtime_signals.py \
-        --output "$ARTIFACT_DIR/camera/"
+        --output "$ARTIFACT_DIR/camera/" \
+        $spray_flag
 }
 
 # ---- 失败处理 ----
@@ -569,7 +575,12 @@ echo "  CONTROLLERS_RUNNING           ✓"
 echo "  CR5_KINEMATIC_CHAIN_PASS     ✓"
 echo "  CAMERA_COLOR_3_OF_3_PASS     ✓"
 echo "  CAMERA_DEPTH_3_OF_3_PASS     ✓"
-echo "  SPRAY_SIGNAL_PASS            ✓"
+echo "  CAMERA_TF_OK                 ✓"
+if [[ "$ENABLE_SPRAY_SIM" == "true" ]]; then
+    echo "  SPRAY_SIGNAL_PASS            ✓"
+  else
+    echo "  SPRAY_SIGNAL_SKIPPED         (calibration mode)"
+  fi
 echo ""
 echo "  Session ACTIVE — Ctrl+C to exit"
 echo ""
