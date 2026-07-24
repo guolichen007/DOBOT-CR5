@@ -94,7 +94,9 @@ def remap_custom_ids(raw_ids_flat, id_start, board):
     id_start: 此面板的起始 ID (100, 200, 或 300)
     board: CharucoBoard 对象 (local IDs 0-based)
 
-    返回: (selected_indices, local_ids_array, matched_corners_indices)
+    返回: (selected_indices, local_ids_array)
+          selected_indices: list of corner indices
+          local_ids_array: np.ndarray of local marker IDs (0-based), or None
     """
     board_n_markers = int(np.asarray(board.ids).size)
     id_end = id_start + board_n_markers - 1
@@ -105,7 +107,7 @@ def remap_custom_ids(raw_ids_flat, id_start, board):
             selected.append((i, raw_id))
 
     if not selected:
-        return [], None, []
+        return [], None
 
     idx_list = [s[0] for s in selected]
     local_ids = np.array(
