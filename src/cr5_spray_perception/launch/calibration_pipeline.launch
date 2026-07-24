@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<!--
+  三相机联合标定流水线 — 一键启动.
+
+  包含:
+    - JointCaptureManager (跨相机同步采集)
+    - ceres_ba_optimizer (C++ Bundle Adjustment)
+
+  仿真验证用法:
+    # 先启动仿真:
+    bash src/cr5_spray_sim/scripts/run_simulation.sh \
+      --gui --object=calibration_target --profile=quality
+    # 再启动标定流水线:
+    roslaunch cr5_spray_perception calibration_pipeline.launch
+
+  实机用法 (后续):
+    # 先启动相机:
+    roslaunch dobot_bringup multi_realsense_sync.launch
+    # 再启动标定流水线:
+    roslaunch cr5_spray_perception calibration_pipeline.launch
+-->
+<launch>
+  <!-- JointCaptureManager: 跨相机同步采集 -->
+  <node name="joint_capture_manager" pkg="cr5_spray_perception"
+    type="joint_capture_manager.py" output="screen">
+    <param name="run_id" value="calib_session_001"/>
+    <param name="output_dir" value="/tmp/cr5_calib_data"/>
+    <param name="camera_names"
+      value="[cam_front_left, cam_front_right, cam_rear]"/>
+    <param name="timeout_s" value="15.0"/>
+    <param name="sync_slop_s" value="0.05"/>
+    <param name="cross_sync_slop_s" value="0.033"/>
+    <param name="max_color_depth_skew_s" value="0.030"/>
+    <param name="max_camera_info_skew_s" value="0.030"/>
+    <param name="require_extrinsics" value="false"/>
+  </node>
+
+  <!--  Ceres Bundle Adjustment (按需调用, 文件 I/O 模式) -->
+  <!--  bundle_adjustment.py 通过子进程调用 -->
+</launch>
