@@ -51,15 +51,63 @@ APRILTAG_FACES = {
 
 CAMERAS = ["cam_front_left", "cam_front_right", "cam_rear"]
 
-# ── 从 calibration_target.yaml 硬编码的面板位姿 ──
-# pose_target: T_target_face — 将面板局部坐标转换到 calibration_target_frame
-FACE_POSES_TARGET = {
+# ── 从 calibration_target.yaml 加载面板位姿 ──
+# 硬编码值仅做 fallback (与仓库中 YAML 保持一致)
+_FALLBACK_FACE_POSES = {
     "front": {"xyz": [0.171, 0.0, 0.0],     "rpy": [0.0,  math.pi/2, 0.0]},
     "left":  {"xyz": [0.0, 0.141, 0.0],     "rpy": [-math.pi/2, 0.0, 0.0]},
     "right": {"xyz": [0.0, -0.141, 0.0],    "rpy": [math.pi/2, 0.0, 0.0]},
     "top":   {"xyz": [0.0, 0.0, 0.121],     "rpy": [0.0, 0.0, 0.0]},
     "back":  {"xyz": [-0.171, 0.0, 0.0],    "rpy": [0.0, -math.pi/2, 0.0]},
 }
+
+
+def _load_face_poses_from_yaml():
+    """从 calibration_target.yaml 读取面板位姿.
+
+    确保单一真值来源. 如果 YAML 不可用则退回硬编码值.
+    """
+    search_paths = []
+    # 通过 rospack 查找
+    try:
+        import rospkg
+        rp = rospkg.RosPack()
+        sim_path = rp.get_path("cr5_spray_sim")
+        search_paths.append(os.path.join(
+            sim_path, "config", "calibration", "calibration_target.yaml"))
+    except Exception:
+        pass
+    # 相对于本脚本的路径
+    search_paths.append(os.path.join(
+        os.path.dirname(__file__), "..", "..", "cr5_spray_sim",
+        "config", "calibration", "calibration_target.yaml"))
+
+    for p in search_paths:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r") as f:
+                    cfg = yaml.safe_load(f)
+                panels = cfg.get("panels", {})
+                poses = {}
+                for name, panel in panels.items():
+                    pt = panel.get("pose_target", {})
+                    if pt and "xyz" in pt and "rpy" in pt:
+                        poses[name] = {
+                            "xyz": list(pt["xyz"]),
+                            "rpy": list(pt["rpy"]),
+                        }
+                if len(poses) >= 5:
+                    rospy.loginfo("Loaded %d face poses from %s (SHA: ...)",
+                                  len(poses), p)
+                    return poses
+            except Exception as e:
+                rospy.logwarn("Failed to load face poses from %s: %s", p, e)
+
+    rospy.logwarn("Using fallback hardcoded face poses (YAML not found)")
+    return dict(_FALLBACK_FACE_POSES)
+
+
+FACE_POSES_TARGET = None  # 延迟加载
 
 
 def _euler_matrix(ai, aj, ak):
@@ -197,7 +245,8 @@ def detect_on_image(cv_img, K, D):
                     [pos[0]-half, pos[1]-half, 0],
                 ]
                 obj_pts_face.extend(tag_obj)
-                img_pts_face.extend([corners[i][0].tolist()])
+                # P1-2: 展平 - corners[i][0] 是 4 个角点 [[u,v],...], 需要 expand
+                img_pts_face.extend(corners[i][0].tolist())
 
         results[fk] = {
             "object_points_3d_face": obj_pts_face,
@@ -262,10 +311,14 @@ def undistort_points(img_pts, K, D):
 
 
 def solve_pnp(obj_pts, img_pts, K, D):
-    """PnP: 计算 T_camera_target.
+    """PnP: 计算 T_camera_target (相机在 target 坐标系中的位姿).
+
+    OpenCV solvePnP 返回的 rvec/tvec 满足:
+      p_camera = R * p_target + t
+    即 T_camera_target: 将 target 系 3D 点变换到 camera 系
 
     Returns:
-        T_cam_target: 4x4 变换矩阵 (camera → target)
+        T_cam_target: 4x4 变换矩阵 (p_camera = T_cam_target @ p_target)
         rvec, tvec: OpenCV 格式
         stats: dict with inliers, rmse_px
         None 如果失败
@@ -369,6 +422,11 @@ def main():
     aruco_compat.log_capability()
 
     os.makedirs(args.output, exist_ok=True)
+
+    # P1-3: 从 calibration_target.yaml 加载面板位姿 (替代硬编码)
+    global FACE_POSES_TARGET, T_TARGET_FACE
+    FACE_POSES_TARGET = _load_face_poses_from_yaml()
+    T_TARGET_FACE = {name: build_T_target_face(name) for name in FACE_POSES_TARGET}
 
     # ── 等待 joint_capture_manager 服务 ──
     svc_name = "/joint_capture_manager/capture_sync_group"
@@ -490,6 +548,14 @@ def main():
 
             # P0-5: 去畸变 → PnP → T_camera_target
             img_pts_undist = undistort_points(img_pts_raw, K, D)
+
+            # P1-2: 强制验证 obj/img 点数一致
+            if len(obj_pts_target) != len(img_pts_undist):
+                print("  {}: obj/img count mismatch ({} vs {}), faces=[{}]".format(
+                    cam, len(obj_pts_target), len(img_pts_undist), face_str))
+                group_pass = False
+                continue
+
             T_cam_target, rvec, tvec, pnp_stats = solve_pnp(
                 obj_pts_target, img_pts_undist, K, None)  # D=None (已去畸变)
 
@@ -526,8 +592,8 @@ def main():
             print("  Group {}: FAIL (cannot compute rig poses)".format(group_idx + 1))
             continue
 
-        # 第一帧后固定相机初值
-        if group_idx == 0:
+        # P1-1: 第一个有效组初始化相机 (而非仅 group_idx==0)
+        if not camera_initial_poses:
             for cam in CAMERAS:
                 T_rc = T_rig_cameras.get(cam)
                 if T_rc is not None:

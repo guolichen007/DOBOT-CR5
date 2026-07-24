@@ -245,9 +245,32 @@ int main(int argc, char** argv) {
   double overall_rmse = total_residual_pairs > 0
       ? std::sqrt(total_sq_error / total_residual_pairs) : 0.0;
 
+  // — 质量分层评估 —
+  double max_per_cam_rmse = 0.0;
+  for (auto& kv : cam_errors) {
+    auto& errors = kv.second;
+    if (errors.empty()) continue;
+    double sum_sq = 0.0;
+    for (double e : errors) sum_sq += e * e;
+    max_per_cam_rmse = std::max(max_per_cam_rmse,
+                                std::sqrt(sum_sq / errors.size()));
+  }
+
+  bool optimizer_usable = summary.IsSolutionUsable();
+  // 仿真实门限: overall_rmse <= 1.0px, per-camera <= 1.5px, max_residual <= 5px
+  // 实机容忍: overall_rmse <= 2.0px, per-camera <= 2.5px
+  // 当前使用仿真门限
+  bool quality_pass = optimizer_usable
+      && overall_rmse <= 1.0
+      && max_per_cam_rmse <= 1.5
+      && max_error <= 5.0
+      && total_residual_pairs >= 20;
+
   // — 构建输出 JSON —
   json output;
-  output["success"] = summary.IsSolutionUsable() && overall_rmse < 10.0;
+  output["success"] = optimizer_usable && quality_pass;
+  output["optimizer_usable"] = optimizer_usable;
+  output["quality_status"] = quality_pass ? "PASS" : (optimizer_usable ? "DEGRADED" : "FAIL");
   output["initial_cost"] = summary.initial_cost;
   output["final_cost"] = summary.final_cost;
   output["iterations"] = static_cast<int>(
@@ -257,7 +280,14 @@ int main(int argc, char** argv) {
   output["message"] = summary.message;
   output["overall_rmse_px"] = overall_rmse;
   output["max_residual_px"] = max_error;
+  output["max_per_camera_rmse_px"] = max_per_cam_rmse;
   output["n_observations"] = total_residual_pairs;
+  output["quality_thresholds"] = {
+    {"overall_rmse_px_max", 1.0},
+    {"per_camera_rmse_px_max", 1.5},
+    {"max_residual_px_max", 5.0},
+    {"min_observations", 20},
+  };
 
   // per-camera RMSE
   json per_cam_rmse = json::object();

@@ -423,19 +423,38 @@ class CaptureManager:
         if ext_yaml is None:
             ext_yaml = {}
 
+        schema_ver = ext_yaml.get("schema_version", 1)
+
+        # 根据 schema 版本确定关键字段名
+        # v1: T_target_camera / T_camera_target, target_frame
+        # v2: T_rig_camera / T_camera_rig, rig_frame
+        contract = ext_yaml.get("transform_contract", {})
+        if schema_ver >= 2:
+            primary_key = contract.get("primary_transform", "T_rig_camera")
+            inverse_key = contract.get("inverse_transform", "T_camera_rig")
+            ref_frame = ext_yaml.get("rig_frame", "cam_front_left_color_optical_frame")
+            ref_frame_key = "rig_frame"
+        else:
+            primary_key = contract.get("primary_transform", "T_target_camera")
+            inverse_key = contract.get("inverse_transform", "T_camera_target")
+            ref_frame = ext_yaml.get("target_frame", "calibration_target_frame")
+            ref_frame_key = "target_frame"
+
         meta = {
             "configured": True,
             "required": self.require_extrinsics,
             "file": abs_path,
             "sha256": sha,
-            "schema_version": ext_yaml.get("schema_version", 1),
+            "schema_version": schema_ver,
             "calibration_id": ext_yaml.get("calibration_id", "unknown"),
             "generated_at": ext_yaml.get("generated_at", "unknown"),
             "method": ext_yaml.get("method", "unknown"),
-            "target_frame": ext_yaml.get("target_frame", "calibration_target_frame"),
+            ref_frame_key: ref_frame,
+            "primary_key": primary_key,
+            "inverse_key": inverse_key,
         }
 
-        # 提取相机→frame 映射 + 矩阵
+        # 提取相机→frame 映射 + 矩阵 (按 schema 版本使用正确 key)
         cameras_meta = ext_yaml.get("cameras", {})
         if cameras_meta:
             meta["cameras"] = {}
@@ -443,8 +462,8 @@ class CaptureManager:
                 meta["cameras"][cam] = {
                     "optical_frame": info.get("optical_frame", "unknown"),
                 }
-                # 携带矩阵供严格校验
-                for key in ("T_camera_target", "T_target_camera"):
+                # 携带矩阵供严格校验 (同时支持 v1/v2 key 名)
+                for key in (primary_key, inverse_key):
                     if key in info:
                         meta["cameras"][cam][key] = info[key]
 
@@ -471,19 +490,20 @@ class CaptureManager:
         if self.require_extrinsics:
             errors = []
 
-            # schema_version
+            # schema_version (支持 v1 和 v2)
             sv = meta.get("schema_version")
-            if sv != 1:
-                errors.append(f"unsupported schema_version: {sv}")
+            if sv not in (1, 2):
+                errors.append(f"unsupported schema_version: {sv} (expected 1 or 2)")
 
             # status
             if ext_yaml.get("status", "FAIL") != "PASS":
                 errors.append(f"extrinsics status is {ext_yaml.get('status', 'FAIL')}, "
                              "require_extrinsics=true requires PASS")
 
-            # target_frame
-            if not meta.get("target_frame"):
-                errors.append("target_frame is empty")
+            # 参考坐标系 (v1: target_frame, v2: rig_frame)
+            frame_key_v = "rig_frame" if sv >= 2 else "target_frame"
+            if not meta.get(frame_key_v):
+                errors.append(f"{frame_key_v} is empty")
 
             # 三台相机存在
             expected_cams = set(self.camera_names)
@@ -492,40 +512,44 @@ class CaptureManager:
             if missing:
                 errors.append(f"missing cameras: {sorted(missing)}")
 
-            # 每台相机严格矩阵验证
+            # 每台相机严格矩阵验证 (使用契约 key 名)
             for cam in expected_cams:
                 cam_meta = meta.get("cameras", {}).get(cam, {})
                 optical = cam_meta.get("optical_frame", "")
                 if not optical:
                     errors.append(f"{cam}: optical_frame is empty")
 
-                T_ct = cam_meta.get("T_camera_target")
-                T_tc = cam_meta.get("T_target_camera")
-                if T_ct is None or T_tc is None:
-                    errors.append(f"{cam}: missing T_camera_target or T_target_camera")
+                T_prim = cam_meta.get(primary_key)
+                T_inv = cam_meta.get(inverse_key)
+                if T_prim is None or T_inv is None:
+                    errors.append(f"{cam}: missing {primary_key} or {inverse_key}")
                     continue
 
-                T_ct_np = np.array(T_ct, dtype=float)
-                T_tc_np = np.array(T_tc, dtype=float)
+                T_prim_np = np.array(T_prim, dtype=float)
+                T_inv_np = np.array(T_inv, dtype=float)
 
-                if T_ct_np.shape != (4, 4):
-                    errors.append(f"{cam}: T_camera_target shape {T_ct_np.shape} != (4,4)")
-                if T_tc_np.shape != (4, 4):
-                    errors.append(f"{cam}: T_target_camera shape {T_tc_np.shape} != (4,4)")
+                if T_prim_np.shape != (4, 4):
+                    errors.append(f"{cam}: {primary_key} shape {T_prim_np.shape} != (4,4)")
+                if T_inv_np.shape != (4, 4):
+                    errors.append(f"{cam}: {inverse_key} shape {T_inv_np.shape} != (4,4)")
 
-                if not np.isfinite(T_ct_np).all():
-                    errors.append(f"{cam}: T_camera_target contains NaN/Inf")
-                if not np.isfinite(T_tc_np).all():
-                    errors.append(f"{cam}: T_target_camera contains NaN/Inf")
+                if not np.isfinite(T_prim_np).all():
+                    errors.append(f"{cam}: {primary_key} contains NaN/Inf")
+                if not np.isfinite(T_inv_np).all():
+                    errors.append(f"{cam}: {inverse_key} contains NaN/Inf")
 
                 # 互为逆矩阵
-                if T_ct_np.shape == (4, 4) and T_tc_np.shape == (4, 4):
-                    if not np.allclose(T_ct_np @ T_tc_np, np.eye(4), atol=1e-6):
-                        errors.append(f"{cam}: T_camera_target @ T_target_camera != I4")
+                if T_prim_np.shape == (4, 4) and T_inv_np.shape == (4, 4):
+                    if not np.allclose(T_prim_np @ T_inv_np, np.eye(4), atol=1e-6):
+                        errors.append(f"{cam}: {primary_key} @ {inverse_key} != I4")
                     # 旋转矩阵近似正交
-                    R = T_ct_np[:3, :3]
+                    R = T_prim_np[:3, :3]
                     if not np.allclose(R @ R.T, np.eye(3), atol=1e-3):
                         errors.append(f"{cam}: rotation matrix not orthogonal")
+                    # 行列式 ≈ 1
+                    det = np.linalg.det(R)
+                    if abs(det - 1.0) > 0.01:
+                        errors.append(f"{cam}: det(R)={det:.4f} (expected 1.0)")
 
             if errors:
                 for e in errors:

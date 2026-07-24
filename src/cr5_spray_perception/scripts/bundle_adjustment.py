@@ -170,7 +170,11 @@ def build_ceres_input(observations_data):
 
 
 def run_ceres_ba(input_json, output_dir):
-    """运行 Ceres BA 子进程."""
+    """运行 Ceres BA 子进程.
+
+    Returns:
+        (ba_output, errors). ba_output=None 表示失败.
+    """
     input_path = os.path.join(output_dir, "ceres_ba_input.json")
     output_path = os.path.join(output_dir, "ceres_ba_output.json")
 
@@ -180,16 +184,13 @@ def run_ceres_ba(input_json, output_dir):
     # 查找 ceres_ba_optimizer 可执行文件
     exe_path = None
     search_paths = [
-        # 从 scripts/ 向上 3 级到 workspace root, 再进入 devel/lib/
         os.path.join(os.path.dirname(__file__), "..", "..", "..", "devel",
                      "lib", "cr5_spray_perception", "ceres_ba_optimizer"),
     ]
-    # 通过 rospack 查找
     try:
         import rospkg
         rp = rospkg.RosPack()
         pkg_path = rp.get_path("cr5_spray_perception")
-        # pkg_path = .../src/cr5_spray_perception, 向上 2 级到 workspace root
         search_paths.append(os.path.join(
             os.path.dirname(os.path.dirname(pkg_path)), "devel", "lib",
             "cr5_spray_perception", "ceres_ba_optimizer"))
@@ -202,21 +203,62 @@ def run_ceres_ba(input_json, output_dir):
             break
 
     if exe_path is None:
-        raise FileNotFoundError(
-            "ceres_ba_optimizer not found. Build with: catkin_make")
+        return None, ["ceres_ba_optimizer not found. Build with: catkin_make"]
 
-    result = subprocess.run(
-        [exe_path, input_path, output_path],
-        capture_output=True, text=True, timeout=60)
+    try:
+        result = subprocess.run(
+            [exe_path, input_path, output_path],
+            capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        return None, ["Ceres BA timed out (>60s)"]
+    except Exception as e:
+        return None, ["Ceres BA subprocess error: {}".format(e)]
+
     print(result.stdout)
+    errors = []
 
+    # P0-C: Ceres 进程退出码非零
     if result.returncode != 0:
-        print("STDERR:", result.stderr, file=sys.stderr)
+        errors.append("Ceres BA exited with code {}: {}".format(
+            result.returncode, result.stderr[:500] if result.stderr else "no stderr"))
 
-    with open(output_path) as f:
-        output = json.load(f)
+    # 输出文件必须存在
+    if not os.path.isfile(output_path):
+        errors.append("BA output file not found: {}".format(output_path))
+        return None, errors
 
-    return output
+    try:
+        with open(output_path) as f:
+            output = json.load(f)
+    except Exception as e:
+        errors.append("Failed to parse BA output JSON: {}".format(e))
+        return None, errors
+
+    # P0-C: success 字段必须为 true
+    if not output.get("success", False):
+        errors.append("Ceres BA reported success=false. "
+                      "overall_rmse={:.3f}px, message={}".format(
+                          output.get("overall_rmse_px", -1),
+                          output.get("message", "unknown")))
+
+    # 验证输出完整性
+    out_cameras = output.get("cameras", [])
+    if len(out_cameras) < 2:
+        errors.append("BA output has < 2 cameras (got {})".format(len(out_cameras)))
+
+    for cam in out_cameras:
+        pose = cam.get("optimized_pose", [])
+        if len(pose) != 7:
+            errors.append("{}: optimized_pose has {} elements (expected 7)".format(
+                cam.get("name", "unknown"), len(pose)))
+        if not all(np.isfinite(float(v)) for v in pose):
+            errors.append("{}: optimized_pose contains NaN/Inf".format(
+                cam.get("name", "unknown")))
+
+    if errors:
+        return output, errors  # output 可用于诊断, errors 非空表示失败
+
+    return output, []
 
 
 def build_extrinsics_yaml(ba_output, cam_names):
@@ -263,7 +305,7 @@ def build_extrinsics_yaml(ba_output, cam_names):
         }
 
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "calibration_id": "ba_{}".format(datetime.now().strftime("%Y%m%d_%H%M%S")),
         "generated_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
         "method": "multi_frame_bundle_adjustment",
@@ -284,6 +326,10 @@ def build_extrinsics_yaml(ba_output, cam_names):
             "iterations": ba_output.get("iterations"),
             "time_ms": ba_output.get("time_ms"),
             "num_targets": len(ba_output.get("targets", [])),
+            "overall_rmse_px": ba_output.get("overall_rmse_px"),
+            "max_residual_px": ba_output.get("max_residual_px"),
+            "n_observations": ba_output.get("n_observations"),
+            "per_camera_rmse": ba_output.get("per_camera_rmse", {}),
         },
         "cameras": cameras_dict,
     }
@@ -313,25 +359,47 @@ def main():
 
     # 3. 运行 Ceres BA
     print("Running Ceres Bundle Adjustment...")
-    ba_output = run_ceres_ba(ceres_input, args.output)
+    ba_output, ba_errors = run_ceres_ba(ceres_input, args.output)
+
+    if ba_output is None or ba_errors:
+        print("\n" + "=" * 60)
+        print("  BUNDLE ADJUSTMENT FAILED")
+        for err in (ba_errors or ["unknown error"]):
+            print("  ERROR: {}".format(err))
+        print("=" * 60)
+        sys.exit(1)
 
     # 4. 构建外参 YAML
     print("Building extrinsics YAML...")
     extrinsics = build_extrinsics_yaml(ba_output, cam_names)
+
+    # P0-C: 外参状态必须为 PASS
+    if extrinsics.get("status") != "PASS":
+        print("\n" + "=" * 60)
+        print("  BUNDLE ADJUSTMENT FAILED: status={}".format(extrinsics.get("status")))
+        print("  ba_stats: {}".format(extrinsics.get("ba_stats", {})))
+        print("=" * 60)
+        sys.exit(2)
 
     extrinsics_path = os.path.join(args.output, "initial_extrinsics.yaml")
     with open(extrinsics_path, "w") as f:
         yaml.dump(extrinsics, f, default_flow_style=False)
 
     print("BA Report:")
-    print("  initial_cost: {:.2f}".format(ba_output.get("initial_cost", 0)))
-    print("  final_cost:   {:.2f}".format(ba_output.get("final_cost", 0)))
+    print("  overall_rmse:  {:.3f} px".format(ba_output.get("overall_rmse_px", 0)))
+    print("  max_residual:  {:.3f} px".format(ba_output.get("max_residual_px", 0)))
+    print("  initial_cost:  {:.2f}".format(ba_output.get("initial_cost", 0)))
+    print("  final_cost:    {:.2f}".format(ba_output.get("final_cost", 0)))
     reduction = (1 - ba_output.get("final_cost", 0) /
                  max(ba_output.get("initial_cost", 1), 1)) * 100
-    print("  reduction:    {:.1f}%".format(reduction))
-    print("  iterations:   {}".format(ba_output.get("iterations", 0)))
-    print("  time_ms:      {:.1f}".format(ba_output.get("time_ms", 0)))
-    print("  status:       {}".format(extrinsics["status"]))
+    print("  reduction:     {:.1f}%".format(reduction))
+    print("  iterations:    {}".format(ba_output.get("iterations", 0)))
+    print("  time_ms:       {:.1f}".format(ba_output.get("time_ms", 0)))
+    print("  status:        {}".format(extrinsics["status"]))
+    for cam_name, cam_stats in ba_output.get("per_camera_rmse", {}).items():
+        print("  {}: RMSE={:.3f}px, n={}, max={:.3f}px".format(
+            cam_name, cam_stats["rmse_px"],
+            cam_stats["n_residuals"], cam_stats["max_error_px"]))
     print("\nWrote: {}".format(extrinsics_path))
 
 

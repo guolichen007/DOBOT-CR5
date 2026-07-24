@@ -48,15 +48,30 @@ depth_image_to_meters = _cm.depth_image_to_meters
 
 
 class JointCaptureManager(CaptureManager):
-    """扩展 CaptureManager V3, 增加跨相机同步."""
+    """扩展 CaptureManager V3, 增加跨相机同步.
+
+    P0-A 修复: 按 color stamp 精确匹配 RGB-D tuple.
+    - per-camera 缓存最近 N 个四路 tuple, 按 color timestamp (ns) 索引
+    - ATS 回调用精确 color stamp 查找对应 tuple (不允许 33ms 模糊匹配)
+    - 最终 inter-camera skew 从实际保存的 color stamp 重新计算
+    """
+
+    # 精确匹配容差: 同一帧不同 topic 的时间戳抖动 < 100us
+    EXACT_MATCH_TOLERANCE_S = 0.0001
 
     def __init__(self):
         super().__init__()
 
         # ── 跨相机同步 ──
         self.cross_sync_slop_s = rospy.get_param("~cross_sync_slop_s", 0.033)
+        self.max_inter_camera_skew_s = rospy.get_param("~max_inter_camera_skew_s", 0.005)
         self._cross_sync_data = None
         self._cross_lock = threading.Lock()
+
+        # ── Per-camera tuple 缓存 (color stamp → tuple) ──
+        self._tuple_cache = {}  # cam → OrderedDict[stamp_ns, tuple]
+        self._max_cache_entries = 15
+        self._patch_sync_callbacks()
         self._setup_cross_sync()
 
         # ── SyncFrameGroup 计数 ──
@@ -68,80 +83,105 @@ class JointCaptureManager(CaptureManager):
                       self._svc_capture_sync_group)
 
         rospy.loginfo("JointCaptureManager ready: %d cameras, "
-                      "cross_slop=%.3fs",
-                      len(self.camera_names), self.cross_sync_slop_s)
+                      "cross_slop=%.3fs, max_inter_cam_skew=%.1fms",
+                      len(self.camera_names), self.cross_sync_slop_s,
+                      self.max_inter_camera_skew_s * 1000)
+
+    def _patch_sync_callbacks(self):
+        """在基类 per-camera sync CB 之后追加缓存写入.
+
+        基类 _make_sync_cb 已经在 __init__ 中注册.
+        这里拦截 _sync_data 写入并在每次更新时同步写入 _tuple_cache.
+        """
+        # 存储原始方法引用
+        self._base_make_sync_cb = self._make_sync_cb
+
+        def patched_make_sync_cb(cam):
+            base_cb = self._base_make_sync_cb(cam)
+            def cb(color_msg, depth_msg, color_info_msg, depth_info_msg):
+                base_cb(color_msg, depth_msg, color_info_msg, depth_info_msg)
+                # 写入缓存: 按 color timestamp (ns) 索引
+                stamp_ns = color_msg.header.stamp.to_nsec()
+                with self._sync_lock:
+                    if cam not in self._tuple_cache:
+                        self._tuple_cache[cam] = {}
+                    cache = self._tuple_cache[cam]
+                    cache[stamp_ns] = (color_msg, depth_msg,
+                                       color_info_msg, depth_info_msg)
+                    # 限制缓存大小
+                    while len(cache) > self._max_cache_entries:
+                        oldest = min(cache.keys())
+                        del cache[oldest]
+            return cb
+
+        self._make_sync_cb = patched_make_sync_cb
 
     def _setup_cross_sync(self):
-        """创建跨相机的 3-way ApproximateTimeSynchronizer.
-
-        对每台相机订阅 color/image_raw (已经 per-camera 4-way 同步过),
-        用 ATS 确保三台相机的 color 帧时间戳接近.
-        """
+        """创建跨相机的 3-way ApproximateTimeSynchronizer."""
         color_subs = []
         for cam in self.camera_names:
             sub = message_filters.Subscriber(
                 "/" + cam + "/camera/color/image_raw", Image)
             color_subs.append(sub)
 
-        # 动态创建 3-way (或 N-way) 同步器
         self._cross_ats = message_filters.ApproximateTimeSynchronizer(
             color_subs, queue_size=5, slop=self.cross_sync_slop_s,
             allow_headerless=False)
         self._cross_ats.registerCallback(self._cross_sync_cb)
 
     def _cross_sync_cb(self, *color_msgs):
-        """跨相机同步回调.
+        """跨相机同步回调 (P0-A 修复版).
 
-        当三台相机的 color 消息时间戳在 cross_sync_slop_s 内时触发.
-        严格校验: per-camera sync 中的 color 消息必须与 ATS 触发的消息匹配.
+        使用 ATS 触发的 color 消息精确时间戳 (ns)
+        从 tuple 缓存中查找对应的 RGB-D 四路 tuple.
+        不允许模糊匹配.
         """
         with self._cross_lock:
             if not self._capture_active:
                 return
 
-            # 检查所有相机都有 per-camera sync 数据
             with self._sync_lock:
-                all_ready = all(
-                    self._sync_data.get(cam) is not None
-                    for cam in self.camera_names)
-                if not all_ready:
-                    return
-
-                # 严格校验: per-camera sync 的 color 时间戳必须匹配 ATS 触发消息
-                max_skew = 0.0
+                # 按精确 color stamp 查找匹配的四路 tuple
+                matched_snapshot = {}
+                match_stamps = {}
                 for i, cam in enumerate(self.camera_names):
-                    data = self._sync_data.get(cam)
-                    if data is None:
-                        return
-                    color_synced = data[0]  # per-camera 4-way sync 中的 color 消息
-                    # 比较 ATS 触发的 color 消息和 per-camera sync 中的 color 消息
-                    skew = abs((color_msgs[i].header.stamp -
-                                color_synced.header.stamp).to_sec())
-                    if skew > self.cross_sync_slop_s:
-                        return  # per-camera sync 数据不是同一帧
-                    max_skew = max(max_skew, skew)
+                    stamp_ns = color_msgs[i].header.stamp.to_nsec()
+                    cache = self._tuple_cache.get(cam, {})
+                    matched = cache.get(stamp_ns)
+                    if matched is None:
+                        return  # 缓存中没有精确匹配, 拒绝
+                    # 二次验证: 缓存中的 color 消息必须与 ATS 消息完全一致
+                    cached_color = matched[0]
+                    cached_stamp_ns = cached_color.header.stamp.to_nsec()
+                    if cached_stamp_ns != stamp_ns:
+                        return  # 缓存数据不一致, 拒绝
+                    matched_snapshot[cam] = matched
+                    match_stamps[cam] = color_msgs[i].header.stamp
 
-                # 计算实际跨相机最大时间差
+                # 从实际保存的 color stamp 重新计算 inter-camera skew
                 inter_cam_skew = 0.0
-                for i in range(len(self.camera_names)):
-                    for j in range(i + 1, len(self.camera_names)):
-                        d = abs((color_msgs[i].header.stamp -
-                                 color_msgs[j].header.stamp).to_sec())
+                stamps = list(match_stamps.values())
+                for i in range(len(stamps)):
+                    for j in range(i + 1, len(stamps)):
+                        d = abs((stamps[i] - stamps[j]).to_sec())
                         inter_cam_skew = max(inter_cam_skew, d)
 
-                # 仿真硬门限 ≤5ms, 容忍 ≤10ms
-                max_allowed_inter_cam_skew = rospy.get_param(
-                    "~max_inter_camera_skew_s", 0.005)
-                if inter_cam_skew > max_allowed_inter_cam_skew:
+                # 硬门限检查 (基于实际保存数据)
+                if inter_cam_skew > self.max_inter_camera_skew_s:
                     rospy.logwarn_throttle(
-                        5.0, "Cross-camera skew %.1fms > %.1fms, rejecting",
-                        inter_cam_skew * 1000, max_allowed_inter_cam_skew * 1000)
+                        5.0,
+                        "Cross-camera skew %.1fms > %.1fms (measured from saved data), rejecting",
+                        inter_cam_skew * 1000,
+                        self.max_inter_camera_skew_s * 1000)
                     return
 
-                snapshot = dict(self._sync_data)
-                # 记录实际跨相机时间差
+                snapshot = matched_snapshot
                 snapshot["_cross_skew_s"] = inter_cam_skew
-                snapshot["_max_color_skew_s"] = max_skew
+                snapshot["_cross_match_method"] = "exact_stamp_ns"
+                snapshot["_cross_color_stamps"] = {
+                    cam: {"secs": s.secs, "nsecs": s.nsecs}
+                    for cam, s in match_stamps.items()
+                }
 
             self._cross_sync_data = snapshot
 
@@ -158,6 +198,8 @@ class JointCaptureManager(CaptureManager):
             self._capture_started_ros = rospy.Time.now()
             for cam in self.camera_names:
                 self._sync_data[cam] = None
+            # 清空 tuple 缓存 (避免上一次采集的旧数据)
+            self._tuple_cache.clear()
 
         with self._cross_lock:
             self._cross_sync_data = None
@@ -295,6 +337,8 @@ class JointCaptureManager(CaptureManager):
 
         # ── group manifest ──
         success = (captured == self.expected_camera_count and len(errors) == 0)
+        cross_skew = snapshot.get("_cross_skew_s", None)
+        cross_stamps = snapshot.get("_cross_color_stamps", {})
         group_manifest = {
             "group_id": group_id,
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -304,6 +348,13 @@ class JointCaptureManager(CaptureManager):
             "success": success,
             "errors": errors if errors else [],
             "per_camera": per_camera_detail,
+            "cross_camera_sync": {
+                "method": "3-way ApproximateTimeSynchronizer + exact stamp lookup",
+                "max_inter_camera_skew_s": cross_skew,
+                "max_allowed_skew_s": self.max_inter_camera_skew_s,
+                "ats_slop_s": self.cross_sync_slop_s,
+                "per_camera_color_stamps": cross_stamps,
+            },
         }
         _atomic_write_json(
             os.path.join(group_dir, "group_manifest.json"), group_manifest)
