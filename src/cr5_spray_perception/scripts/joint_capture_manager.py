@@ -93,10 +93,12 @@ class JointCaptureManager(CaptureManager):
         """跨相机同步回调.
 
         当三台相机的 color 消息时间戳在 cross_sync_slop_s 内时触发.
+        严格校验: per-camera sync 中的 color 消息必须与 ATS 触发的消息匹配.
         """
         with self._cross_lock:
             if not self._capture_active:
                 return
+
             # 检查所有相机都有 per-camera sync 数据
             with self._sync_lock:
                 all_ready = all(
@@ -104,7 +106,42 @@ class JointCaptureManager(CaptureManager):
                     for cam in self.camera_names)
                 if not all_ready:
                     return
+
+                # 严格校验: per-camera sync 的 color 时间戳必须匹配 ATS 触发消息
+                max_skew = 0.0
+                for i, cam in enumerate(self.camera_names):
+                    data = self._sync_data.get(cam)
+                    if data is None:
+                        return
+                    color_synced = data[0]  # per-camera 4-way sync 中的 color 消息
+                    # 比较 ATS 触发的 color 消息和 per-camera sync 中的 color 消息
+                    skew = abs((color_msgs[i].header.stamp -
+                                color_synced.header.stamp).to_sec())
+                    if skew > self.cross_sync_slop_s:
+                        return  # per-camera sync 数据不是同一帧
+                    max_skew = max(max_skew, skew)
+
+                # 计算实际跨相机最大时间差
+                inter_cam_skew = 0.0
+                for i in range(len(self.camera_names)):
+                    for j in range(i + 1, len(self.camera_names)):
+                        d = abs((color_msgs[i].header.stamp -
+                                 color_msgs[j].header.stamp).to_sec())
+                        inter_cam_skew = max(inter_cam_skew, d)
+
+                # 仿真硬门限 ≤5ms, 容忍 ≤10ms
+                max_allowed_inter_cam_skew = rospy.get_param(
+                    "~max_inter_camera_skew_s", 0.005)
+                if inter_cam_skew > max_allowed_inter_cam_skew:
+                    rospy.logwarn_throttle(
+                        5.0, "Cross-camera skew %.1fms > %.1fms, rejecting",
+                        inter_cam_skew * 1000, max_allowed_inter_cam_skew * 1000)
+                    return
+
                 snapshot = dict(self._sync_data)
+                # 记录实际跨相机时间差
+                snapshot["_cross_skew_s"] = inter_cam_skew
+                snapshot["_max_color_skew_s"] = max_skew
 
             self._cross_sync_data = snapshot
 
@@ -280,7 +317,12 @@ class JointCaptureManager(CaptureManager):
 
     def _svc_capture_sync_group(self, req):
         ok, msg, path = self.capture_sync_group()
-        return TriggerResponse(success=ok, message=msg)
+        # 将 group_dir 嵌入 message，格式: "GROUP_DIR:<path>|<original_msg>"
+        if ok and path:
+            full_msg = "GROUP_DIR:{}|{}".format(path, msg)
+        else:
+            full_msg = msg
+        return TriggerResponse(success=ok, message=full_msg)
 
 
 if __name__ == "__main__":

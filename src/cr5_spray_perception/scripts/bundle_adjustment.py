@@ -58,9 +58,12 @@ def build_ceres_input(observations_data):
         if isinstance(K, list):
             K = np.array(K).reshape(3, 3)
 
-        init_rvec = cam_info.get("rvec_init", [0, 0, 0])
-        init_tvec = cam_info.get("tvec_init", [0, 0, 0])
-        qt = rvec_tvec_to_quat_trans(init_rvec, init_tvec)
+        # 优先使用 direct initial_pose [qw,qx,qy,qz,tx,ty,tz]
+        qt = cam_info.get("initial_pose")
+        if qt is None:
+            init_rvec = cam_info.get("rvec_init", [0, 0, 0])
+            init_tvec = cam_info.get("tvec_init", [0, 0, 0])
+            qt = rvec_tvec_to_quat_trans(init_rvec, init_tvec)
 
         cameras_json.append({
             "name": cam_name,
@@ -81,18 +84,41 @@ def build_ceres_input(observations_data):
 
     tgt_to_idx = {}
     for j, gid in enumerate(group_ids):
-        tgt_to_idx[int(gid)] = j
+        # gid 可能是 int 或 "group_0000" 字符串
+        if isinstance(gid, str):
+            try:
+                numeric_gid = int(gid)
+            except ValueError:
+                # "group_0000" → 0
+                numeric_gid = int(gid.split("_")[-1]) if "_" in gid else j
+        else:
+            numeric_gid = int(gid)
+
+        tgt_to_idx[numeric_gid] = j
+
+        # 读取目标初始位姿 (如果有)
+        group_data = groups.get(gid, groups.get(numeric_gid, {}))
+        tgt_init_pose = group_data.get("target_initial_pose", None) if isinstance(group_data, dict) else None
+        if tgt_init_pose is None:
+            tgt_init_pose = [1, 0, 0, 0, 0, 0, 0]  # 恒等四元数 [qw,qx,qy,qz,tx,ty,tz]
+
         targets_json.append({
-            "group_id": int(gid),
-            "initial_pose": [0, 0, 0, 1, 0, 0, 0],  # 默认恒等
+            "group_id": numeric_gid,
+            "initial_pose": tgt_init_pose,
         })
 
     obs_json = []
-    for gid_str in (group_ids if isinstance(group_ids[0], str)
-                    else [str(g) for g in group_ids]):
-        gid = int(gid_str)
-        group_data = groups.get(gid_str, groups[gid] if isinstance(groups, list)
-                                else groups.get(gid, {}))
+    for gid_raw in group_ids:
+        # 统一处理 int / "group_0000" 两种 group ID
+        if isinstance(gid_raw, str):
+            try:
+                gid = int(gid_raw)
+            except ValueError:
+                gid = int(gid_raw.split("_")[-1]) if "_" in gid_raw else 0
+        else:
+            gid = int(gid_raw)
+
+        group_data = groups.get(gid_raw, groups.get(gid, {}))
         if not isinstance(group_data, dict):
             continue
 
@@ -154,7 +180,8 @@ def run_ceres_ba(input_json, output_dir):
     # 查找 ceres_ba_optimizer 可执行文件
     exe_path = None
     search_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "..", "devel",
+        # 从 scripts/ 向上 3 级到 workspace root, 再进入 devel/lib/
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "devel",
                      "lib", "cr5_spray_perception", "ceres_ba_optimizer"),
     ]
     # 通过 rospack 查找
@@ -162,8 +189,9 @@ def run_ceres_ba(input_json, output_dir):
         import rospkg
         rp = rospkg.RosPack()
         pkg_path = rp.get_path("cr5_spray_perception")
+        # pkg_path = .../src/cr5_spray_perception, 向上 2 级到 workspace root
         search_paths.append(os.path.join(
-            os.path.dirname(pkg_path), "devel", "lib",
+            os.path.dirname(os.path.dirname(pkg_path)), "devel", "lib",
             "cr5_spray_perception", "ceres_ba_optimizer"))
     except Exception:
         pass
@@ -192,8 +220,21 @@ def run_ceres_ba(input_json, output_dir):
 
 
 def build_extrinsics_yaml(ba_output, cam_names):
-    """从 BA 输出构建 standard initial_extrinsics.yaml."""
+    """从 BA 输出构建 standard initial_extrinsics.yaml.
+
+    BA 优化变量:
+      cam_pose  = T_rig_camera (rig = 第一台相机 optical frame)
+      tgt_pose  = T_rig_target (标定目标在 rig 坐标系中的位姿)
+
+    输出契约:
+      T_rig_camera: 将 camera 坐标系中的点转换到 rig 坐标系
+      T_camera_rig: 逆变换, 将 rig 坐标系中的点转换到 camera 坐标系
+      rig_frame: 第一台相机的 color_optical_frame
+    """
     import cv2
+
+    first_cam = cam_names[0] if cam_names else "cam_front_left"
+    rig_frame = "{}_color_optical_frame".format(first_cam)
 
     cameras_dict = {}
     for cam in ba_output.get("cameras", []):
@@ -204,23 +245,21 @@ def build_extrinsics_yaml(ba_output, cam_names):
 
         # 四元数 → 旋转矩阵 → rvec
         from tf.transformations import quaternion_matrix
-        T = quaternion_matrix([qx, qy, qz, qw])
-        R = T[:3, :3]
-        rvec = cv2.Rodrigues(R)[0].flatten().tolist()
+        T_rig_cam = quaternion_matrix([qx, qy, qz, qw])
+        T_rig_cam[:3, 3] = [tx, ty, tz]
+
+        rvec = cv2.Rodrigues(T_rig_cam[:3, :3])[0].flatten().tolist()
         tvec = [tx, ty, tz]
 
-        # T_camera_target = [R | t] 4x4
-        T_ct = np.eye(4)
-        T_ct[:3, :3] = R
-        T_ct[:3, 3] = [tx, ty, tz]
-        T_tc = np.linalg.inv(T_ct)
+        # T_camera_rig = inv(T_rig_camera)
+        T_cam_rig = np.linalg.inv(T_rig_cam)
 
         cameras_dict[name] = {
             "optical_frame": "{}_color_optical_frame".format(name),
-            "T_camera_target": T_ct.tolist(),
-            "T_target_camera": T_tc.tolist(),
-            "T_camera_target_rvec": rvec,
-            "T_camera_target_tvec": tvec,
+            "T_rig_camera": T_rig_cam.tolist(),
+            "T_camera_rig": T_cam_rig.tolist(),
+            "T_rig_camera_rvec": rvec,
+            "T_rig_camera_tvec": tvec,
         }
 
     return {
@@ -230,12 +269,14 @@ def build_extrinsics_yaml(ba_output, cam_names):
         "method": "multi_frame_bundle_adjustment",
         "optimization_framework": "Ceres Solver (SE(3) LM, Huber 2px)",
         "status": "PASS" if ba_output.get("success") else "FAIL",
-        "target_frame": "calibration_target_frame",
+        "rig_frame": rig_frame,
+        "rig_definition": "first camera ({}) color optical frame, gauge-fixed at identity".format(first_cam),
         "transform_contract": {
-            "primary_transform": "T_target_camera",
-            "inverse_transform": "T_camera_target",
-            "primary_equation": "p_target = T_target_camera @ p_camera",
-            "inverse_equation": "p_camera = T_camera_target @ p_target",
+            "primary_transform": "T_rig_camera",
+            "inverse_transform": "T_camera_rig",
+            "primary_equation": "p_rig = T_rig_camera @ p_camera",
+            "inverse_equation": "p_camera = T_camera_rig @ p_rig",
+            "note": "For TSDF fusion, transform each camera's points to rig_frame using T_rig_camera",
         },
         "ba_stats": {
             "initial_cost": ba_output.get("initial_cost"),

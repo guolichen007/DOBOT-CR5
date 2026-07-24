@@ -30,6 +30,7 @@
     <param name="timeout_s" value="15.0"/>
     <param name="sync_slop_s" value="0.05"/>
     <param name="cross_sync_slop_s" value="0.033"/>
+    <param name="max_inter_camera_skew_s" value="0.005"/>
     <param name="max_color_depth_skew_s" value="0.030"/>
     <param name="max_camera_info_skew_s" value="0.030"/>
     <param name="require_extrinsics" value="false"/>

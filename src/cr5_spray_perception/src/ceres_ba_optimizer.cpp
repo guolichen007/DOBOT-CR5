@@ -15,6 +15,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -92,6 +93,13 @@ struct ReprojectionError {
     T cam_q_conj[4] = { cam_pose[0], -cam_pose[1], -cam_pose[2], -cam_pose[3] };
     T pc[3];
     ceres::QuaternionRotatePoint(cam_q_conj, pc_minus, pc);
+
+    // 深度保护: z ≤ 0 时返回大残差, 避免除零/负深度
+    if (pc[2] <= T(1e-6)) {
+      residual[0] = T(1e6);
+      residual[1] = T(1e6);
+      return true;
+    }
 
     T u_pred = T(fx_) * pc[0] / pc[2] + T(cx_);
     T v_pred = T(fy_) * pc[1] / pc[2] + T(cy_);
@@ -204,9 +212,42 @@ int main(int argc, char** argv) {
   ceres::Solve(options, &problem, &summary);
   auto t1 = std::chrono::steady_clock::now();
 
+  // — 逐残差评估 (per-camera RMSE, max residual) —
+  std::map<int, std::vector<double>> cam_errors;  // camera_idx → per-residual errors
+  double total_sq_error = 0.0, max_error = 0.0;
+  int total_residual_pairs = 0;
+
+  ceres::Problem::EvaluateOptions eval_opts;
+  eval_opts.apply_loss_function = false;  // raw residual
+  std::vector<double> residuals;
+  problem.Evaluate(eval_opts, nullptr, &residuals, nullptr, nullptr);
+
+  // 按观测顺序评估 (与添加顺序一致)
+  int residual_idx = 0;
+  for (auto& obs : jobs) {
+    int cam_idx = obs.at("camera_idx").get<int>();
+    auto& img = obs.at("img_pts");
+    int n_pts = static_cast<int>(img.size()) / 2;
+    for (int k = 0; k < n_pts; ++k) {
+      if (residual_idx * 2 + 1 < static_cast<int>(residuals.size())) {
+        double e_u = residuals[residual_idx * 2];
+        double e_v = residuals[residual_idx * 2 + 1];
+        double e_px = std::sqrt(e_u * e_u + e_v * e_v);
+        cam_errors[cam_idx].push_back(e_px);
+        total_sq_error += e_px * e_px;
+        max_error = std::max(max_error, e_px);
+        ++total_residual_pairs;
+      }
+      ++residual_idx;
+    }
+  }
+
+  double overall_rmse = total_residual_pairs > 0
+      ? std::sqrt(total_sq_error / total_residual_pairs) : 0.0;
+
   // — 构建输出 JSON —
   json output;
-  output["success"] = summary.IsSolutionUsable();
+  output["success"] = summary.IsSolutionUsable() && overall_rmse < 10.0;
   output["initial_cost"] = summary.initial_cost;
   output["final_cost"] = summary.final_cost;
   output["iterations"] = static_cast<int>(
@@ -214,6 +255,30 @@ int main(int argc, char** argv) {
           ? summary.iterations.back().iteration : 0);
   output["time_ms"] = std::chrono::duration<double, std::milli>(t1 - t0).count();
   output["message"] = summary.message;
+  output["overall_rmse_px"] = overall_rmse;
+  output["max_residual_px"] = max_error;
+  output["n_observations"] = total_residual_pairs;
+
+  // per-camera RMSE
+  json per_cam_rmse = json::object();
+  for (auto& kv : cam_errors) {
+    auto& errors = kv.second;
+    if (errors.empty()) continue;
+    double sum_sq = 0.0;
+    for (double e : errors) sum_sq += e * e;
+    double rmse = std::sqrt(sum_sq / errors.size());
+    // 找到相机名
+    std::string cam_name = "cam_" + std::to_string(kv.first);
+    if (kv.first < n_cameras) {
+      cam_name = jcameras[kv.first]["name"];
+    }
+    per_cam_rmse[cam_name] = {
+      {"rmse_px", rmse},
+      {"n_residuals", errors.size()},
+      {"max_error_px", *std::max_element(errors.begin(), errors.end())}
+    };
+  }
+  output["per_camera_rmse"] = per_cam_rmse;
 
   // 相机结果
   json out_cameras = json::array();

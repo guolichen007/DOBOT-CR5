@@ -2,29 +2,31 @@
 """
 多帧标定采集 + PnP + Bundle Adjustment 工作流.
 
-交互式引导: 移动标定目标 → 采集同步帧组 → 检测 ChArUco/AprilTag → PnP.
-累计 N 组后自动运行 Ceres Bundle Adjustment, 输出精化外参.
+修复 (P0-1~P0-7):
+  P0-1: 读取 JointCaptureManager 保存的同步帧组图像 (非 rospy.wait_for_message)
+  P0-2: 合并各面检测结果为相机级 obj_pts/img_pts (BA 兼容格式)
+  P0-3: 使用整数 group ID
+  P0-4: 将面板局部坐标转换到 calibration_target_frame
+  P0-5: 每帧每相机运行 solvePnP 计算 T_camera_target 初值
+  P0-6: 恒等四元数 [1,0,0,0]
+  P0-7: 输出 T_rig_camera (rig=第一台相机 optical frame)
 
 用法:
   rosrun cr5_spray_perception run_multi_frame_calibration.py \
     --num-groups 10 --output artifacts/calibration
 """
-import sys, os, json, time, math, argparse
-import yaml, numpy as np
+import sys, os, json, time, math, argparse, glob
+import yaml
+import numpy as np
+import cv2
+from cv2 import aruco
 import rospy
 from std_srvs.srv import Trigger
 from datetime import datetime
 
-# 复用 estimate_camera_extrinsics 的检测逻辑
-_est_path = os.path.join(os.path.dirname(__file__),
-                         "estimate_camera_extrinsics.py")
-
-# 直接导入检测函数 (避免重复定义)
-import cv2
-from cv2 import aruco
 from cr5_spray_perception import aruco_compat
 
-# 面板定义 (与 estimate_camera_extrinsics.py 保持一致)
+# ── 面板定义 ──
 CHARUCO_FACES = {
     "front": {"sx": 8, "sy": 6, "sq_m": 0.027, "mk_m": 0.020,
               "dict_id": aruco.DICT_5X5_1000, "id_start": 100,
@@ -49,6 +51,73 @@ APRILTAG_FACES = {
 
 CAMERAS = ["cam_front_left", "cam_front_right", "cam_rear"]
 
+# ── 从 calibration_target.yaml 硬编码的面板位姿 ──
+# pose_target: T_target_face — 将面板局部坐标转换到 calibration_target_frame
+FACE_POSES_TARGET = {
+    "front": {"xyz": [0.171, 0.0, 0.0],     "rpy": [0.0,  math.pi/2, 0.0]},
+    "left":  {"xyz": [0.0, 0.141, 0.0],     "rpy": [-math.pi/2, 0.0, 0.0]},
+    "right": {"xyz": [0.0, -0.141, 0.0],    "rpy": [math.pi/2, 0.0, 0.0]},
+    "top":   {"xyz": [0.0, 0.0, 0.121],     "rpy": [0.0, 0.0, 0.0]},
+    "back":  {"xyz": [-0.171, 0.0, 0.0],    "rpy": [0.0, -math.pi/2, 0.0]},
+}
+
+
+def _euler_matrix(ai, aj, ak):
+    """tf.transformations.euler_matrix 等价实现, 避免 ROS tf 依赖."""
+    from math import cos, sin
+    Rx = np.array([[1, 0, 0], [0, cos(ai), -sin(ai)], [0, sin(ai), cos(ai)]])
+    Ry = np.array([[cos(aj), 0, sin(aj)], [0, 1, 0], [-sin(aj), 0, cos(aj)]])
+    Rz = np.array([[cos(ak), -sin(ak), 0], [sin(ak), cos(ak), 0], [0, 0, 1]])
+    R = Rz @ Ry @ Rx
+    T = np.eye(4)
+    T[:3, :3] = R
+    return T
+
+
+def _quaternion_from_matrix(T):
+    """从 4x4 旋转矩阵提取四元数 [x,y,z,w]."""
+    R = np.asarray(T[:3, :3], dtype=np.float64)
+    q = np.empty(4)
+    t = R.trace()
+    if t > 0:
+        s = 0.5 / math.sqrt(t + 1.0)
+        q[3] = 0.25 / s
+        q[0] = (R[2,1] - R[1,2]) * s
+        q[1] = (R[0,2] - R[2,0]) * s
+        q[2] = (R[1,0] - R[0,1]) * s
+    else:
+        if R[0,0] > R[1,1] and R[0,0] > R[2,2]:
+            s = 2.0 * math.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
+            q[3] = (R[2,1] - R[1,2]) / s
+            q[0] = 0.25 * s
+            q[1] = (R[0,1] + R[1,0]) / s
+            q[2] = (R[0,2] + R[2,0]) / s
+        elif R[1,1] > R[2,2]:
+            s = 2.0 * math.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
+            q[3] = (R[0,2] - R[2,0]) / s
+            q[0] = (R[0,1] + R[1,0]) / s
+            q[1] = 0.25 * s
+            q[2] = (R[1,2] + R[2,1]) / s
+        else:
+            s = 2.0 * math.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
+            q[3] = (R[1,0] - R[0,1]) / s
+            q[0] = (R[0,2] + R[2,0]) / s
+            q[1] = (R[1,2] + R[2,1]) / s
+            q[2] = 0.25 * s
+    return [float(v) for v in q]
+
+
+def build_T_target_face(face_name):
+    """构建 T_target_face 4x4 矩阵."""
+    p = FACE_POSES_TARGET[face_name]
+    T = _euler_matrix(p["rpy"][0], p["rpy"][1], p["rpy"][2])
+    T[:3, 3] = p["xyz"]
+    return T
+
+
+# 预构建
+T_TARGET_FACE = {name: build_T_target_face(name) for name in FACE_POSES_TARGET}
+
 # 预创建 Charuco boards
 for v in CHARUCO_FACES.values():
     v["board"] = aruco.CharucoBoard_create(
@@ -56,11 +125,20 @@ for v in CHARUCO_FACES.values():
         aruco.getPredefinedDictionary(v["dict_id"]))
 
 
+# ═══════════════════════════════════════════════════════════════
+# 检测
+# ═══════════════════════════════════════════════════════════════
+
 def detect_on_image(cv_img, K, D):
-    """对单张图像检测所有 ChArUco/AprilTag 面."""
+    """检测所有 ChArUco/AprilTag 面, 返回 face-keyed 检测结果.
+
+    返回格式: {face_name: {object_points_3d_face, image_points_2d, corner_count}}
+    object_points_3d_face: 面板局部坐标系 (z=0 平面)
+    """
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
     results = {}
 
+    # ── ChArUco 面 ──
     for fk, fc in CHARUCO_FACES.items():
         board = fc["board"]
         id_start = fc["id_start"]
@@ -69,7 +147,7 @@ def detect_on_image(cv_img, K, D):
         corners, ids, rejected = aruco_compat.detect_markers(
             gray, board.dictionary, params)
 
-        obj_pts_list, img_pts_list = [], []
+        obj_pts_face, img_pts_face = [], []
         if ids is not None:
             ids_flat = [int(i) for i in ids.flatten()]
             idx_list, local_ids = aruco_compat.remap_custom_ids(
@@ -87,19 +165,16 @@ def detect_on_image(cv_img, K, D):
                     board_pts[:, 0] -= bw / 2.0
                     board_pts[:, 1] -= bh / 2.0
                     cids_flat = [int(i) for i in cids.flatten()]
-                    obj_pts = np.array([board_pts[i] for i in cids_flat],
-                                       dtype=np.float32)
-                    img_pts = cc.reshape(-1, 2).astype(np.float32)
-                    obj_pts_list = obj_pts.tolist()
-                    img_pts_list = img_pts.tolist()
+                    obj_pts_face = [board_pts[i].tolist() for i in cids_flat]
+                    img_pts_face = cc.reshape(-1, 2).astype(np.float32).tolist()
 
         results[fk] = {
-            "object_points_3d": obj_pts_list,
-            "image_points_2d": img_pts_list,
-            "corner_count": len(obj_pts_list),
+            "object_points_3d_face": obj_pts_face,
+            "image_points_2d": img_pts_face,
+            "corner_count": len(obj_pts_face),
         }
 
-    # AprilTag
+    # ── AprilTag 面 ──
     tag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
     params = aruco_compat.detector_parameters()
     params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
@@ -107,7 +182,7 @@ def detect_on_image(cv_img, K, D):
         gray, tag_dict, params)
 
     for fk, fc in APRILTAG_FACES.items():
-        obj_pts_list, img_pts_list = [], []
+        obj_pts_face, img_pts_face = [], []
         if ids is not None:
             ids_flat = [int(i) for i in ids.flatten()]
             for i, tid in enumerate(ids_flat):
@@ -115,28 +190,177 @@ def detect_on_image(cv_img, K, D):
                     continue
                 pos = fc["positions"][tid]
                 half = fc["tag_size"] / 2.0
-                tag_obj = np.array([
+                tag_obj = [
                     [pos[0]-half, pos[1]+half, 0],
                     [pos[0]+half, pos[1]+half, 0],
                     [pos[0]+half, pos[1]-half, 0],
                     [pos[0]-half, pos[1]-half, 0],
-                ], dtype=np.float32)
-                obj_pts_list.extend(tag_obj.tolist())
-                img_pts_list.extend(corners[i][0].tolist())
+                ]
+                obj_pts_face.extend(tag_obj)
+                img_pts_face.extend([corners[i][0].tolist()])
 
         results[fk] = {
-            "object_points_3d": obj_pts_list,
-            "image_points_2d": img_pts_list,
-            "corner_count": len(obj_pts_list),
+            "object_points_3d_face": obj_pts_face,
+            "image_points_2d": img_pts_face,
+            "corner_count": len(obj_pts_face),
         }
 
     return results
 
 
+# ═══════════════════════════════════════════════════════════════
+# 坐标转换 + PnP
+# ═══════════════════════════════════════════════════════════════
+
+def transform_points_to_target(obj_pts_face, face_name):
+    """将面板局部 3D 点转换到 calibration_target_frame."""
+    if not obj_pts_face:
+        return []
+    T = T_TARGET_FACE[face_name]
+    result = []
+    for pt in obj_pts_face:
+        p_h = np.array([pt[0], pt[1], pt[2], 1.0])
+        p_t = T @ p_h
+        result.append([float(p_t[0]), float(p_t[1]), float(p_t[2])])
+    return result
+
+
+def merge_face_detections_to_target(detection):
+    """合并所有面的检测结果到统一的 calibration_target_frame.
+
+    Returns:
+        obj_pts_target: 所有面板点在 target 坐标系中的 3D 坐标
+        img_pts: 对应的 2D 像素坐标
+        face_counts: {face_name: corner_count}
+    """
+    all_obj = []
+    all_img = []
+    face_counts = {}
+    for fk, fd in detection.items():
+        obj_face = fd.get("object_points_3d_face", [])
+        img_face = fd.get("image_points_2d", [])
+        if not obj_face:
+            continue
+        # P0-4: 转换到 target 坐标系
+        obj_target = transform_points_to_target(obj_face, fk)
+        all_obj.extend(obj_target)
+        all_img.extend(img_face)
+        face_counts[fk] = len(obj_target)
+    return all_obj, all_img, face_counts
+
+
+def undistort_points(img_pts, K, D):
+    """去畸变像素坐标, 使 Ceres BA 可以使用纯针孔模型."""
+    if not img_pts or D is None or np.all(np.array(D) == 0):
+        return img_pts
+    pts = np.array(img_pts, dtype=np.float32).reshape(-1, 1, 2)
+    K_arr = np.array(K, dtype=np.float64).reshape(3, 3)
+    D_arr = np.array(D, dtype=np.float64).reshape(-1)
+    # undistortPoints + 还原到像素坐标
+    undistorted = cv2.undistortPoints(pts, K_arr, D_arr, P=K_arr)
+    return undistorted.reshape(-1, 2).tolist()
+
+
+def solve_pnp(obj_pts, img_pts, K, D):
+    """PnP: 计算 T_camera_target.
+
+    Returns:
+        T_cam_target: 4x4 变换矩阵 (camera → target)
+        rvec, tvec: OpenCV 格式
+        stats: dict with inliers, rmse_px
+        None 如果失败
+    """
+    if len(obj_pts) < 4:
+        return None, None, None, None
+
+    obj = np.array(obj_pts, dtype=np.float32).reshape(-1, 3)
+    img = np.array(img_pts, dtype=np.float32).reshape(-1, 2)
+    K_arr = np.array(K, dtype=np.float64).reshape(3, 3)
+    D_arr = np.array(D, dtype=np.float64).reshape(-1) if D is not None else np.zeros(4)
+
+    # EPNP + RANSAC
+    ok, rvec, tvec, inliers = cv2.solvePnPRansac(
+        obj, img, K_arr, D_arr,
+        flags=cv2.SOLVEPNP_EPNP, reprojectionError=3.0,
+        confidence=0.99, iterationsCount=100)
+    if not ok or inliers is None or len(inliers) < 4:
+        return None, None, None, {"error": "PnP RANSAC failed"}
+
+    # LM 精化
+    rvec, tvec = cv2.solvePnPRefineLM(
+        obj, img, K_arr, D_arr, rvec, tvec,
+        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-6))
+
+    # 重投影误差
+    proj, _ = cv2.projectPoints(obj, rvec, tvec, K_arr, D_arr)
+    errors = np.linalg.norm(img - proj.reshape(-1, 2), axis=1)
+    rmse = float(np.sqrt(np.mean(errors ** 2)))
+
+    R, _ = cv2.Rodrigues(rvec)
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = tvec.flatten()
+
+    return T, rvec, tvec, {
+        "inliers": int(len(inliers)), "n_pts": len(obj_pts),
+        "rmse_px": rmse, "max_error_px": float(np.max(errors)),
+    }
+
+
+def T_to_quat_trans(T):
+    """从 4x4 矩阵提取 [qw,qx,qy,qz,tx,ty,tz] (Ceres 格式)."""
+    q = _quaternion_from_matrix(T)
+    return [q[3], q[0], q[1], q[2],
+            float(T[0, 3]), float(T[1, 3]), float(T[2, 3])]
+
+
+def T_to_rvec_tvec(T):
+    """从 4x4 矩阵提取 rvec, tvec."""
+    rvec = cv2.Rodrigues(T[:3, :3])[0].flatten().tolist()
+    tvec = T[:3, 3].flatten().tolist()
+    return rvec, tvec
+
+
+def compute_rig_poses(pnp_results):
+    """从各相机的 T_camera_target 计算 T_rig_camera.
+
+    rig = 第一台相机 (CAMERAS[0]) 的 optical frame.
+    T_rig_cam0 = I (规范固定).
+    T_rig_target = T_cam0_target (第一帧时 rig=target 的相对位姿从 cam0 的 PnP 获得).
+    T_rig_cami = T_rig_target @ inv(T_cami_target).
+
+    Returns:
+        T_rig_cameras: {cam_name: 4x4}
+        T_rig_target: 4x4
+    """
+    T_cam0_target = pnp_results.get(CAMERAS[0])
+    if T_cam0_target is None:
+        return None, None
+
+    T_rig_cam0 = np.eye(4)
+    T_rig_target = T_cam0_target.copy()  # 当 rig=cam0: T_rig_target = T_cam0_target
+
+    T_rig_cameras = {CAMERAS[0]: T_rig_cam0}
+
+    for cam in CAMERAS[1:]:
+        T_cami_target = pnp_results.get(cam)
+        if T_cami_target is None:
+            continue
+        T_rig_cami = T_rig_target @ np.linalg.inv(T_cami_target)
+        T_rig_cameras[cam] = T_rig_cami
+
+    return T_rig_cameras, T_rig_target
+
+
+# ═══════════════════════════════════════════════════════════════
+# 主流程
+# ═══════════════════════════════════════════════════════════════
+
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Multi-frame calibration with PnP + Ceres BA")
     parser.add_argument("--num-groups", type=int, default=10,
-                        help="number of frame groups to capture")
+                        help="number of sync frame groups to capture")
     parser.add_argument("--output", default="artifacts/calibration",
                         help="output directory")
     args = parser.parse_args(rospy.myargv()[1:])
@@ -146,7 +370,7 @@ def main():
 
     os.makedirs(args.output, exist_ok=True)
 
-    # 等待服务
+    # ── 等待 joint_capture_manager 服务 ──
     svc_name = "/joint_capture_manager/capture_sync_group"
     rospy.loginfo("Waiting for %s ...", svc_name)
     try:
@@ -157,38 +381,38 @@ def main():
 
     capture_svc = rospy.ServiceProxy(svc_name, Trigger)
 
-    # 累积观测
-    accumulated = {
-        "cameras": {},
-        "observations": {},
-    }
-
-    # 初始化相机内参
+    # ── 读取相机内参 ──
+    from sensor_msgs.msg import CameraInfo
+    camera_infos = {}
     for cam in CAMERAS:
         try:
-            from sensor_msgs.msg import CameraInfo
             info = rospy.wait_for_message(
                 "/{}/camera/color/camera_info".format(cam), CameraInfo, timeout=5.0)
             K = np.array(info.K).reshape(3, 3)
             D = np.array(info.D) if info.D else np.zeros(4)
-            accumulated["cameras"][cam] = {
-                "K": K.tolist(),
-                "D": D.tolist(),
-                "rvec_init": [0, 0, 0],
-                "tvec_init": [0, 0, 0],
-            }
+            camera_infos[cam] = {"K": K.tolist(), "D": D.tolist(),
+                                  "width": info.width, "height": info.height}
             rospy.loginfo("%s: K=[%.1f, %.1f] %dx%d",
-                          cam, K[0,0], K[1,1], info.width, info.height)
+                          cam, K[0, 0], K[1, 1], info.width, info.height)
         except Exception as e:
             rospy.logerr("%s CameraInfo failed: %s", cam, e)
             sys.exit(1)
 
     # ── 多帧采集循环 ──
     print("\n" + "=" * 60)
-    print("  Multi-Frame Calibration Capture")
+    print("  Multi-Frame Calibration Capture (Fixed P0 issues)")
     print("  Target: {} sync frame groups".format(args.num_groups))
     print("  Cameras: {}".format(CAMERAS))
     print("=" * 60 + "\n")
+
+    accumulated = {
+        "cameras": {},
+        "observations": {},
+    }
+
+    # 相机初始位姿 (跨帧累积, 第一帧后固定)
+    camera_initial_poses = {}
+    rig_frame = "{}_color_optical_frame".format(CAMERAS[0])
 
     for group_idx in range(args.num_groups):
         print("\n--- Group {}/{} ---".format(group_idx + 1, args.num_groups))
@@ -199,7 +423,7 @@ def main():
             print("\nAborted.")
             break
 
-        # 采集同步帧组
+        # ── P0-1: 调用采集服务, 解析 group_dir ──
         print("Capturing sync group...")
         resp = capture_svc()
         if not resp.success:
@@ -210,61 +434,141 @@ def main():
             if not resp.success:
                 print("  Skipping group {}".format(group_idx))
                 continue
-        print("  OK: {}".format(resp.message))
 
-        # PnP 检测 (从已保存的图像中检测)
+        # 从 response message 解析 group_dir
+        group_dir = None
+        msg = resp.message
+        if msg.startswith("GROUP_DIR:"):
+            parts = msg.split("|", 1)
+            group_dir = parts[0].replace("GROUP_DIR:", "")
+            clean_msg = parts[1] if len(parts) > 1 else msg
+        else:
+            clean_msg = msg
+        print("  OK: {}".format(clean_msg))
+
+        if group_dir is None or not os.path.isdir(group_dir):
+            print("  ERROR: cannot determine group_dir from service response")
+            continue
+
+        # ── P0-1: 从保存的同步组读取图像 ──
         group_data = {}
         group_pass = True
+        pnp_results = {}  # {cam: T_camera_target}
 
         for cam in CAMERAS:
-            # 读取刚保存的图像
-            import glob
-            group_dirs = sorted(glob.glob(
-                os.path.join(os.path.expanduser("~/cr5_spray_data"),
-                             "*", "groups", "group_*")))
-            # 直接用 rostopic 获取最新图像
-            from sensor_msgs.msg import Image
-            from cv_bridge import CvBridge
-            bridge = CvBridge()
-            try:
-                color_msg = rospy.wait_for_message(
-                    "/{}/camera/color/image_raw".format(cam), Image, timeout=5.0)
-                cv_img = bridge.imgmsg_to_cv2(color_msg, "bgr8")
-            except Exception as e:
-                print("  {}: image failed - {}".format(cam, e))
+            color_path = os.path.join(group_dir, cam, "color.png")
+            if not os.path.exists(color_path):
+                print("  {}: color.png not found at {}".format(cam, color_path))
                 group_pass = False
                 continue
 
-            K = np.array(accumulated["cameras"][cam]["K"]).reshape(3, 3)
-            D = np.array(accumulated["cameras"][cam].get("D", [0,0,0,0]))
+            cv_img = cv2.imread(color_path)
+            if cv_img is None:
+                print("  {}: cv2.imread failed".format(cam))
+                group_pass = False
+                continue
 
+            K = camera_infos[cam]["K"]
+            D = camera_infos[cam]["D"]
+
+            # 检测
             detection = detect_on_image(cv_img, K, D)
 
-            total_corners = sum(
-                d.get("corner_count", 0) for d in detection.values())
-            detected_faces = [k for k, d in detection.items()
-                            if d.get("corner_count", 0) >= 4]
-            group_data[cam] = detection
-            face_str = ",".join(detected_faces) if detected_faces else "none"
-            status = "✓" if detected_faces else "✗"
-            print("  {}: {} corners, faces=[{}] {}".format(
-                cam, total_corners, face_str, status))
-            if not detected_faces:
-                group_pass = False
+            # ── P0-4: 面板局部坐标 → calibration_target_frame → 合并 ──
+            obj_pts_target, img_pts_raw, face_counts = \
+                merge_face_detections_to_target(detection)
 
-        # 保存组数据
-        if group_pass:
-            group_id = "group_{:04d}".format(group_idx)
-            accumulated["observations"][group_id] = group_data
-            print("  Group {}: PASS".format(group_idx + 1))
+            total_corners = sum(face_counts.values())
+            detected_faces = [k for k, v in face_counts.items() if v >= 4]
+            face_str = ",".join(detected_faces) if detected_faces else "none"
+
+            if total_corners < 4:
+                print("  {}: {} corners (<4), faces=[{}] ✗".format(
+                    cam, total_corners, face_str))
+                group_pass = False
+                continue
+
+            # P0-5: 去畸变 → PnP → T_camera_target
+            img_pts_undist = undistort_points(img_pts_raw, K, D)
+            T_cam_target, rvec, tvec, pnp_stats = solve_pnp(
+                obj_pts_target, img_pts_undist, K, None)  # D=None (已去畸变)
+
+            if T_cam_target is None:
+                print("  {}: {} corners, faces=[{}] — PnP FAIL: {}".format(
+                    cam, total_corners, face_str, pnp_stats.get("error", "unknown")))
+                group_pass = False
+                continue
+
+            pnp_results[cam] = T_cam_target
+
+            status = "✓" if detected_faces else "✗"
+            print("  {}: {} corners, faces=[{}], PnP RMSE={:.2f}px {} {}".format(
+                cam, total_corners, face_str,
+                pnp_stats.get("rmse_px", 99), status,
+                "(undistorted)" if D is not None and np.any(np.array(D) != 0) else ""))
+
+            # ── P0-2: 存储合并后的相机级观测 ──
+            group_data[cam] = {
+                "object_points_3d": obj_pts_target,
+                "image_points_2d": img_pts_undist,  # 去畸变后
+                "corner_count": total_corners,
+                "face_counts": face_counts,
+                "pnp_stats": pnp_stats,
+            }
+
+        if not group_pass:
+            print("  Group {}: FAIL (not all cameras passed)".format(group_idx + 1))
+            continue
+
+        # ── P0-5: 计算 T_rig_camera 初值 ──
+        T_rig_cameras, T_rig_target = compute_rig_poses(pnp_results)
+        if T_rig_cameras is None:
+            print("  Group {}: FAIL (cannot compute rig poses)".format(group_idx + 1))
+            continue
+
+        # 第一帧后固定相机初值
+        if group_idx == 0:
+            for cam in CAMERAS:
+                T_rc = T_rig_cameras.get(cam)
+                if T_rc is not None:
+                    rv, tv = T_to_rvec_tvec(T_rc)
+                    camera_initial_poses[cam] = {
+                        "initial_pose": T_to_quat_trans(T_rc),
+                        "rvec_init": rv,
+                        "tvec_init": tv,
+                    }
+
+        # 存储目标初始位姿 (T_rig_target)
+        group_data["target_initial_pose"] = T_to_quat_trans(T_rig_target)
+
+        # ── P0-3: 使用整数 group ID ──
+        accumulated["observations"][group_idx] = group_data
+        print("  Group {}: PASS ({} cameras, target pose initialized)".format(
+            group_idx + 1, len(pnp_results)))
+
+    # ── 填写相机信息 (含初值) ──
+    for cam in CAMERAS:
+        cam_entry = {
+            "K": camera_infos[cam]["K"],
+            "D": camera_infos[cam]["D"],
+            "width": camera_infos[cam]["width"],
+            "height": camera_infos[cam]["height"],
+        }
+        if cam in camera_initial_poses:
+            cam_entry.update(camera_initial_poses[cam])
         else:
-            print("  Group {}: FAIL (not all cameras detected)".format(group_idx + 1))
+            # fallback: 恒等初值
+            cam_entry["initial_pose"] = [1, 0, 0, 0, 0, 0, 0]
+            cam_entry["rvec_init"] = [0, 0, 0]
+            cam_entry["tvec_init"] = [0, 0, 0]
+        accumulated["cameras"][cam] = cam_entry
 
     # ── 保存累积观测 ──
     obs_path = os.path.join(args.output, "accumulated_observations.yaml")
     with open(obs_path, "w") as f:
         yaml.dump(accumulated, f, default_flow_style=False)
-    print("\nObservations saved: {}".format(obs_path))
+    print("\nObservations saved: {} ({} groups)".format(
+        obs_path, len(accumulated["observations"])))
 
     # ── 运行 Bundle Adjustment ──
     n_groups = len(accumulated["observations"])
@@ -286,6 +590,7 @@ def main():
     if result.returncode == 0:
         print("\n" + "=" * 60)
         print("  CALIBRATION COMPLETE")
+        print("  Rig frame: {}".format(rig_frame))
         print("  Extrinsics: {}".format(
             os.path.join(ba_dir, "initial_extrinsics.yaml")))
         print("=" * 60)
