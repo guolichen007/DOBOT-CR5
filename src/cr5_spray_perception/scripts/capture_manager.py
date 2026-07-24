@@ -75,10 +75,21 @@ def _atomic_write_json(filepath, data):
 
 
 def _atomic_write_npy(filepath, arr):
-    """原子写入 NPY."""
+    """原子写入 NPY — 使用文件句柄避免 np.save 自动追加 .npy 扩展名."""
     tmp = filepath + ".tmp"
-    np.save(tmp, arr)
-    os.replace(tmp, filepath)
+    try:
+        with open(tmp, "wb") as f:
+            np.save(f, arr)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, filepath)
+    except Exception:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _msg_timestamp_secs(msg):
@@ -200,9 +211,10 @@ class CaptureManager:
 
         # ── 线程安全 ──
         self._sync_lock = threading.Lock()
-        # 采集 token/generation, 避免旧消息进入新 snapshot
+        self._capture_request_lock = threading.Lock()
+        # 采集激活标志 + 时间窗口, 避免旧消息进入新 snapshot
         self._capture_active = False
-        self._capture_gen = 0
+        self._capture_started_ros = None  # rospy.Time
 
         self.run_dir = os.path.join(self.output_dir, self.run_id)
         self.views_dir = os.path.join(self.run_dir, "views")
@@ -287,11 +299,19 @@ class CaptureManager:
     # ------------------------------------------------------------------
 
     def _make_sync_cb(self, cam):
-        """创建闭包捕获 cam 名称."""
+        """创建闭包捕获 cam 名称. 只接受采集开始时间之后的消息."""
         def cb(color_msg, depth_msg, color_info_msg, depth_info_msg):
             with self._sync_lock:
                 if not self._capture_active:
                     return
+                # 时间窗口检查: 拒绝采集开始前的旧消息
+                if self._capture_started_ros is not None:
+                    c_ts = color_msg.header.stamp
+                    d_ts = depth_msg.header.stamp
+                    # ROS Time 比较: 允许 1ms 容差
+                    if (c_ts < self._capture_started_ros - rospy.Duration(0.001) or
+                            d_ts < self._capture_started_ros - rospy.Duration(0.001)):
+                        return
                 self._sync_data[cam] = (
                     color_msg, depth_msg, color_info_msg, depth_info_msg)
         return cb
@@ -481,12 +501,24 @@ class CaptureManager:
 
         Returns: (success: bool, message: str, view_dir: str)
         """
+        # ── 串行化采集请求 ──
+        if not self._capture_request_lock.acquire(blocking=False):
+            msg = "capture already in progress — reject concurrent request"
+            rospy.logwarn(msg)
+            return False, msg, ""
+        try:
+            return self._capture_view_impl(mode)
+        finally:
+            self._capture_request_lock.release()
+
+    def _capture_view_impl(self, mode):
+        """capture_view 的内部实现 (调用者已持有 _capture_request_lock)."""
         rospy.loginfo("Capturing view (mode=%s, strict 4-way sync)...", mode)
 
-        # ── 清空旧数据 + 激活采集 ──
+        # ── 清空旧数据 + 激活采集 + 记录时间窗口 ──
         with self._sync_lock:
             self._capture_active = True
-            self._capture_gen += 1
+            self._capture_started_ros = rospy.Time.now()
             for cam in self.camera_names:
                 self._sync_data[cam] = None
 
@@ -498,8 +530,9 @@ class CaptureManager:
                 if self._all_synced():
                     break
                 if time.time() - t_start > self.timeout_s:
-                    ready = sum(1 for v in self._sync_data.values()
-                                if v is not None)
+                    with self._sync_lock:
+                        ready = sum(1 for v in self._sync_data.values()
+                                    if v is not None)
                     msg = (f"Timeout waiting for synced data: {ready}/"
                            f"{self.expected_camera_count} cameras after "
                            f"{self.timeout_s:.0f}s")
@@ -514,6 +547,7 @@ class CaptureManager:
         finally:
             with self._sync_lock:
                 self._capture_active = False
+                self._capture_started_ros = None
 
         view_id = "view_{:04d}".format(len(os.listdir(self.views_dir)))
         view_dir = os.path.join(self.views_dir, view_id)
@@ -549,10 +583,18 @@ class CaptureManager:
                     errors.append(f"{cam}: {cinfo_checks['error']}")
                     continue
 
-                # ── 保存 color ──
+                # ── 保存 color (原子写入, 检查返回值) ──
                 color_img = self.bridge.imgmsg_to_cv2(color_msg, "rgb8")
-                cv2.imwrite(os.path.join(cam_dir, "color.png"),
-                            cv2.cvtColor(color_img, cv2.COLOR_RGB2BGR))
+                color_bgr = cv2.cvtColor(color_img, cv2.COLOR_RGB2BGR)
+                color_path = os.path.join(cam_dir, "color.png")
+                color_tmp = color_path + ".tmp.png"
+                ok = cv2.imwrite(color_tmp, color_bgr)
+                if not ok:
+                    raise IOError(f"cv2.imwrite failed for {color_path}")
+                # fsync through file handle
+                with open(color_tmp, "rb") as _f:
+                    os.fsync(_f.fileno())
+                os.replace(color_tmp, color_path)
 
                 # ── 保存 depth ──
                 depth_img = self.bridge.imgmsg_to_cv2(
