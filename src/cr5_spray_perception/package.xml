@@ -20,6 +20,11 @@
   <depend>camera_info_manager</depend>
   <depend>message_filters</depend>
   <depend>rospkg</depend>
+  <depend>roscpp</depend>
+
+  <!-- C++ deps -->
+  <build_depend>libceres-dev</build_depend>
+  <build_depend>nlohmann-json3-dev</build_depend>
 
   <!-- Python deps via requirements.txt -->
   <exec_depend>python3-numpy</exec_depend>
