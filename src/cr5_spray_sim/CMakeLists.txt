@@ -52,6 +52,7 @@ catkin_install_python(PROGRAMS
   scripts/spray_simulator.py
   # 标定目标 (仿真模型职责)
   scripts/publish_calibration_target_frames.py
+  scripts/publish_fixed_camera_frames.py
   scripts/validate_calibration_target_geometry.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

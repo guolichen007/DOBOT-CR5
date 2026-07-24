@@ -113,6 +113,10 @@
     <param name="camera_profile" value="$(arg camera_profile)"/>
   </node>
 
+  <!-- Fixed camera TF (world→camera_link→optical_frame) -->
+  <node name="publish_fixed_camera_frames" pkg="cr5_spray_sim"
+    type="publish_fixed_camera_frames.py" respawn="false" output="screen"/>
+
   <!-- Object yaw control -->
   <node name="control_object_yaw" pkg="cr5_spray_sim"
     type="control_object_yaw.py" output="screen"/>
