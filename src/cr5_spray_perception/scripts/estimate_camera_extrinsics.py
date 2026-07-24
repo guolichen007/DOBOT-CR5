@@ -644,6 +644,40 @@ def _build_truth_comparison(all_results, per_camera_pass):
     return comparison
 
 
+def _write_truth_csv(comparison, output_dir):
+    """从 truth comparison 数据生成 CSV 报告."""
+    import csv
+    csv_path = os.path.join(output_dir, "gazebo_truth_comparison.csv")
+    fieldnames = [
+        "camera", "selected_panel", "point_count", "inlier_count",
+        "inlier_ratio", "rmse_px", "translation_error_mm",
+        "rotation_error_deg", "grade",
+    ]
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for cam_name in sorted(comparison.get("cameras", {}).keys()):
+            entry = comparison["cameras"][cam_name]
+            row = {
+                "camera": cam_name,
+                "selected_panel": entry.get("selected_panel", "none"),
+                "point_count": entry.get("point_count", ""),
+                "inlier_count": entry.get("inlier_count", ""),
+                "inlier_ratio": entry.get("inlier_ratio", ""),
+                "rmse_px": entry.get("rmse_px", ""),
+                "translation_error_mm": "",
+                "rotation_error_deg": "",
+                "grade": entry.get("grade", "N/A"),
+            }
+            if entry.get("errors"):
+                row["translation_error_mm"] = entry["errors"].get(
+                    "translation_error_mm", "")
+                row["rotation_error_deg"] = entry["errors"].get(
+                    "rotation_error_deg", "")
+            writer.writerow(row)
+    return csv_path
+
+
 def build_standard_extrinsics_yaml(all_results, per_camera_pass):
     """
     构建符合 CaptureManager 消费端 schema 的 initial_extrinsics.yaml.
@@ -778,12 +812,24 @@ def main():
     with open(os.path.join(args.output, "reprojection_report.json"), "w") as f:
         json.dump(reproj, f, indent=2)
 
-    # 4. gazebo_truth_comparison.json: 完整 truth 对比 (Commit 7 增强)
+    # 4. gazebo_truth_comparison.json + CSV: 完整 truth 对比
     if args.truth_source == "gazebo":
         all_results["truth_source"] = "gazebo"
         truth_comparison = _build_truth_comparison(all_results, per_camera_pass)
+
+        # 从 extrinsics_doc 补充 point/inlier/rmse 到 comparison
+        for cam_name, cam_entry in extrinsics_doc.get("cameras", {}).items():
+            if cam_name in truth_comparison.get("cameras", {}):
+                tc = truth_comparison["cameras"][cam_name]
+                tc["point_count"] = cam_entry.get("point_count", 0)
+                tc["inlier_count"] = cam_entry.get("inlier_count", 0)
+                tc["inlier_ratio"] = cam_entry.get("inlier_ratio", 0.0)
+                tc["rmse_px"] = cam_entry.get("reprojection_rmse_px", -1.0)
+
         with open(os.path.join(args.output, "gazebo_truth_comparison.json"), "w") as f:
             json.dump(truth_comparison, f, indent=2)
+        csv_path = _write_truth_csv(truth_comparison, args.output)
+        rospy.loginfo("Truth CSV written: %s", csv_path)
     else:
         all_results["truth_source"] = "none"
         all_results["truth_comparison"] = "unavailable"
