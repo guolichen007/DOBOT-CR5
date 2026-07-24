@@ -435,15 +435,18 @@ class CaptureManager:
             "target_frame": ext_yaml.get("target_frame", "calibration_target_frame"),
         }
 
-        # 提取相机→frame 映射
+        # 提取相机→frame 映射 + 矩阵
         cameras_meta = ext_yaml.get("cameras", {})
         if cameras_meta:
-            meta["cameras"] = {
-                cam: {
+            meta["cameras"] = {}
+            for cam, info in cameras_meta.items():
+                meta["cameras"][cam] = {
                     "optical_frame": info.get("optical_frame", "unknown"),
                 }
-                for cam, info in cameras_meta.items()
-            }
+                # 携带矩阵供严格校验
+                for key in ("T_camera_target", "T_target_camera"):
+                    if key in info:
+                        meta["cameras"][cam][key] = info[key]
 
         # 提取坐标方向契约
         contract = ext_yaml.get("transform_contract", {})
@@ -457,7 +460,6 @@ class CaptureManager:
                     "inverse_equation", "p_camera = T_camera_target @ p_target"),
             }
         else:
-            # 未声明契约时提供默认约定
             meta["transform_contract"] = {
                 "primary_transform": "T_target_camera",
                 "inverse_transform": "T_camera_target",
@@ -465,15 +467,71 @@ class CaptureManager:
                 "inverse_equation": "p_camera = T_camera_target @ p_target",
             }
 
-        # 验证若 require_extrinsics=true，必须包含三台相机
+        # ── require_extrinsics=true 时的严格验证 ──
         if self.require_extrinsics:
+            errors = []
+
+            # schema_version
+            sv = meta.get("schema_version")
+            if sv != 1:
+                errors.append(f"unsupported schema_version: {sv}")
+
+            # status
+            if ext_yaml.get("status", "FAIL") != "PASS":
+                errors.append(f"extrinsics status is {ext_yaml.get('status', 'FAIL')}, "
+                             "require_extrinsics=true requires PASS")
+
+            # target_frame
+            if not meta.get("target_frame"):
+                errors.append("target_frame is empty")
+
+            # 三台相机存在
             expected_cams = set(self.camera_names)
             found_cams = set(meta.get("cameras", {}).keys())
             missing = expected_cams - found_cams
             if missing:
-                rospy.logerr(
-                    "FATAL: require_extrinsics=true but extrinsics file "
-                    "missing cameras: %s", sorted(missing))
+                errors.append(f"missing cameras: {sorted(missing)}")
+
+            # 每台相机严格矩阵验证
+            for cam in expected_cams:
+                cam_meta = meta.get("cameras", {}).get(cam, {})
+                optical = cam_meta.get("optical_frame", "")
+                if not optical:
+                    errors.append(f"{cam}: optical_frame is empty")
+
+                T_ct = cam_meta.get("T_camera_target")
+                T_tc = cam_meta.get("T_target_camera")
+                if T_ct is None or T_tc is None:
+                    errors.append(f"{cam}: missing T_camera_target or T_target_camera")
+                    continue
+
+                T_ct_np = np.array(T_ct, dtype=float)
+                T_tc_np = np.array(T_tc, dtype=float)
+
+                if T_ct_np.shape != (4, 4):
+                    errors.append(f"{cam}: T_camera_target shape {T_ct_np.shape} != (4,4)")
+                if T_tc_np.shape != (4, 4):
+                    errors.append(f"{cam}: T_target_camera shape {T_tc_np.shape} != (4,4)")
+
+                if not np.isfinite(T_ct_np).all():
+                    errors.append(f"{cam}: T_camera_target contains NaN/Inf")
+                if not np.isfinite(T_tc_np).all():
+                    errors.append(f"{cam}: T_target_camera contains NaN/Inf")
+
+                # 互为逆矩阵
+                if T_ct_np.shape == (4, 4) and T_tc_np.shape == (4, 4):
+                    if not np.allclose(T_ct_np @ T_tc_np, np.eye(4), atol=1e-6):
+                        errors.append(f"{cam}: T_camera_target @ T_target_camera != I4")
+                    # 旋转矩阵近似正交
+                    R = T_ct_np[:3, :3]
+                    if not np.allclose(R @ R.T, np.eye(3), atol=1e-3):
+                        errors.append(f"{cam}: rotation matrix not orthogonal")
+
+            if errors:
+                for e in errors:
+                    rospy.logerr("EXTRINSICS VALIDATION: %s", e)
+                rospy.logerr("FATAL: require_extrinsics=true but validation failed "
+                            "(%d errors)", len(errors))
                 sys.exit(1)
 
         rospy.loginfo("Extrinsics meta loaded: file=%s sha256=%s... method=%s",

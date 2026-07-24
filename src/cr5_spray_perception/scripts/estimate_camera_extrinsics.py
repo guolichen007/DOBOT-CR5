@@ -302,32 +302,67 @@ def select_best_solution(solutions):
 
     优先级:
       1. stats.pass == True (RMSE <= MAX_REPROJ)
-      2. 满足 inlier 门限
+      2. 逐候选 inlier 门限 (4 点→min 4, 其他→max(4, min(10, ceil(n_pts*0.6))))
       3. reprojection RMSE 最小
-      4. RMSE 接近时优先 inlier_ratio 更高
+      4. RMSE 接近时优先 inlier_ratio 更高, 然后 point_count 更高
 
     Returns:
       (best_solution, selection_reason, all_candidates_ranked)
+      all_candidates_ranked 包含所有候选 (含失败), 每个带 elimination_reason.
     """
     if not solutions:
         return None, "no solutions", []
 
+    def _candidate_has_sufficient_inliers(sol):
+        n_pts = sol.get("n_pts", 0)
+        inliers = sol.get("inliers", 0)
+        if n_pts <= 4:
+            required = 4
+        else:
+            required = max(4, min(10, int(math.ceil(n_pts * 0.6))))
+        return inliers >= required
+
+    # 对所有候选进行排名 (含失败原因)
+    all_ranked = []
+    for s in solutions:
+        entry = {
+            "panel": s.get("panel"),
+            "type": s.get("type"),
+            "rmse_px": s.get("rmse_px"),
+            "inliers": s.get("inliers"),
+            "n_pts": s.get("n_pts"),
+            "pass": s.get("pass", False),
+            "has_valid_transform": s.get("T_camera_target_4x4") is not None,
+        }
+
+        elim = []
+        if not entry["pass"]:
+            elim.append("reprojection_failed")
+        if not entry["has_valid_transform"]:
+            elim.append("missing_face_tf")
+        if entry["pass"] and entry["has_valid_transform"]:
+            if not _candidate_has_sufficient_inliers(s):
+                elim.append("insufficient_inliers")
+        entry["elimination_reason"] = elim if elim else None
+        all_ranked.append(entry)
+
     # 1. 只考虑 pass=True
     passing = [s for s in solutions if s.get("pass", False)]
     if not passing:
-        # 如果没有 pass 的, fallback 到 RMSE 最小的
         ranked = sorted(solutions, key=lambda s: s.get("rmse_px", 999))
-        return ranked[0], "no pass — fallback to min RMSE", ranked
+        return ranked[0], "no pass — fallback to min RMSE", all_ranked
 
-    # 2. inlier 门限
-    n_pts = max(s.get("n_pts", 0) for s in passing)
-    min_inliers = max(4, int(n_pts * 0.6))
-    sufficient = [s for s in passing if s.get("inliers", 0) >= min_inliers]
+    # 2. 逐候选 inlier 门限
+    sufficient = [s for s in passing if _candidate_has_sufficient_inliers(s)]
     if not sufficient:
         sufficient = passing  # 放宽门限
 
-    # 3. 按 RMSE 排序
-    ranked = sorted(sufficient, key=lambda s: s.get("rmse_px", 999))
+    # 3. 按 RMSE 升序 → inlier_ratio 降序 → point_count 降序
+    ranked = sorted(sufficient, key=lambda s: (
+        s.get("rmse_px", 999),
+        -(s.get("inliers", 0) / max(s.get("n_pts", 1), 1)),
+        -s.get("n_pts", 0),
+    ))
 
     # 4. RMSE 接近时看 inlier_ratio
     best = ranked[0]
@@ -336,7 +371,6 @@ def select_best_solution(solutions):
     close_candidates = [s for s in ranked if s.get("rmse_px", 999) <= close_thresh]
 
     if len(close_candidates) > 1:
-        # 在 RMSE 接近的候选中选 inlier_ratio 最高的
         best = max(close_candidates, key=lambda s: (
             s.get("inliers", 0) / max(s.get("n_pts", 1), 1)))
 
@@ -346,7 +380,7 @@ def select_best_solution(solutions):
         f"best RMSE={best.get('rmse_px', -1):.4f}px, "
         f"panel={best.get('panel', 'unknown')}"
     )
-    return best, reason, ranked
+    return best, reason, all_ranked
 
 
 def compute_transform_errors(T_camera_target_est, T_camera_target_truth):
@@ -545,6 +579,145 @@ def process_camera(cam_name, tf_buf, output_dir, truth_source="none"):
     return results
 
 
+def _build_truth_comparison(all_results, per_camera_pass):
+    """
+    生成完整的 truth 对比报告 (estimate + truth + errors + grade).
+
+    与 Commit 4 不同, 此版本同时输出每台相机的 estimate/truth/errors/grade.
+    """
+    comparison = {
+        "truth_source": "gazebo",
+        "transform_direction": "T_camera_target",
+        "thresholds": {
+            "translation_pass_mm": 10.0,
+            "translation_warn_mm": 20.0,
+            "rotation_pass_deg": 0.5,
+            "rotation_warn_deg": 1.0,
+        },
+        "cameras": {},
+    }
+
+    grades = []
+    for cam_name in sorted(CAMERAS.keys()):
+        cr = all_results.get(cam_name, {})
+        if not isinstance(cr, dict):
+            continue
+
+        entry = {}
+        selected = cr.get("selected_solution", {})
+        truth = cr.get("gazebo_truth", {})
+
+        if selected and selected.get("T_camera_target_4x4"):
+            entry["selected_panel"] = selected.get("panel", "unknown")
+            entry["estimate"] = {
+                "T_camera_target": selected["T_camera_target_4x4"],
+            }
+        else:
+            entry["selected_panel"] = "none"
+            entry["estimate"] = None
+
+        if truth and truth.get("T_camera_target_4x4"):
+            entry["truth"] = {
+                "T_camera_target": truth["T_camera_target_4x4"],
+            }
+        else:
+            entry["truth"] = None
+
+        if cr.get("truth_errors"):
+            entry["errors"] = cr["truth_errors"]
+        if cr.get("truth_grade"):
+            entry["grade"] = cr["truth_grade"]
+            grades.append(cr["truth_grade"])
+
+        comparison["cameras"][cam_name] = entry
+
+    # 整体判定
+    if not grades:
+        comparison["overall_result"] = "UNKNOWN"
+    elif "FAIL" in grades:
+        comparison["overall_result"] = "FAIL"
+    elif "WARN" in grades:
+        comparison["overall_result"] = "WARN"
+    else:
+        comparison["overall_result"] = "PASS"
+
+    return comparison
+
+
+def build_standard_extrinsics_yaml(all_results, per_camera_pass):
+    """
+    构建符合 CaptureManager 消费端 schema 的 initial_extrinsics.yaml.
+
+    结构:
+      schema_version: 1
+      calibration_id: ...
+      status: PASS | FAIL
+      target_frame: calibration_target_frame
+      transform_contract: {...}
+      cameras:
+        cam_front_left:
+          optical_frame: ...
+          selected_panel: ...
+          selected_type: ...
+          point_count: ...
+          inlier_count: ...
+          inlier_ratio: ...
+          reprojection_rmse_px: ...
+          T_camera_target: 4x4
+          T_target_camera: 4x4
+          truth_errors: {...}
+          truth_grade: PASS|WARN|FAIL
+    """
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    all_pass = all(per_camera_pass.values())
+
+    doc = {
+        "schema_version": 1,
+        "calibration_id": f"three_camera_pnp_{timestamp}",
+        "generated_at": timestamp,
+        "method": "multi_face_pnp_gazebo_validation",
+        "status": "PASS" if all_pass else "FAIL",
+        "target_frame": "calibration_target_frame",
+        "transform_contract": {
+            "primary_transform": "T_target_camera",
+            "inverse_transform": "T_camera_target",
+            "primary_equation": "p_target = T_target_camera @ p_camera",
+            "inverse_equation": "p_camera = T_camera_target @ p_target",
+        },
+        "cameras": {},
+    }
+
+    for cam_name in sorted(CAMERAS.keys()):
+        cr = all_results.get(cam_name, {})
+        if not isinstance(cr, dict):
+            continue
+
+        selected = cr.get("selected_solution", {})
+        cam_entry = {
+            "optical_frame": cr.get("optical_frame", "unknown"),
+            "selected_panel": selected.get("panel", "none"),
+            "selected_type": selected.get("type", "none"),
+            "point_count": selected.get("n_pts", 0),
+            "inlier_count": selected.get("inliers", 0),
+            "inlier_ratio": round(
+                selected.get("inliers", 0) / max(selected.get("n_pts", 1), 1), 4),
+            "reprojection_rmse_px": selected.get("rmse_px", -1.0),
+            "T_camera_target": selected.get("T_camera_target_4x4", []),
+            "T_target_camera": selected.get("T_target_camera_4x4", []),
+        }
+
+        # 附加 truth 信息 (如果有)
+        if cr.get("truth_errors"):
+            cam_entry["truth_errors"] = cr["truth_errors"]
+        if cr.get("truth_grade"):
+            cam_entry["truth_grade"] = cr["truth_grade"]
+
+        doc["cameras"][cam_name] = cam_entry
+
+    return doc
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", default="artifacts/calibration_target")
@@ -583,11 +756,19 @@ def main():
     all_results["per_camera_pass"] = per_camera_pass
     all_results["all_cameras_have_solution"] = all_cameras_have_solution
 
-    # Save outputs
+    # ── 诊断报告 (保留完整信息, 供人工审查) ──
     import yaml as _yaml
-    with open(os.path.join(args.output, "initial_extrinsics.yaml"), "w") as f:
-        _yaml.dump(all_results, f, default_flow_style=False)
 
+    # 1. initial_extrinsics.yaml: 标准化可消费外参 (CaptureManager 输入)
+    extrinsics_doc = build_standard_extrinsics_yaml(all_results, per_camera_pass)
+    with open(os.path.join(args.output, "initial_extrinsics.yaml"), "w") as f:
+        _yaml.dump(extrinsics_doc, f, default_flow_style=False)
+
+    # 2. all_candidates.json: 所有候选解 (诊断)
+    with open(os.path.join(args.output, "all_candidates.json"), "w") as f:
+        json.dump(all_results, f, indent=2, default=str)
+
+    # 3. reprojection_report.json: 重投影汇总
     reproj = {}
     for cn, cr in all_results.items():
         if isinstance(cr, dict) and "solutions" in cr:
@@ -597,19 +778,21 @@ def main():
     with open(os.path.join(args.output, "reprojection_report.json"), "w") as f:
         json.dump(reproj, f, indent=2)
 
+    # 4. gazebo_truth_comparison.json: 完整 truth 对比 (Commit 7 增强)
     if args.truth_source == "gazebo":
-        truth_d = {cn: cr.get("gazebo_truth") for cn, cr in all_results.items()
-                   if isinstance(cr, dict)}
-        with open(os.path.join(args.output, "gazebo_truth_comparison.json"), "w") as f:
-            json.dump(truth_d, f, indent=2)
         all_results["truth_source"] = "gazebo"
+        truth_comparison = _build_truth_comparison(all_results, per_camera_pass)
+        with open(os.path.join(args.output, "gazebo_truth_comparison.json"), "w") as f:
+            json.dump(truth_comparison, f, indent=2)
     else:
         all_results["truth_source"] = "none"
         all_results["truth_comparison"] = "unavailable"
 
+    # 5. calibration_summary.json
     summary = {
         "per_camera_pass": per_camera_pass,
         "all_cameras_have_solution": all_cameras_have_solution,
+        "overall_status": extrinsics_doc["status"],
         "git_sha": os.environ.get("CR5_SPRAY_GIT_SHA", "unknown"),
     }
     with open(os.path.join(args.output, "calibration_summary.json"), "w") as f:
