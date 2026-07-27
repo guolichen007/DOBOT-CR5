@@ -68,6 +68,7 @@ def build_ceres_input(observations_data):
 
     cam_to_idx = {name: i for i, name in enumerate(cam_names)}
 
+    cameras_json = []
     for cam_name in cam_names:
         cam_info = data["cameras"][cam_name]
         K = cam_info.get("K", [[1,0,0],[0,1,0],[0,0,1]])

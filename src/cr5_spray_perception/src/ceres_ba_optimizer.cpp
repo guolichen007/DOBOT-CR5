@@ -266,7 +266,7 @@ int main(int argc, char** argv) {
   }
 
   bool optimizer_usable = summary.IsSolutionUsable();
-  // 仿真验收门限: overall_rmse <= 1.0px, per-camera <= 1.5px, max_residual <= 5px
+  // 实机验收门限: overall_rmse <= 1.0px, per-camera <= 1.5px, max_residual <= 5px
   // 每台相机: >= 40 角点观测, >= 5 有效 frame groups
   // 总观测: >= 20
   bool quality_pass = optimizer_usable
