@@ -56,14 +56,18 @@ CHARUCO_FACES = {
 }
 
 APRILTAG_FACES = {
-    "right": {"face_frame": "calibration_target_right_frame",
-              "dict_id": aruco.DICT_APRILTAG_36h11,
-              "tag_ids": {4, 5, 6, 7},
-              "board_size_m": (0.100, 0.100)},
     "top":   {"face_frame": "calibration_target_top_frame",
               "dict_id": aruco.DICT_APRILTAG_36h11,
               "tag_ids": {8},
               "board_size_m": (0.120, 0.120)},
+}
+
+# V2: 右面改为 ArUco DICT_4X4_50
+ARUCO_FACES = {
+    "right": {"face_frame": "calibration_target_right_frame",
+              "dict_id": aruco.DICT_4X4_50,
+              "tag_ids": {10, 11, 12, 13},
+              "board_size_m": (0.160, 0.120)},
 }
 
 CAMERAS = {
@@ -186,6 +190,22 @@ def detect_faces_on_image(gray, cam_name):
         params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
         corners, ids, rejected = aruco_compat.detect_markers(
             gray, tag_dict, params)
+
+        if ids is None:
+            detected[fk] = {"tag_ids": [], "tag_count": 0}
+            continue
+
+        ids_flat = [int(i) for i in ids.flatten()]
+        matched = [mid for mid in ids_flat if mid in fc["tag_ids"]]
+        detected[fk] = {"tag_ids": matched, "tag_count": len(matched)}
+
+    # ArUco 4x4 (右面)
+    for fk, fc in ARUCO_FACES.items():
+        aruco_dict = aruco.getPredefinedDictionary(fc["dict_id"])
+        params = aruco_compat.detector_parameters()
+        params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+        corners, ids, rejected = aruco_compat.detect_markers(
+            gray, aruco_dict, params)
 
         if ids is None:
             detected[fk] = {"tag_ids": [], "tag_count": 0}
@@ -360,6 +380,47 @@ def main():
         # 处理 AprilTag 面
         for fk, fc in APRILTAG_FACES.items():
             result = {"face": fk, "type": "apriltag"}
+            corners, T = compute_face_3d_corners(
+                fc["face_frame"], fc["board_size_m"], tf_buf)
+
+            if corners is None:
+                result["classification"] = "TF_MISSING"
+                cam_result["faces"][fk] = result
+                continue
+
+            proj, in_front = project_points(corners, K, R_cam_world, t_cam_world)
+            if proj is not None:
+                proj_data[fk] = {"projected_corners_px": proj.tolist()}
+                result["projected_corners_px"] = proj.tolist()
+
+            if T is not None:
+                face_normal_world = T[:3, 2]
+                cam_to_face = corners.mean(axis=0) - T_world_cam[:3, 3]
+                cam_to_face_norm = np.linalg.norm(cam_to_face)
+                if cam_to_face_norm > 0.001:
+                    cam_to_face_dir = cam_to_face / cam_to_face_norm
+                    cos_angle = float(np.dot(cam_to_face_dir, face_normal_world))
+                    result["face_normal_dot_view"] = round(cos_angle, 4)
+                    result["view_angle_deg"] = round(
+                        math.degrees(math.acos(max(-1, min(1, abs(cos_angle))))), 1)
+                    result["depth_m"] = round(cam_to_face_norm, 3)
+
+            if proj is not None and in_front.sum() >= 3:
+                area_px = abs(cv2.contourArea(proj.astype(np.float32)))
+                result["projected_area_px2"] = round(area_px, 1)
+                result["projected_area_pct"] = round(
+                    area_px / (cv_img.shape[1] * cv_img.shape[0]) * 100, 2)
+
+            det = detection.get(fk, {})
+            result.update({k: det.get(k) for k in ("tag_ids", "tag_count") if k in det})
+
+            result["classification"] = classify_face(
+                proj, in_front, fc["board_size_m"], det, is_charuco=False)
+            cam_result["faces"][fk] = result
+
+        # 处理 ArUco 面 (DICT_4X4_50, 右面)
+        for fk, fc in ARUCO_FACES.items():
+            result = {"face": fk, "type": "aruco"}
             corners, T = compute_face_3d_corners(
                 fc["face_frame"], fc["board_size_m"], tf_buf)
 

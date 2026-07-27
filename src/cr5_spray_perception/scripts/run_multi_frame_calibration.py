@@ -40,13 +40,18 @@ CHARUCO_FACES = {
 }
 
 APRILTAG_FACES = {
-    "right": {"tag_size": 0.07, "tag_ids": [4,5,6,7],
-              "face_frame": "calibration_target_right_frame",
-              "positions": {4:(-0.0425,0.0425,0), 5:(0.0425,0.0425,0),
-                           6:(-0.0425,-0.0425,0), 7:(0.0425,-0.0425,0)}},
     "top":   {"tag_size": 0.12, "tag_ids": [8],
               "face_frame": "calibration_target_top_frame",
               "positions": {8:(0,0,0)}},
+}
+
+# V2: 右面改为 ArUco DICT_4X4_50 (比 AprilTag 36h11 更抗低分辨率)
+ARUCO_FACES = {
+    "right": {"marker_size_m": 0.076, "marker_ids": [10, 11, 12, 13],
+              "dict_id": aruco.DICT_4X4_50,
+              "face_frame": "calibration_target_right_frame",
+              "positions": {10: (-0.06, 0.05, 0), 11: (0.06, 0.05, 0),
+                           12: (-0.06, -0.05, 0), 13: (0.06, -0.05, 0)}},
 }
 
 CAMERAS = ["cam_front_left", "cam_front_right", "cam_rear"]
@@ -218,6 +223,37 @@ def detect_on_image(cv_img, K, D):
                     cids_flat = [int(i) for i in cids.flatten()]
                     obj_pts_face = [board_pts[i].tolist() for i in cids_flat]
                     img_pts_face = cc.reshape(-1, 2).astype(np.float32).tolist()
+
+        results[fk] = {
+            "object_points_3d_face": obj_pts_face,
+            "image_points_2d": img_pts_face,
+            "corner_count": len(obj_pts_face),
+        }
+
+    # ── ArUco 面 (DICT_4X4_50, 右面) ──
+    aruco_dict_4x4 = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
+    params_4x4 = aruco_compat.detector_parameters()
+    params_4x4.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+    corners_4x4, ids_4x4, _ = aruco_compat.detect_markers(
+        gray, aruco_dict_4x4, params_4x4)
+
+    for fk, fc in ARUCO_FACES.items():
+        obj_pts_face, img_pts_face = [], []
+        if ids_4x4 is not None:
+            ids_flat = [int(i) for i in ids_4x4.flatten()]
+            for i, tid in enumerate(ids_flat):
+                if tid not in fc["marker_ids"]:
+                    continue
+                pos = fc["positions"][tid]
+                half = fc["marker_size_m"] / 2.0
+                marker_obj = [
+                    [pos[0]-half, pos[1]+half, 0],
+                    [pos[0]+half, pos[1]+half, 0],
+                    [pos[0]+half, pos[1]-half, 0],
+                    [pos[0]-half, pos[1]-half, 0],
+                ]
+                obj_pts_face.extend(marker_obj)
+                img_pts_face.extend(corners_4x4[i][0].tolist())
 
         results[fk] = {
             "object_points_3d_face": obj_pts_face,

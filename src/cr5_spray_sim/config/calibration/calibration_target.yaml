@@ -138,8 +138,8 @@ panels:
       - 214
   right:
     frame: calibration_target_right_frame
-    texture: apriltag_right.png
-    pattern: apriltag_grid
+    texture: aruco_right.png
+    pattern: aruco
     canvas_px:
     - 2200
     - 1800
@@ -155,19 +155,18 @@ panels:
       - 1.57079632679
       - 0.0
       - 0.0
-    dictionary: DICT_APRILTAG_36h11
+    dictionary: DICT_4X4_50
     tag_ids:
-    - 4
-    - 5
-    - 6
-    - 7
+    - 10
+    - 11
+    - 12
+    - 13
+    marker_size_m: 0.076
     layout:
-    - - 4
-      - 5
-    - - 6
-      - 7
-    tag_size_m: 0.07
-    tag_gap_m: 0.015
+    - - 10
+      - 11
+    - - 12
+      - 13
   top:
     frame: calibration_target_top_frame
     texture: apriltag_top.png
@@ -325,14 +324,14 @@ validation:
       - 214
       detected_charuco_corner_count: 20
       rejected_candidate_count: 59
-    apriltag_right.png:
+    aruco_right.png:
       detected_tag_count: 4
       detected_tag_ids:
-      - 4
-      - 5
-      - 6
-      - 7
-      rejected_candidate_count: 18
+      - 10
+      - 11
+      - 12
+      - 13
+      rejected_candidate_count: 0
     apriltag_top.png:
       detected_tag_count: 1
       detected_tag_ids:
@@ -384,11 +383,11 @@ files:
     height_px: 1800
     mode: L
     sha256: 0301d4d9580f83fa6e580e8030ab1bceb3991877c6387cfa33160be74276b8a7
-  apriltag_right.png:
+  aruco_right.png:
     width_px: 2200
     height_px: 1800
     mode: L
-    sha256: 0cb8caf9e67e6758fb5e1603b64824e437d9988337029fd4c6f8f5a9888994c7
+    sha256: 802814e6fcc67633a86792e25f26a31e65b1c046a4ff3d575d3f4a9087177b50
   apriltag_top.png:
     width_px: 1600
     height_px: 1600
