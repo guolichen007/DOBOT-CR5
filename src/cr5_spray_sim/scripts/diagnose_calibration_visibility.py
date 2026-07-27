@@ -45,10 +45,6 @@ CHARUCO_FACES = {
               "dict_id": aruco.DICT_5X5_1000, "id_start": 100,
               "face_frame": "calibration_target_front_frame",
               "board_size_m": (0.216, 0.162)},
-    "left":  {"sx": 6, "sy": 5, "sq_m": 0.022, "mk_m": 0.016,
-              "dict_id": aruco.DICT_5X5_1000, "id_start": 200,
-              "face_frame": "calibration_target_left_frame",
-              "board_size_m": (0.132, 0.110)},
     "back":  {"sx": 8, "sy": 6, "sq_m": 0.027, "mk_m": 0.020,
               "dict_id": aruco.DICT_5X5_1000, "id_start": 300,
               "face_frame": "calibration_target_back_frame",
@@ -56,10 +52,14 @@ CHARUCO_FACES = {
 }
 
 APRILTAG_FACES = {
-    "top":   {"face_frame": "calibration_target_top_frame",
-              "dict_id": aruco.DICT_APRILTAG_36h11,
-              "tag_ids": {8},
-              "board_size_m": (0.120, 0.120)},
+    "left": {"face_frame": "calibration_target_left_frame",
+             "dict_id": aruco.DICT_APRILTAG_36h11,
+             "tag_ids": {4, 5, 6, 7},
+             "board_size_m": (0.120, 0.100)},
+    "top":  {"face_frame": "calibration_target_top_frame",
+             "dict_id": aruco.DICT_APRILTAG_36h11,
+             "tag_ids": {8},
+             "board_size_m": (0.120, 0.120)},
 }
 
 # V2: 右面改为 ArUco DICT_4X4_50

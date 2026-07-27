@@ -98,7 +98,7 @@ panels:
   left:
     frame: calibration_target_left_frame
     texture: charuco_left.png
-    pattern: charuco
+    pattern: apriltag_grid
     canvas_px:
     - 1600
     - 1200
@@ -114,28 +114,18 @@ panels:
       - -1.57079632679
       - 0.0
       - 0.0
-    board:
-      squares_x: 6
-      squares_y: 5
-      square_length_m: 0.022
-      marker_length_m: 0.016
-      dictionary: DICT_5X5_1000
-      marker_ids:
-      - 200
-      - 201
-      - 202
-      - 203
-      - 204
-      - 205
-      - 206
-      - 207
-      - 208
-      - 209
-      - 210
-      - 211
-      - 212
-      - 213
-      - 214
+    dictionary: DICT_APRILTAG_36h11
+    tag_ids:
+    - 4
+    - 5
+    - 6
+    - 7
+    tag_size_m: 0.07
+    layout:
+    - - 4
+      - 5
+    - - 6
+      - 7
   right:
     frame: calibration_target_right_frame
     texture: aruco_right.png
@@ -305,25 +295,13 @@ validation:
       detected_charuco_corner_count: 35
       rejected_candidate_count: 88
     charuco_left.png:
-      detected_marker_count: 15
-      detected_marker_ids:
-      - 200
-      - 201
-      - 202
-      - 203
-      - 204
-      - 205
-      - 206
-      - 207
-      - 208
-      - 209
-      - 210
-      - 211
-      - 212
-      - 213
-      - 214
-      detected_charuco_corner_count: 20
-      rejected_candidate_count: 59
+      detected_tag_count: 4
+      detected_tag_ids:
+      - 4
+      - 5
+      - 6
+      - 7
+      rejected_candidate_count: 0
     aruco_right.png:
       detected_tag_count: 4
       detected_tag_ids:
@@ -377,7 +355,7 @@ files:
     width_px: 1600
     height_px: 1200
     mode: L
-    sha256: 4d658ccf2d907a6b13c079c00b7e55ae0f6755f75108982672460cd554685787
+    sha256: 477f8d68cb4b8df1cea8487714bfaf8d67c1a56f5faf868eed57b5700ee07305
   charuco_back.png:
     width_px: 2400
     height_px: 1800

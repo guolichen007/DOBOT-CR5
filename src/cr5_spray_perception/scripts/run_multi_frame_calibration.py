@@ -31,18 +31,19 @@ CHARUCO_FACES = {
     "front": {"sx": 8, "sy": 6, "sq_m": 0.027, "mk_m": 0.020,
               "dict_id": aruco.DICT_5X5_1000, "id_start": 100,
               "face_frame": "calibration_target_front_frame"},
-    "left":  {"sx": 6, "sy": 5, "sq_m": 0.022, "mk_m": 0.016,
-              "dict_id": aruco.DICT_5X5_1000, "id_start": 200,
-              "face_frame": "calibration_target_left_frame"},
     "back":  {"sx": 8, "sy": 6, "sq_m": 0.027, "mk_m": 0.020,
               "dict_id": aruco.DICT_5X5_1000, "id_start": 300,
               "face_frame": "calibration_target_back_frame"},
 }
 
 APRILTAG_FACES = {
-    "top":   {"tag_size": 0.12, "tag_ids": [8],
-              "face_frame": "calibration_target_top_frame",
-              "positions": {8:(0,0,0)}},
+    "left": {"tag_size": 0.07, "tag_ids": [4,5,6,7],
+             "face_frame": "calibration_target_left_frame",
+             "positions": {4:(-0.0425,0.0425,0), 5:(0.0425,0.0425,0),
+                          6:(-0.0425,-0.0425,0), 7:(0.0425,-0.0425,0)}},
+    "top":  {"tag_size": 0.12, "tag_ids": [8],
+             "face_frame": "calibration_target_top_frame",
+             "positions": {8:(0,0,0)}},
 }
 
 # V2: 右面改为 ArUco DICT_4X4_50 (比 AprilTag 36h11 更抗低分辨率)
