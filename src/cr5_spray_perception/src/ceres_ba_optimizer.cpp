@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -212,8 +213,9 @@ int main(int argc, char** argv) {
   ceres::Solve(options, &problem, &summary);
   auto t1 = std::chrono::steady_clock::now();
 
-  // — 逐残差评估 (per-camera RMSE, max residual) —
+  // — 逐残差评估 (per-camera RMSE, max residual, n_groups) —
   std::map<int, std::vector<double>> cam_errors;  // camera_idx → per-residual errors
+  std::map<int, std::set<int>> cam_targets;       // camera_idx → set of target indices
   double total_sq_error = 0.0, max_error = 0.0;
   int total_residual_pairs = 0;
 
@@ -226,6 +228,8 @@ int main(int argc, char** argv) {
   int residual_idx = 0;
   for (auto& obs : jobs) {
     int cam_idx = obs.at("camera_idx").get<int>();
+    int tgt_raw = obs.at("target_idx").get<int>();
+    cam_targets[cam_idx].insert(tgt_raw);  // track which target groups this camera sees
     auto& img = obs.at("img_pts");
     int n_pts = static_cast<int>(img.size()) / 2;
     for (int k = 0; k < n_pts; ++k) {
@@ -247,6 +251,8 @@ int main(int argc, char** argv) {
 
   // — 质量分层评估 —
   double max_per_cam_rmse = 0.0;
+  int min_cam_obs = 999999;
+  int min_cam_groups = 999999;
   for (auto& kv : cam_errors) {
     auto& errors = kv.second;
     if (errors.empty()) continue;
@@ -254,17 +260,22 @@ int main(int argc, char** argv) {
     for (double e : errors) sum_sq += e * e;
     max_per_cam_rmse = std::max(max_per_cam_rmse,
                                 std::sqrt(sum_sq / errors.size()));
+    min_cam_obs = std::min(min_cam_obs, static_cast<int>(errors.size()));
+    int n_groups = static_cast<int>(cam_targets[kv.first].size());
+    min_cam_groups = std::min(min_cam_groups, n_groups);
   }
 
   bool optimizer_usable = summary.IsSolutionUsable();
-  // 仿真实门限: overall_rmse <= 1.0px, per-camera <= 1.5px, max_residual <= 5px
-  // 实机容忍: overall_rmse <= 2.0px, per-camera <= 2.5px
-  // 当前使用仿真门限
+  // 仿真验收门限: overall_rmse <= 1.0px, per-camera <= 1.5px, max_residual <= 5px
+  // 每台相机: >= 40 角点观测, >= 5 有效 frame groups
+  // 总观测: >= 20
   bool quality_pass = optimizer_usable
       && overall_rmse <= 1.0
       && max_per_cam_rmse <= 1.5
       && max_error <= 5.0
-      && total_residual_pairs >= 20;
+      && total_residual_pairs >= 20
+      && min_cam_obs >= 40
+      && min_cam_groups >= 5;
 
   // — 构建输出 JSON —
   json output;
@@ -286,7 +297,9 @@ int main(int argc, char** argv) {
     {"overall_rmse_px_max", 1.0},
     {"per_camera_rmse_px_max", 1.5},
     {"max_residual_px_max", 5.0},
-    {"min_observations", 20},
+    {"min_total_observations", 20},
+    {"min_observations_per_camera", 40},
+    {"min_groups_per_camera", 5},
   };
 
   // per-camera RMSE
@@ -297,6 +310,7 @@ int main(int argc, char** argv) {
     double sum_sq = 0.0;
     for (double e : errors) sum_sq += e * e;
     double rmse = std::sqrt(sum_sq / errors.size());
+    int n_groups = static_cast<int>(cam_targets[kv.first].size());
     // 找到相机名
     std::string cam_name = "cam_" + std::to_string(kv.first);
     if (kv.first < n_cameras) {
@@ -305,6 +319,7 @@ int main(int argc, char** argv) {
     per_cam_rmse[cam_name] = {
       {"rmse_px", rmse},
       {"n_residuals", errors.size()},
+      {"n_groups", n_groups},
       {"max_error_px", *std::max_element(errors.begin(), errors.end())}
     };
   }

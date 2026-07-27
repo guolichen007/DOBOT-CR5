@@ -41,15 +41,31 @@ def rvec_tvec_to_quat_trans(rvec, tvec):
 
 
 def build_ceres_input(observations_data):
-    """将观测数据转换为 Ceres BA 输入 JSON."""
+    """将观测数据转换为 Ceres BA 输入 JSON.
+
+    增加完整性检查: 正好 3 台相机, obj/img 点数一致, 数组维度合法.
+    """
     data = {}
     if isinstance(observations_data, dict):
         data = observations_data
     else:
-        return None
+        return None, []
 
-    cameras_json = []
+    # ── 输入完整性检查: 必须正好 3 台相机 ──
+    EXPECTED_CAMERAS = {"cam_front_left", "cam_front_right", "cam_rear"}
     cam_names = sorted(data.get("cameras", {}).keys())
+    input_cam_set = set(cam_names)
+
+    errors = []
+    if input_cam_set != EXPECTED_CAMERAS:
+        missing = EXPECTED_CAMERAS - input_cam_set
+        extra = input_cam_set - EXPECTED_CAMERAS
+        if missing:
+            errors.append("BA input missing cameras: {}".format(sorted(missing)))
+        if extra:
+            errors.append("BA input unexpected cameras: {}".format(sorted(extra)))
+        return None, errors
+
     cam_to_idx = {name: i for i, name in enumerate(cam_names)}
 
     for cam_name in cam_names:
@@ -131,6 +147,43 @@ def build_ceres_input(observations_data):
             if not obj_pts or not img_pts:
                 continue
 
+            # ── 完整性检查: 每个 obj_pt 必须有对应 img_pt ──
+            if len(obj_pts) != len(img_pts):
+                errors.append(
+                    "{} group {}: obj/img count mismatch ({} vs {})".format(
+                        cam_name, gid, len(obj_pts), len(img_pts)))
+                continue
+
+            # ── 数组维度检查 ──
+            obj_flat = []
+            for pt in obj_pts:
+                if isinstance(pt, (list, tuple)) and len(pt) >= 3:
+                    obj_flat.extend([float(v) for v in pt[:3]])
+                else:
+                    errors.append(
+                        "{} group {}: invalid obj_pt {}".format(cam_name, gid, pt))
+            img_flat = []
+            for pt in img_pts:
+                if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                    img_flat.extend([float(v) for v in pt[:2]])
+                else:
+                    errors.append(
+                        "{} group {}: invalid img_pt {}".format(cam_name, gid, pt))
+
+            if len(obj_flat) % 3 != 0:
+                errors.append(
+                    "{} group {}: obj_flat len {} not divisible by 3".format(
+                        cam_name, gid, len(obj_flat)))
+            if len(img_flat) % 2 != 0:
+                errors.append(
+                    "{} group {}: img_flat len {} not divisible by 2".format(
+                        cam_name, gid, len(img_flat)))
+            if len(obj_flat) // 3 != len(img_flat) // 2:
+                errors.append(
+                    "{} group {}: point count mismatch after flatten: {} vs {}".format(
+                        cam_name, gid, len(obj_flat) // 3, len(img_flat) // 2))
+                continue
+
             cam_idx = cam_to_idx.get(cam_name)
             tgt_idx = tgt_to_idx.get(gid)
             if cam_idx is None or tgt_idx is None:
@@ -138,16 +191,6 @@ def build_ceres_input(observations_data):
 
             cam_info = data["cameras"][cam_name]
             K = np.array(cam_info.get("K", [[1,0,0],[0,1,0],[0,0,1]])).reshape(3, 3)
-
-            # Flatten obj_pts/img_pts
-            obj_flat = []
-            for pt in obj_pts:
-                if isinstance(pt, (list, tuple)):
-                    obj_flat.extend([float(v) for v in pt[:3]])
-            img_flat = []
-            for pt in img_pts:
-                if isinstance(pt, (list, tuple)):
-                    img_flat.extend([float(v) for v in pt[:2]])
 
             obs_json.append({
                 "camera_idx": cam_idx,
@@ -157,6 +200,9 @@ def build_ceres_input(observations_data):
                 "obj_pts": obj_flat,
                 "img_pts": img_flat,
             })
+
+    if errors:
+        return None, errors
 
     return {
         "cameras": cameras_json,
@@ -352,6 +398,16 @@ def main():
     # 2. 构建 Ceres 输入
     print("Building Ceres input...")
     ceres_input, cam_names = build_ceres_input(obs_data)
+
+    # 检查输入构建错误
+    if ceres_input is None:
+        print("\n" + "=" * 60)
+        print("  BUNDLE ADJUSTMENT FAILED: invalid input")
+        for err in (cam_names or ["unknown input error"]):
+            print("  ERROR: {}".format(err))
+        print("=" * 60)
+        sys.exit(1)
+
     print("  {} cameras, {} targets, {} observations".format(
         len(ceres_input["cameras"]),
         len(ceres_input["targets"]),
@@ -368,6 +424,22 @@ def main():
             print("  ERROR: {}".format(err))
         print("=" * 60)
         sys.exit(1)
+
+    # ── 输出完整性检查: 输出相机名集合必须等于输入相机名集合 ──
+    input_cam_set = set(cam_names)
+    output_cam_names = [c["name"] for c in ba_output.get("cameras", [])]
+    output_cam_set = set(output_cam_names)
+    if input_cam_set != output_cam_set:
+        missing = input_cam_set - output_cam_set
+        extra = output_cam_set - input_cam_set
+        print("\n" + "=" * 60)
+        print("  BUNDLE ADJUSTMENT FAILED: camera set mismatch")
+        if missing:
+            print("  Missing in output: {}".format(sorted(missing)))
+        if extra:
+            print("  Unexpected in output: {}".format(sorted(extra)))
+        print("=" * 60)
+        sys.exit(3)
 
     # 4. 构建外参 YAML
     print("Building extrinsics YAML...")

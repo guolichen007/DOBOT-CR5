@@ -65,7 +65,7 @@ _FALLBACK_FACE_POSES = {
 def _load_face_poses_from_yaml():
     """从 calibration_target.yaml 读取面板位姿.
 
-    确保单一真值来源. 如果 YAML 不可用则退回硬编码值.
+    确保单一真值来源. YAML 不可用时返回 None (由调用者决定是否 fallback).
     """
     search_paths = []
     # 通过 rospack 查找
@@ -97,17 +97,20 @@ def _load_face_poses_from_yaml():
                             "rpy": list(pt["rpy"]),
                         }
                 if len(poses) >= 5:
-                    rospy.loginfo("Loaded %d face poses from %s (SHA: ...)",
+                    rospy.loginfo("Loaded %d face poses from %s",
                                   len(poses), p)
                     return poses
             except Exception as e:
                 rospy.logwarn("Failed to load face poses from %s: %s", p, e)
 
-    rospy.logwarn("Using fallback hardcoded face poses (YAML not found)")
-    return dict(_FALLBACK_FACE_POSES)
+    # YAML 不可用 → 返回 None, 由调用者决定是否 fallback
+    rospy.logwarn("calibration_target.yaml not found — returning None")
+    return None
 
 
-FACE_POSES_TARGET = None  # 延迟加载
+# P0-2 修复: 使用 fallback 作为模块顶层默认值, 避免 import 时迭代 None.
+# 正式运行时 main() 会用 calibration_target.yaml 覆盖.
+FACE_POSES_TARGET = dict(_FALLBACK_FACE_POSES)
 
 
 def _euler_matrix(ai, aj, ak):
@@ -423,10 +426,17 @@ def main():
 
     os.makedirs(args.output, exist_ok=True)
 
-    # P1-3: 从 calibration_target.yaml 加载面板位姿 (替代硬编码)
+    # P0-2/P1-3: 从 calibration_target.yaml 加载面板位姿 (权威来源)
+    # fallback 仅用于 import 阶段; 正式标定 YAML 缺失直接 FAIL
     global FACE_POSES_TARGET, T_TARGET_FACE
-    FACE_POSES_TARGET = _load_face_poses_from_yaml()
+    yaml_poses = _load_face_poses_from_yaml()
+    if yaml_poses is None or len(yaml_poses) < 5:
+        rospy.logerr("FATAL: calibration_target.yaml not found or incomplete. "
+                     "Cannot run formal calibration with fallback poses.")
+        sys.exit(1)
+    FACE_POSES_TARGET = yaml_poses
     T_TARGET_FACE = {name: build_T_target_face(name) for name in FACE_POSES_TARGET}
+    rospy.loginfo("Face poses loaded from YAML: %d faces", len(FACE_POSES_TARGET))
 
     # ── 等待 joint_capture_manager 服务 ──
     svc_name = "/joint_capture_manager/capture_sync_group"
