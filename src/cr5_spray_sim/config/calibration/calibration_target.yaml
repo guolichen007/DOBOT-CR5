@@ -100,8 +100,8 @@ panels:
     texture: charuco_left.png
     pattern: apriltag_grid
     canvas_px:
-    - 3200
-    - 2400
+    - 2200
+    - 1800
     physical_canvas_m:
     - 0.16
     - 0.12
@@ -352,10 +352,10 @@ files:
     mode: L
     sha256: 88bd0f1959b108490823cf47aadb5af1c88f267351e27cedc79019ea50ac9363
   charuco_left.png:
-    width_px: 3200
-    height_px: 2400
+    width_px: 2200
+    height_px: 1800
     mode: L
-    sha256: 4bffaa3c24bb4b632cab551db6c0e807399d873ddb797d686d5d65f3098a9006
+    sha256: 0cb8caf9e67e6758fb5e1603b64824e437d9988337029fd4c6f8f5a9888994c7
   charuco_back.png:
     width_px: 2400
     height_px: 1800
