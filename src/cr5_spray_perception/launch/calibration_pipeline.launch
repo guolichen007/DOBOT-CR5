@@ -4,7 +4,7 @@
   <node name="joint_capture_manager" pkg="cr5_spray_perception"
     type="joint_capture_manager.py" output="screen">
     <param name="run_id" value="calib_session_001"/>
-    <param name="output_dir" value="/tmp/cr5_calib_data"/>
+    <param name="output_dir" value="$(env HOME)/cr5_ros1_ws/artifacts/capture_data"/>
     <rosparam param="camera_names">
       - cam_front_left
       - cam_front_right
