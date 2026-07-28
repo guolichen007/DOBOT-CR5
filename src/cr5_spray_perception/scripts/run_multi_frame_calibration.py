@@ -52,8 +52,8 @@ ARUCO_FACES = {
     "right": {"marker_size_m": 0.076, "marker_ids": [10, 11, 12, 13],
               "dict_id": aruco.DICT_4X4_50,
               "face_frame": "calibration_target_right_frame",
-              "positions": {10: (0.047, -0.044, 0), 11: (-0.047, -0.044, 0),
-                           12: (0.047, 0.044, 0), 13: (-0.047, 0.044, 0)}},
+              "positions": {10: (-0.047, 0.044, 0), 11: (0.047, 0.044, 0),
+                           12: (-0.047, -0.044, 0), 13: (0.047, -0.044, 0)}},
 }
 
 CAMERAS = ["cam_front_left", "cam_front_right", "cam_rear"]
