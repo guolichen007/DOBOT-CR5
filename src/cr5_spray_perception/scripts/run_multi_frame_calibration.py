@@ -479,13 +479,18 @@ def main():
         description="Multi-frame calibration with PnP + Ceres BA")
     parser.add_argument("--num-groups", type=int, default=10,
                         help="number of sync frame groups to capture")
-    parser.add_argument("--output", default="artifacts/calibration",
-                        help="output directory")
+    parser.add_argument("--output", default="",
+                        help="output directory (default: $CR5_DATA_ROOT/calibration/runs/<timestamp>)")
     args = parser.parse_args(rospy.myargv()[1:])
 
     rospy.init_node("multi_frame_calibration", anonymous=True, log_level=rospy.WARN)
     aruco_compat.log_capability()
 
+    # 默认输出路径: $CR5_DATA_ROOT/calibration/runs/<timestamp>
+    if not args.output:
+        data_root = os.environ.get("CR5_DATA_ROOT", os.path.expanduser("~/cr5_data"))
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        args.output = os.path.join(data_root, "calibration", "runs", ts)
     os.makedirs(args.output, exist_ok=True)
 
     # P0-2/P1-3: 从 calibration_target.yaml 加载面板位姿 (权威来源)

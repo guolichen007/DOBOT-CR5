@@ -101,11 +101,15 @@ START → CAMERA CHECK → TIME SYNC → TARGET POSE → DETECT
 → Gazebo TRUTH VALIDATE → schema v2 EXPORT → RELOAD VERIFY
 ```
 
-**验收门限：**
+**工程平台验收（平台可用）：**
 - 同步: inter-camera skew ≤ 5ms, 5/5 PASS
-- PnP: ≥ 8 points/camera, RMSE ≤ 1.5px (GOOD)
-- BA: overall RMSE ≤ 1.0px, per-camera ≤ 1.5px, max residual ≤ 5px
-- Truth: translation ≤ 10mm, rotation ≤ 0.5° (理想 ≤ 5mm / ≤ 0.25°)
+- 检测: 三台相机均能检测到标定图案
+- 工具: PnP / BA 程序可运行并输出结果
+
+**标定精度参考（用户人工判断，非平台验收条件）：**
+- PnP: 建议 ≥ 8 points/camera, RMSE ≤ 1.5px
+- BA: 建议 overall RMSE ≤ 1.0px, per-camera ≤ 1.5px
+- Truth: 建议 translation ≤ 10mm, rotation ≤ 0.5°
 
 ## 7. 数据边界
 

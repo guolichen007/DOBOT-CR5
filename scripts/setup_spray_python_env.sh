@@ -4,7 +4,7 @@
 
 set -e
 WORKSPACE="$(cd "$(dirname "$0")/.." && pwd)"
-VENV="$WORKSPACE/.venv-spray"
+VENV="${CR5_VENV_DIR:-$HOME/.venvs/cr5-spray}"
 
 if [ ! -d "$VENV" ]; then
     echo "Creating venv at $VENV..."
