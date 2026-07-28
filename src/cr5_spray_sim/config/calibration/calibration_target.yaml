@@ -1,4 +1,4 @@
-schema_version: 1
+schema_version: 2
 target:
   name: calibration_target
   frame: calibration_target_frame
@@ -97,7 +97,7 @@ panels:
       0.220 x 0.180 m body face
   left:
     frame: calibration_target_left_frame
-    texture: charuco_left.png
+    texture: apriltag_left.png
     pattern: apriltag_grid
     canvas_px:
     - 2200
@@ -121,6 +121,11 @@ panels:
     - 6
     - 7
     tag_size_m: 0.07
+    tag_centers_face_m:
+      4: [-0.0425,  0.0425, 0.0]
+      5: [ 0.0425,  0.0425, 0.0]
+      6: [-0.0425, -0.0425, 0.0]
+      7: [ 0.0425, -0.0425, 0.0]
     layout:
     - - 4
       - 5
@@ -152,6 +157,11 @@ panels:
     - 12
     - 13
     marker_size_m: 0.076
+    marker_centers_face_m:
+      10: [ 0.047, -0.044, 0.0]
+      11: [-0.047, -0.044, 0.0]
+      12: [ 0.047,  0.044, 0.0]
+      13: [-0.047,  0.044, 0.0]
     layout:
     - - 10
       - 11
@@ -180,6 +190,8 @@ panels:
     tag_ids:
     - 8
     tag_size_m: 0.12
+    tag_centers_face_m:
+      8: [0.0, 0.0, 0.0]
   face_guide:
     texture: calibration_target_face_guide.png
     algorithm_use: false
@@ -239,9 +251,9 @@ gazebo_materials:
   script_directory: models/calibration_target/materials/scripts/
   required_material_names:
   - CR5/Calibration/CharucoFront
-  - CR5/Calibration/CharucoLeft
+  - CR5/Calibration/AprilTagLeft
   - CR5/Calibration/CharucoBack
-  - CR5/Calibration/AprilTagRight
+  - CR5/Calibration/ArucoRight
   - CR5/Calibration/AprilTagTop
   - CR5/Calibration/FaceGuide
   rendering:
@@ -294,7 +306,7 @@ validation:
       - 123
       detected_charuco_corner_count: 35
       rejected_candidate_count: 88
-    charuco_left.png:
+    apriltag_left.png:
       detected_tag_count: 4
       detected_tag_ids:
       - 4
@@ -351,7 +363,7 @@ files:
     height_px: 1800
     mode: L
     sha256: 88bd0f1959b108490823cf47aadb5af1c88f267351e27cedc79019ea50ac9363
-  charuco_left.png:
+  apriltag_left.png:
     width_px: 2200
     height_px: 1800
     mode: L

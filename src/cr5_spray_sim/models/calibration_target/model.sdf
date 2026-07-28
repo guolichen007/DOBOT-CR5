@@ -95,13 +95,13 @@
           <script>
             <uri>model://calibration_target/materials/scripts</uri>
             <uri>model://calibration_target/materials/textures</uri>
-            <name>CR5/Calibration/CharucoLeft</name>
+            <name>CR5/Calibration/AprilTagLeft</name>
           </script>
         </material>
       </visual>
     </link>
 
-    <!-- Right: AprilTag 2×2, 0.22×0.18m, 面向 -Y -->
+    <!-- Right: ArUco 2×2, 0.22×0.18m, 面向 -Y -->
     <link name="right_panel">
       <pose>0 -0.141 0 1.570796 0 0</pose>
       <visual name="right_panel_vis">
@@ -116,7 +116,7 @@
           <script>
             <uri>model://calibration_target/materials/scripts</uri>
             <uri>model://calibration_target/materials/textures</uri>
-            <name>CR5/Calibration/AprilTagRight</name>
+            <name>CR5/Calibration/ArucoRight</name>
           </script>
         </material>
       </visual>

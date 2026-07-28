@@ -143,9 +143,9 @@ require_file() {
 if [[ "$OBJECT" == "calibration_target" ]]; then
     require_file "$PKG_DIR/models/calibration_target/materials/scripts/calibration_target.material"
     require_file "$PKG_DIR/models/calibration_target/materials/textures/charuco_front.png"
-    require_file "$PKG_DIR/models/calibration_target/materials/textures/charuco_left.png"
+    require_file "$PKG_DIR/models/calibration_target/materials/textures/apriltag_left.png"
     require_file "$PKG_DIR/models/calibration_target/materials/textures/charuco_back.png"
-    require_file "$PKG_DIR/models/calibration_target/materials/textures/apriltag_right.png"
+    require_file "$PKG_DIR/models/calibration_target/materials/textures/aruco_right.png"
     require_file "$PKG_DIR/models/calibration_target/materials/textures/apriltag_top.png"
     echo "GAZEBO_RESOURCE_PATH=$GAZEBO_RESOURCE_PATH"
     echo "Calibration media tree:"

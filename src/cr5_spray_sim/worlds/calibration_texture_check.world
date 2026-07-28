@@ -109,7 +109,7 @@
             <script>
               <uri>model://calibration_target/materials/scripts</uri>
               <uri>model://calibration_target/materials/textures</uri>
-              <name>CR5/Calibration/CharucoLeft</name>
+              <name>CR5/Calibration/AprilTagLeft</name>
             </script>
           </material>
         </visual>
@@ -130,7 +130,7 @@
             <script>
               <uri>model://calibration_target/materials/scripts</uri>
               <uri>model://calibration_target/materials/textures</uri>
-              <name>CR5/Calibration/AprilTagRight</name>
+              <name>CR5/Calibration/ArucoRight</name>
             </script>
           </material>
         </visual>

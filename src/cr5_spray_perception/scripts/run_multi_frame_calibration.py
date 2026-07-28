@@ -46,13 +46,14 @@ APRILTAG_FACES = {
              "positions": {8:(0,0,0)}},
 }
 
-# V2: 右面改为 ArUco DICT_4X4_50 (比 AprilTag 36h11 更抗低分辨率)
+# V3: YAML 为几何真值来源, 此处仅保留 import 阶段 fallback.
+# 正式运行时 main() 从 calibration_target.yaml 覆盖.
 ARUCO_FACES = {
     "right": {"marker_size_m": 0.076, "marker_ids": [10, 11, 12, 13],
               "dict_id": aruco.DICT_4X4_50,
               "face_frame": "calibration_target_right_frame",
-              "positions": {10: (-0.06, 0.05, 0), 11: (0.06, 0.05, 0),
-                           12: (-0.06, -0.05, 0), 13: (0.06, -0.05, 0)}},
+              "positions": {10: (0.047, -0.044, 0), 11: (-0.047, -0.044, 0),
+                           12: (0.047, 0.044, 0), 13: (-0.047, 0.044, 0)}},
 }
 
 CAMERAS = ["cam_front_left", "cam_front_right", "cam_rear"]
@@ -117,6 +118,30 @@ def _load_face_poses_from_yaml():
 # P0-2 修复: 使用 fallback 作为模块顶层默认值, 避免 import 时迭代 None.
 # 正式运行时 main() 会用 calibration_target.yaml 覆盖.
 FACE_POSES_TARGET = dict(_FALLBACK_FACE_POSES)
+
+
+def _load_full_yaml():
+    """加载完整 calibration_target.yaml (含面板级 marker center 定义)."""
+    search_paths = []
+    try:
+        import rospkg
+        rp = rospkg.RosPack()
+        sim_path = rp.get_path("cr5_spray_sim")
+        search_paths.append(os.path.join(
+            sim_path, "config", "calibration", "calibration_target.yaml"))
+    except Exception:
+        pass
+    search_paths.append(os.path.join(
+        os.path.dirname(__file__), "..", "..", "cr5_spray_sim",
+        "config", "calibration", "calibration_target.yaml"))
+    for p in search_paths:
+        if os.path.isfile(p):
+            try:
+                with open(p, "r") as f:
+                    return yaml.safe_load(f)
+            except Exception as e:
+                rospy.logwarn("Failed to load full YAML from %s: %s", p, e)
+    return None
 
 
 def _euler_matrix(ai, aj, ak):
@@ -474,6 +499,49 @@ def main():
     FACE_POSES_TARGET = yaml_poses
     T_TARGET_FACE = {name: build_T_target_face(name) for name in FACE_POSES_TARGET}
     rospy.loginfo("Face poses loaded from YAML: %d faces", len(FACE_POSES_TARGET))
+
+    # ── 从 YAML 覆盖面定义 (schema v2: tag_centers_face_m / marker_centers_face_m) ──
+    # 加载完整 YAML 读取面级几何真值
+    yaml_full = _load_full_yaml()
+    if yaml_full:
+        panels = yaml_full.get("panels", {})
+        global APRILTAG_FACES, ARUCO_FACES
+        # 左面 (AprilTag)
+        left_cfg = panels.get("left", {})
+        if left_cfg.get("tag_centers_face_m"):
+            APRILTAG_FACES["left"] = {
+                "tag_size": left_cfg["tag_size_m"],
+                "tag_ids": left_cfg["tag_ids"],
+                "face_frame": left_cfg["frame"],
+                "positions": {int(k): tuple(v) for k, v
+                             in left_cfg["tag_centers_face_m"].items()},
+            }
+            rospy.loginfo("Left face loaded from YAML: %d tags",
+                          len(APRILTAG_FACES["left"]["tag_ids"]))
+        # 顶面 (AprilTag)
+        top_cfg = panels.get("top", {})
+        if top_cfg.get("tag_centers_face_m"):
+            APRILTAG_FACES["top"] = {
+                "tag_size": top_cfg["tag_size_m"],
+                "tag_ids": top_cfg["tag_ids"],
+                "face_frame": top_cfg["frame"],
+                "positions": {int(k): tuple(v) for k, v
+                             in top_cfg["tag_centers_face_m"].items()},
+            }
+        # 右面 (ArUco)
+        right_cfg = panels.get("right", {})
+        if right_cfg.get("marker_centers_face_m"):
+            ARUCO_FACES["right"] = {
+                "marker_size_m": right_cfg["marker_size_m"],
+                "marker_ids": right_cfg["tag_ids"],
+                "dict_id": aruco.DICT_4X4_50,
+                "face_frame": right_cfg["frame"],
+                "positions": {int(k): tuple(v) for k, v
+                             in right_cfg["marker_centers_face_m"].items()},
+            }
+            rospy.loginfo("Right face loaded from YAML: markers at %s",
+                          {k: (v[0], v[1]) for k, v
+                           in ARUCO_FACES["right"]["positions"].items()})
 
     # ── 等待 joint_capture_manager 服务 ──
     svc_name = "/joint_capture_manager/capture_sync_group"
