@@ -87,3 +87,4 @@ CLAUDE_DESKTOP_EXECUTION_PROMPT.md
 .venv-spray/
 build/
 devel/
+/artifacts/
