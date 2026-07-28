@@ -80,14 +80,14 @@
       </visual>
     </link>
 
-    <!-- Left: ChArUco 6×5, 0.16×0.12m, 面向 +Y -->
+    <!-- Left: AprilTag 2×2, 0.22×0.18m, 面向 +Y -->
     <link name="left_panel">
       <pose>0 0.141 0 -1.570796 0 0</pose>
       <visual name="left_panel_vis">
         <geometry>
           <mesh>
             <uri>model://calibration_target/meshes/panel_unit.dae</uri>
-            <scale>0.16 0.12 1.0</scale>
+            <scale>0.22 0.18 1.0</scale>
           </mesh>
         </geometry>
         <cast_shadows>false</cast_shadows>

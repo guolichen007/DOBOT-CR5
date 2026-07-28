@@ -55,7 +55,7 @@ APRILTAG_FACES = {
     "left": {"face_frame": "calibration_target_left_frame",
              "dict_id": aruco.DICT_APRILTAG_36h11,
              "tag_ids": {4, 5, 6, 7},
-             "board_size_m": (0.120, 0.100)},
+             "board_size_m": (0.155, 0.155)},
     "top":  {"face_frame": "calibration_target_top_frame",
              "dict_id": aruco.DICT_APRILTAG_36h11,
              "tag_ids": {8},
@@ -67,7 +67,7 @@ ARUCO_FACES = {
     "right": {"face_frame": "calibration_target_right_frame",
               "dict_id": aruco.DICT_4X4_50,
               "tag_ids": {10, 11, 12, 13},
-              "board_size_m": (0.160, 0.120)},
+              "board_size_m": (0.196, 0.176)},
 }
 
 CAMERAS = {

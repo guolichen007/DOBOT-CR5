@@ -103,8 +103,8 @@ panels:
     - 2200
     - 1800
     physical_canvas_m:
-    - 0.16
-    - 0.12
+    - 0.22
+    - 0.18
     pose_target:
       xyz:
       - 0.0
