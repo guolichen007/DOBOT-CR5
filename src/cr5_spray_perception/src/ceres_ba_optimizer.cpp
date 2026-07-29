@@ -151,6 +151,61 @@ struct TranslationPrior {
   double target_, weight_;
 };
 
+// V6: Quaternion rotation prior — 3D tangent-space residual
+//   residual[i] = w * Im(q_current * conj(q_target))[i]
+//   For small rotations: residual ≈ w * (angle_axis / 2)
+//   Use w = 2.0 / sigma_R to make residual dimensionless (~N(0,1) under prior)
+struct QuaternionPrior : public ceres::SizedCostFunction<3, 7> {
+  QuaternionPrior(const double* q_target, double weight)
+      : weight_(weight) {
+    for (int i = 0; i < 4; ++i) target_[i] = q_target[i];
+  }
+
+  bool Evaluate(const double* const* parameters,
+                double* residuals, double** jacobians) const override {
+    const double* q = parameters[0];
+    // dq = q * conj(q_target)
+    // conj(qt) = [tw, -tx, -ty, -tz]
+    double tw = target_[0], tx = -target_[1], ty = -target_[2], tz = -target_[3];
+    // q * conj(qt): w = qw*ctw - qx*ctx - qy*cty - qz*ctz ...
+    //   w =  qw* tw + qx* tx + qy* ty + qz* tz
+    //   x = -qw* tx + qx* tw - qy* tz + qz* ty
+    //   y = -qw* ty + qx* tz + qy* tw - qz* tx
+    //   z = -qw* tz - qx* ty + qy* tx + qz* tw
+    double dq_x = -q[0]*tx + q[1]*tw - q[2]*tz + q[3]*ty;
+    double dq_y = -q[0]*ty + q[1]*tz + q[2]*tw - q[3]*tx;
+    double dq_z = -q[0]*tz - q[1]*ty + q[2]*tx + q[3]*tw;
+
+    residuals[0] = weight_ * dq_x;
+    residuals[1] = weight_ * dq_y;
+    residuals[2] = weight_ * dq_z;
+
+    if (jacobians != nullptr && jacobians[0] != nullptr) {
+      std::fill(jacobians[0], jacobians[0] + 3 * 7, 0.0);
+      // ∂residual[k]/∂q[i]: k=0→x,1→y,2→z; i=0..3 quaternion, 4..6 translation(zero)
+      // dq_x = -qw*tx + qx*tw - qy*tz + qz*ty
+      jacobians[0][0 * 7 + 0] = weight_ * (-tx);             // ∂x/∂qw
+      jacobians[0][0 * 7 + 1] = weight_ * tw;                // ∂x/∂qx
+      jacobians[0][0 * 7 + 2] = weight_ * (-tz);             // ∂x/∂qy
+      jacobians[0][0 * 7 + 3] = weight_ * ty;                // ∂x/∂qz
+      // dq_y = -qw*ty + qx*tz + qy*tw - qz*tx
+      jacobians[0][1 * 7 + 0] = weight_ * (-ty);             // ∂y/∂qw
+      jacobians[0][1 * 7 + 1] = weight_ * tz;                // ∂y/∂qx
+      jacobians[0][1 * 7 + 2] = weight_ * tw;                // ∂y/∂qy
+      jacobians[0][1 * 7 + 3] = weight_ * (-tx);             // ∂y/∂qz
+      // dq_z = -qw*tz - qx*ty + qy*tx + qz*tw
+      jacobians[0][2 * 7 + 0] = weight_ * (-tz);             // ∂z/∂qw
+      jacobians[0][2 * 7 + 1] = weight_ * (-ty);             // ∂z/∂qx
+      jacobians[0][2 * 7 + 2] = weight_ * tx;                // ∂z/∂qy
+      jacobians[0][2 * 7 + 3] = weight_ * tw;                // ∂z/∂qz
+    }
+    return true;
+  }
+
+  double target_[4];
+  double weight_;
+};
+
 // ════════════════════════════════════════════════════════════
 int main(int argc, char** argv) {
   if (argc < 3) {
@@ -220,17 +275,41 @@ int main(int argc, char** argv) {
     }
   }
 
-  // V4: Camera soft prior weight (Stage 2), applied to translation only [4,5,6]
+  // V4/V6: Camera soft prior
+  // 旧 API: camera_prior_weight (translation only, σt = 1/√weight)
+  // 新 API: camera_prior_sigma_translation_m + camera_prior_sigma_rotation_rad
+  double sigma_t_m = input["options"].value("camera_prior_sigma_translation_m", -1.0);
+  double sigma_r_rad = input["options"].value("camera_prior_sigma_rotation_rad", -1.0);
   double cam_prior_w = input["options"].value("camera_prior_weight", 0.0);
-  if (cam_prior_w > 0) {
-    double w = std::sqrt(cam_prior_w);
+
+  // 兼容旧 API: camera_prior_weight → σt = 1/√w
+  if (sigma_t_m < 0 && cam_prior_w > 0) {
+    sigma_t_m = 1.0 / std::sqrt(cam_prior_w);
+  }
+
+  // 应用 camera prior (translation + rotation)
+  if (sigma_t_m > 0 || sigma_r_rad > 0) {
     for (int i = 0; i < n_cameras; ++i) {
       if (fix_first && i == 0) continue;
       auto& init = jcameras[i].at("initial_pose");
-      for (int d = 0; d < 3; ++d) {
-        double t0 = init[4 + d].get<double>();
-        auto* cost = new ceres::AutoDiffCostFunction<ScalarPrior, 1, 7>(
-            new ScalarPrior(t0, 4 + d, w));
+
+      // Translation prior: σt → weight = 1/σt
+      if (sigma_t_m > 0) {
+        double w_t = 1.0 / sigma_t_m;
+        for (int d = 0; d < 3; ++d) {
+          double t0 = init[4 + d].get<double>();
+          auto* cost = new ceres::AutoDiffCostFunction<ScalarPrior, 1, 7>(
+              new ScalarPrior(t0, 4 + d, w_t));
+          problem.AddResidualBlock(cost, nullptr, params.data() + i * 7);
+        }
+      }
+
+      // Rotation prior: σR (rad) → weight = 2/σR (so residual ≈ angle/σR)
+      if (sigma_r_rad > 0) {
+        double w_r = 2.0 / sigma_r_rad;
+        double q0[4] = {init[0].get<double>(), init[1].get<double>(),
+                        init[2].get<double>(), init[3].get<double>()};
+        auto* cost = new QuaternionPrior(q0, w_r);
         problem.AddResidualBlock(cost, nullptr, params.data() + i * 7);
       }
     }
