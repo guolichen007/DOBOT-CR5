@@ -53,15 +53,27 @@ public:
   }
 
   bool ComputeJacobian(const double* x, double* jacobian) const override {
+    // Jacobian of left-multiply Plus (q' = dq ⊗ q) at delta=0.
+    // Verified against numerical differentiation (2026-07-29).
+    // 7 rows (qw,qx,qy,qz,tx,ty,tz) × 6 cols (drx,dry,drz,dtx,dty,dtz)
     std::fill(jacobian, jacobian + 7 * 6, 0.0);
-    jacobian[0 * 6 + 0] = -0.5 * x[1]; jacobian[0 * 6 + 1] = -0.5 * x[2];
+    // ∂qw'/∂(drx,dry,drz)
+    jacobian[0 * 6 + 0] = -0.5 * x[1];
+    jacobian[0 * 6 + 1] = -0.5 * x[2];
     jacobian[0 * 6 + 2] = -0.5 * x[3];
-    jacobian[1 * 6 + 0] =  0.5 * x[0]; jacobian[1 * 6 + 1] = -0.5 * x[3];
-    jacobian[1 * 6 + 2] =  0.5 * x[2];
-    jacobian[2 * 6 + 0] =  0.5 * x[3]; jacobian[2 * 6 + 1] =  0.5 * x[0];
-    jacobian[2 * 6 + 2] = -0.5 * x[1];
-    jacobian[3 * 6 + 0] = -0.5 * x[2]; jacobian[3 * 6 + 1] =  0.5 * x[1];
+    // ∂qx'/∂(drx,dry,drz)
+    jacobian[1 * 6 + 0] =  0.5 * x[0];
+    jacobian[1 * 6 + 1] =  0.5 * x[3];  // FIXED: was -0.5*x[3]
+    jacobian[1 * 6 + 2] = -0.5 * x[2];  // FIXED: was +0.5*x[2]
+    // ∂qy'/∂(drx,dry,drz)
+    jacobian[2 * 6 + 0] = -0.5 * x[3];  // FIXED: was +0.5*x[3]
+    jacobian[2 * 6 + 1] =  0.5 * x[0];
+    jacobian[2 * 6 + 2] =  0.5 * x[1];  // FIXED: was -0.5*x[1]
+    // ∂qz'/∂(drx,dry,drz)
+    jacobian[3 * 6 + 0] =  0.5 * x[2];  // FIXED: was -0.5*x[2]
+    jacobian[3 * 6 + 1] = -0.5 * x[1];  // FIXED: was +0.5*x[1]
     jacobian[3 * 6 + 2] =  0.5 * x[0];
+    // ∂t/∂dt = Identity
     jacobian[4 * 6 + 3] = 1.0; jacobian[5 * 6 + 4] = 1.0;
     jacobian[6 * 6 + 5] = 1.0;
     return true;
@@ -112,6 +124,31 @@ struct ReprojectionError {
 
 private:
   double fx_, fy_, cx_, cy_, ox_, oy_, px_, py_, pz_;
+};
+
+// ════════════════════════════════════════════════════════════
+// Camera Prior: penalize deviation of a scalar parameter from target
+// ════════════════════════════════════════════════════════════
+struct ScalarPrior {
+  ScalarPrior(double target, int param_idx, double weight)
+      : target_(target), param_idx_(param_idx), weight_(weight) {}
+  template <typename T>
+  bool operator()(const T* const pose, T* residual) const {
+    residual[0] = weight_ * (pose[param_idx_] - T(target_));
+    return true;
+  }
+  double target_, weight_;
+  int param_idx_;
+};
+
+struct TranslationPrior {
+  TranslationPrior(double target, double weight) : target_(target), weight_(weight) {}
+  template <typename T>
+  bool operator()(const T* const pose, T* residual) const {
+    residual[0] = weight_ * (pose[4] - T(target_));  // hardcoded for tx
+    return true;
+  }
+  double target_, weight_;
 };
 
 // ════════════════════════════════════════════════════════════
@@ -167,6 +204,41 @@ int main(int argc, char** argv) {
     problem.SetParameterBlockConstant(params.data());
   }
 
+  // V4: 可选固定所有相机 (Stage 1: camera-fixed, targets-only)
+  bool fix_all_cameras = input["options"].value("fix_all_cameras", false);
+  if (fix_all_cameras) {
+    for (int i = 0; i < n_cameras; ++i) {
+      problem.SetParameterBlockConstant(params.data() + i * 7);
+    }
+  }
+
+  // V6: 可选固定所有目标 (诊断: camera-only BA)
+  bool fix_all_targets = input["options"].value("fix_all_targets", false);
+  if (fix_all_targets) {
+    for (int j = 0; j < n_targets; ++j) {
+      problem.SetParameterBlockConstant(params.data() + (n_cameras + j) * 7);
+    }
+  }
+
+  // V4: Camera soft prior weight (Stage 2), applied to translation only [4,5,6]
+  double cam_prior_w = input["options"].value("camera_prior_weight", 0.0);
+  if (cam_prior_w > 0) {
+    double w = std::sqrt(cam_prior_w);
+    for (int i = 0; i < n_cameras; ++i) {
+      if (fix_first && i == 0) continue;
+      auto& init = jcameras[i].at("initial_pose");
+      for (int d = 0; d < 3; ++d) {
+        double t0 = init[4 + d].get<double>();
+        auto* cost = new ceres::AutoDiffCostFunction<ScalarPrior, 1, 7>(
+            new ScalarPrior(t0, 4 + d, w));
+        problem.AddResidualBlock(cost, nullptr, params.data() + i * 7);
+      }
+    }
+  }
+
+  // Huber loss 门限: 默认 2.0px (实机), 仿真/噪声数据可用 ~20px
+  double huber_threshold = input["options"].value("huber_threshold_px", 2.0);
+
   // 添加观测
   auto jobs = input.at("observations");
   int n_residuals = 0;
@@ -189,7 +261,7 @@ int main(int argc, char** argv) {
                                 obj[3*k].get<double>(),
                                 obj[3*k+1].get<double>(),
                                 obj[3*k+2].get<double>()));
-      problem.AddResidualBlock(cost, new ceres::HuberLoss(2.0),
+      problem.AddResidualBlock(cost, new ceres::HuberLoss(huber_threshold),
                                params.data() + cam_idx * 7,
                                params.data() + tgt_idx * 7);
       ++n_residuals;
@@ -279,7 +351,10 @@ int main(int argc, char** argv) {
 
   // — 构建输出 JSON —
   json output;
-  output["success"] = optimizer_usable && quality_pass;
+  // 优化器收敛即视为成功; 质量门限由 quality_status 独立报告
+  // 仿真数据/噪声数据可能不满足实机验收门限, 但不应因此拒绝已收敛的结果
+  bool accept_degraded = input["options"].value("accept_degraded_quality", false);
+  output["success"] = optimizer_usable && (quality_pass || accept_degraded);
   output["optimizer_usable"] = optimizer_usable;
   output["quality_status"] = quality_pass ? "PASS" : (optimizer_usable ? "DEGRADED" : "FAIL");
   output["initial_cost"] = summary.initial_cost;
