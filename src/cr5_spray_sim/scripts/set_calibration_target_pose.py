@@ -21,67 +21,82 @@ from gazebo_msgs.srv import SetModelState, SetModelStateRequest
 from geometry_msgs.msg import Pose, Point, Quaternion
 
 
-# ── Predefined poses (relative to default: x=0.68, y=0.0, z=0.98, q=I) ──
-# target body size is ~0.34 x 0.28 x 0.24 m
-# Camera positions (roughly):
-#   front_left:  ~(0.8,  0.3, 1.2)
-#   front_right: ~(0.8, -0.3, 1.2)
-#   rear:        ~(0.8,  1.0, 1.2)  # behind CR5
+# ── V5: 目标降低至 z=0.60, 相机靠近至 ~0.85m ──
 POSE_PRESETS = {
     "center": {
-        "xyz": [0.68, 0.0, 0.98],
+        "xyz": [0.68, 0.0, 0.60],
         "rpy_deg": [0, 0, 0],
-        "desc": "Default centered pose",
+        "desc": "Default centered pose z=0.60",
     },
     "left": {
-        "xyz": [0.68, 0.08, 0.98],
+        "xyz": [0.68, 0.08, 0.60],
         "rpy_deg": [0, 0, 0],
-        "desc": "Shifted left (toward cam_rear side)",
+        "desc": "Shifted left",
     },
     "right": {
-        "xyz": [0.68, -0.08, 0.98],
+        "xyz": [0.68, -0.08, 0.60],
         "rpy_deg": [0, 0, 0],
-        "desc": "Shifted right (toward cam_front_right side)",
+        "desc": "Shifted right",
     },
     "up": {
-        "xyz": [0.68, 0.0, 1.08],
+        "xyz": [0.68, 0.0, 0.72],
         "rpy_deg": [0, 0, 0],
-        "desc": "Raised 10cm",
+        "desc": "Raised to z=0.72",
     },
     "down": {
-        "xyz": [0.68, 0.0, 0.88],
+        "xyz": [0.68, 0.0, 0.48],
         "rpy_deg": [0, 0, 0],
-        "desc": "Lowered 10cm",
+        "desc": "Lowered to z=0.48",
     },
-    "yaw_p10": {
-        "xyz": [0.68, 0.0, 0.98],
-        "rpy_deg": [0, 0, 10],
-        "desc": "Yaw +10 degrees",
+    "yaw_p15": {
+        "xyz": [0.68, 0.0, 0.60],
+        "rpy_deg": [0, 0, 15],
+        "desc": "Yaw +15deg",
     },
-    "yaw_m10": {
-        "xyz": [0.68, 0.0, 0.98],
-        "rpy_deg": [0, 0, -10],
-        "desc": "Yaw -10 degrees",
+    "yaw_m15": {
+        "xyz": [0.68, 0.0, 0.60],
+        "rpy_deg": [0, 0, -15],
+        "desc": "Yaw -15deg",
     },
-    "pitch_p8": {
-        "xyz": [0.68, 0.0, 0.98],
-        "rpy_deg": [0, 8, 0],
-        "desc": "Pitch +8 degrees",
+    "yaw_p25": {
+        "xyz": [0.68, 0.0, 0.60],
+        "rpy_deg": [0, 0, 25],
+        "desc": "Yaw +25deg (展示侧面)",
     },
-    "pitch_m8": {
-        "xyz": [0.68, 0.0, 0.98],
-        "rpy_deg": [0, -8, 0],
-        "desc": "Pitch -8 degrees",
+    "yaw_m25": {
+        "xyz": [0.68, 0.0, 0.60],
+        "rpy_deg": [0, 0, -25],
+        "desc": "Yaw -25deg (展示侧面)",
     },
-    "combo_lu": {
-        "xyz": [0.68, 0.06, 1.05],
-        "rpy_deg": [0, 0, 8],
-        "desc": "Left + up + slight yaw",
+    "pitch_p10": {
+        "xyz": [0.68, 0.0, 0.60],
+        "rpy_deg": [0, 10, 0],
+        "desc": "Pitch +10deg (顶面可见)",
     },
-    "combo_rd": {
-        "xyz": [0.68, -0.06, 0.91],
-        "rpy_deg": [0, -5, -8],
-        "desc": "Right + down + slight pitch/yaw",
+    "pitch_m10": {
+        "xyz": [0.68, 0.0, 0.60],
+        "rpy_deg": [0, -10, 0],
+        "desc": "Pitch -10deg (底面方向)",
+    },
+    "pitch_p20": {
+        "xyz": [0.68, 0.0, 0.60],
+        "rpy_deg": [0, 20, 0],
+        "desc": "Pitch +20deg (顶面大面积可见)",
+    },
+    "pitch_m20": {
+        "xyz": [0.68, 0.0, 0.60],
+        "rpy_deg": [0, -20, 0],
+        "desc": "Pitch -20deg",
+    },
+    "combo_yp": {
+        "xyz": [0.68, 0.05, 0.55],
+        "rpy_deg": [0, 12, 15],
+        "desc": "Yaw+15 Pitch+12 组合",
+    },
+    "combo_ym": {
+        "xyz": [0.68, -0.05, 0.65],
+        "rpy_deg": [0, -12, -15],
+        "desc": "Yaw-15 Pitch-12 组合",
     },
 }
 

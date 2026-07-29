@@ -15,8 +15,8 @@ simple_goalpost_frame:
   color_frame: [0.52, 0.52, 0.54, 1.0]
 
 simple_hanging_workpiece:
-  # 工件中心, X=0.68 对齐门架横梁 (CR5 工作半径内)
-  position: {x: 0.68, y: 0.0, z: 0.98}
+  # 降低高度使前相机更直接看到侧面 + 顶面 (非共面约束)
+  position: {x: 0.68, y: 0.0, z: 0.60}
   default_type: motor_housing_cylinder
   types:
     motor_housing_cylinder:
@@ -36,8 +36,8 @@ simple_hanging_workpiece:
       max_axis_m: 0.50
 
 cameras:
-  # 目标：工件中心
-  target: {x: 0.68, y: 0.0, z: 0.98}
+  # 目标：工件中心 (降低后匹配新的 spawn 位置)
+  target: {x: 0.68, y: 0.0, z: 0.60}
 
   # VM profile: 低分辨率快速刷新
   vm_profile:
@@ -56,26 +56,26 @@ cameras:
     fps: 10
 
   cameras:
-    # 前左相机 (直接坐标，不通过球面优化)
+    # 前左相机 — 靠近目标, 与目标同高, 能同时看到右侧面+前面+顶面
     - name: cam_front_left
-      position: {x: -0.18, y: -0.68, z: 1.22}
+      position: {x: -0.05, y: -0.55, z: 0.75}
       roll_offset_deg: 0.0
       keep_horizon: true
-      description: "前方左侧，距目标约1.03m"
+      description: "前左侧，距目标约0.85m, 高度接近目标中心"
 
-    # 前右相机 (与左对称)
+    # 前右相机 — 对称, 看左侧面+前面+顶面
     - name: cam_front_right
-      position: {x: -0.18, y: 0.68, z: 1.22}
+      position: {x: -0.05, y: 0.55, z: 0.75}
       roll_offset_deg: 0.0
       keep_horizon: true
-      description: "前方右侧，距目标约1.03m"
+      description: "前右侧，距目标约0.85m, 对称布局"
 
-    # 后相机 (正后方)
+    # 后相机 — 靠近目标, 正对前面 ChArUco
     - name: cam_rear
-      position: {x: 1.46, y: 0.0, z: 1.18}
+      position: {x: 1.20, y: 0.0, z: 0.75}
       roll_offset_deg: 0.0
       keep_horizon: true
-      description: "正后方，距目标约0.94m"
+      description: "正后方，距目标约0.52m, 前面ChArUco近距离高清"
 
   # 图像质量验收阈值
   image_acceptance:
