@@ -165,13 +165,12 @@ struct QuaternionPrior : public ceres::SizedCostFunction<3, 7> {
                 double* residuals, double** jacobians) const override {
     const double* q = parameters[0];
     // dq = q * conj(q_target)
-    // conj(qt) = [tw, -tx, -ty, -tz]
-    double tw = target_[0], tx = -target_[1], ty = -target_[2], tz = -target_[3];
-    // q * conj(qt): w = qw*ctw - qx*ctx - qy*cty - qz*ctz ...
-    //   w =  qw* tw + qx* tx + qy* ty + qz* tz
-    //   x = -qw* tx + qx* tw - qy* tz + qz* ty
-    //   y = -qw* ty + qx* tz + qy* tw - qz* tx
-    //   z = -qw* tz - qx* ty + qy* tx + qz* tw
+    // Im(dq) = [x, y, z] where:
+    //   x = -qw*tx + qx*tw - qy*tz + qz*ty
+    //   y = -qw*ty + qx*tz + qy*tw - qz*tx
+    //   z = -qw*tz - qx*ty + qy*tx + qz*tw
+    // with (tw,tx,ty,tz) = target_ (original, NOT pre-conjugated)
+    double tw = target_[0], tx = target_[1], ty = target_[2], tz = target_[3];
     double dq_x = -q[0]*tx + q[1]*tw - q[2]*tz + q[3]*ty;
     double dq_y = -q[0]*ty + q[1]*tz + q[2]*tw - q[3]*tx;
     double dq_z = -q[0]*tz - q[1]*ty + q[2]*tx + q[3]*tw;
@@ -182,22 +181,21 @@ struct QuaternionPrior : public ceres::SizedCostFunction<3, 7> {
 
     if (jacobians != nullptr && jacobians[0] != nullptr) {
       std::fill(jacobians[0], jacobians[0] + 3 * 7, 0.0);
-      // ∂residual[k]/∂q[i]: k=0→x,1→y,2→z; i=0..3 quaternion, 4..6 translation(zero)
-      // dq_x = -qw*tx + qx*tw - qy*tz + qz*ty
-      jacobians[0][0 * 7 + 0] = weight_ * (-tx);             // ∂x/∂qw
-      jacobians[0][0 * 7 + 1] = weight_ * tw;                // ∂x/∂qx
-      jacobians[0][0 * 7 + 2] = weight_ * (-tz);             // ∂x/∂qy
-      jacobians[0][0 * 7 + 3] = weight_ * ty;                // ∂x/∂qz
-      // dq_y = -qw*ty + qx*tz + qy*tw - qz*tx
-      jacobians[0][1 * 7 + 0] = weight_ * (-ty);             // ∂y/∂qw
-      jacobians[0][1 * 7 + 1] = weight_ * tz;                // ∂y/∂qx
-      jacobians[0][1 * 7 + 2] = weight_ * tw;                // ∂y/∂qy
-      jacobians[0][1 * 7 + 3] = weight_ * (-tx);             // ∂y/∂qz
-      // dq_z = -qw*tz - qx*ty + qy*tx + qz*tw
-      jacobians[0][2 * 7 + 0] = weight_ * (-tz);             // ∂z/∂qw
-      jacobians[0][2 * 7 + 1] = weight_ * (-ty);             // ∂z/∂qx
-      jacobians[0][2 * 7 + 2] = weight_ * tx;                // ∂z/∂qy
-      jacobians[0][2 * 7 + 3] = weight_ * tw;                // ∂z/∂qz
+      // ∂x/∂qw = -tx     ∂x/∂qx = tw     ∂x/∂qy = -tz    ∂x/∂qz = ty
+      jacobians[0][0 * 7 + 0] = weight_ * (-tx);
+      jacobians[0][0 * 7 + 1] = weight_ * tw;
+      jacobians[0][0 * 7 + 2] = weight_ * (-tz);
+      jacobians[0][0 * 7 + 3] = weight_ * ty;
+      // ∂y/∂qw = -ty     ∂y/∂qx = tz     ∂y/∂qy = tw     ∂y/∂qz = -tx
+      jacobians[0][1 * 7 + 0] = weight_ * (-ty);
+      jacobians[0][1 * 7 + 1] = weight_ * tz;
+      jacobians[0][1 * 7 + 2] = weight_ * tw;
+      jacobians[0][1 * 7 + 3] = weight_ * (-tx);
+      // ∂z/∂qw = -tz     ∂z/∂qx = -ty    ∂z/∂qy = tx     ∂z/∂qz = tw
+      jacobians[0][2 * 7 + 0] = weight_ * (-tz);
+      jacobians[0][2 * 7 + 1] = weight_ * (-ty);
+      jacobians[0][2 * 7 + 2] = weight_ * tx;
+      jacobians[0][2 * 7 + 3] = weight_ * tw;
     }
     return true;
   }
