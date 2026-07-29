@@ -40,13 +40,13 @@ from tf.transformations import euler_from_quaternion
 EXPECTED_POSITIONS = {
     "cr5_robot":                  (0.0,   0.0,  0.0),
     "simple_goalpost_frame":      (0.68,  0.0,  0.0),
-    "simple_hanging_workpiece":   (0.68,  0.0,  0.98),
+    "simple_hanging_workpiece":   (0.68,  0.0,  0.60),
     "pedestal_fl":                (-0.28, -0.68, 0.0),
     "pedestal_fr":                (-0.28,  0.68, 0.0),
     "pedestal_rear":              (1.36,  0.0,  0.0),
-    "cam_front_left":             (-0.18, -0.68, 1.22),
-    "cam_front_right":            (-0.18,  0.68, 1.22),
-    "cam_rear":                   (1.46,  0.0,  1.18),
+    "cam_front_left":             (-0.05, -0.55, 0.75),
+    "cam_front_right":            (-0.05,  0.55, 0.75),
+    "cam_rear":                   (1.20,  0.0,  0.75),
 }
 
 # 静态模型
