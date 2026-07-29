@@ -396,11 +396,16 @@ def solve_pnp(obj_pts, img_pts, K, D):
     K_arr = np.array(K, dtype=np.float64).reshape(3, 3)
     D_arr = np.array(D, dtype=np.float64).reshape(-1) if D is not None else np.zeros(4)
 
-    # EPNP + RANSAC
+    # EPNP + RANSAC; 失败时 fallback 到 IPPE (平面点友好)
     ok, rvec, tvec, inliers = cv2.solvePnPRansac(
         obj, img, K_arr, D_arr,
         flags=cv2.SOLVEPNP_EPNP, reprojectionError=3.0,
         confidence=0.99, iterationsCount=100)
+    if not ok or inliers is None or len(inliers) < 4:
+        ok, rvec, tvec, inliers = cv2.solvePnPRansac(
+            obj, img, K_arr, D_arr,
+            flags=cv2.SOLVEPNP_IPPE, reprojectionError=8.0,
+            confidence=0.99, iterationsCount=200)
     if not ok or inliers is None or len(inliers) < 4:
         return None, None, None, {"error": "PnP RANSAC failed"}
 
@@ -468,6 +473,66 @@ def compute_rig_poses(pnp_results):
         T_rig_cameras[cam] = T_rig_cami
 
     return T_rig_cameras, T_rig_target
+
+
+# ═══════════════════════════════════════════════════════════════
+# V6: 运行清单 (数据来源追踪)
+# ═══════════════════════════════════════════════════════════════
+
+def _save_run_manifest(output_dir, n_groups):
+    """保存 run_manifest.yaml — 记录本次标定运行的数据来源."""
+    import hashlib
+    import subprocess as _subprocess
+
+    manifest = {
+        "schema_version": 1,
+        "run_id": os.path.basename(output_dir),
+        "created_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "n_groups_captured": n_groups,
+        "cameras": list(CAMERAS),
+    }
+
+    # Git SHA
+    try:
+        result = _subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=os.path.dirname(__file__))
+        if result.returncode == 0:
+            manifest["git_sha"] = result.stdout.strip()
+    except Exception:
+        pass
+
+    # 场景配置文件 SHA256
+    scene_files = {}
+    search_paths = []
+    try:
+        import rospkg
+        rp = rospkg.RosPack()
+        sim_path = rp.get_path("cr5_spray_sim")
+        search_paths.append(os.path.join(
+            sim_path, "config", "simulation_scene.yaml"))
+        search_paths.append(os.path.join(
+            sim_path, "config", "calibration", "calibration_target.yaml"))
+    except Exception:
+        pass
+
+    for sp in search_paths:
+        if os.path.isfile(sp):
+            key = os.path.basename(sp)
+            try:
+                with open(sp, "rb") as f:
+                    sha = hashlib.sha256(f.read()).hexdigest()
+                scene_files[key] = {"path": sp, "sha256": sha}
+            except Exception:
+                pass
+
+    if scene_files:
+        manifest["scene_files"] = scene_files
+
+    manifest_path = os.path.join(output_dir, "run_manifest.yaml")
+    with open(manifest_path, "w") as f:
+        yaml.dump(manifest, f, default_flow_style=False)
+    rospy.loginfo("Manifest saved: %s", manifest_path)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -755,6 +820,9 @@ def main():
         yaml.dump(accumulated, f, default_flow_style=False)
     print("\nObservations saved: {} ({} groups)".format(
         obs_path, len(accumulated["observations"])))
+
+    # ── V6: 保存 run_manifest.yaml (数据来源追踪) ──
+    _save_run_manifest(args.output, n_groups)
 
     # ── 运行 Bundle Adjustment ──
     n_groups = len(accumulated["observations"])
