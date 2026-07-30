@@ -259,7 +259,10 @@ def detect_on_image(cv_img, K, D):
     # ── ArUco 面 (DICT_4X4_50, 右面) ──
     aruco_dict_4x4 = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
     params_4x4 = aruco_compat.detector_parameters()
-    params_4x4.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+    # V8.8: CORNER_REFINE_NONE — SUBPIX produces 4-7% edge scale expansion
+    # on right-face ArUco, causing 40mm planar PnP depth bias.
+    # NONE eliminates this systematic scale bias (PnP: 49.6→11.0mm).
+    params_4x4.cornerRefinementMethod = 0  # CORNER_REFINE_NONE
     corners_4x4, ids_4x4, _ = aruco_compat.detect_markers(
         gray, aruco_dict_4x4, params_4x4)
 
