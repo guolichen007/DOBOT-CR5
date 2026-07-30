@@ -335,7 +335,7 @@ int main(int argc, char** argv) {
   // Huber loss 门限: 默认 2.0px (实机), 仿真/噪声数据可用 ~20px
   double huber_threshold = input["options"].value("huber_threshold_px", 2.0);
 
-  // 添加观测 (V7: per-observation weight)
+  // 添加观测 (V8.1: per-point weights array support)
   auto jobs = input.at("observations");
   int n_residuals = 0;
   for (auto& obs : jobs) {
@@ -347,7 +347,14 @@ int main(int argc, char** argv) {
     double fy = obs.at("fy").get<double>();
     double cx = obs.at("cx").get<double>();
     double cy = obs.at("cy").get<double>();
-    double obs_weight = obs.value("weight", 1.0);
+
+    // V8.1: per-point weights array (preferred) or single weight (backward compat)
+    double obs_weight = obs.value("weight", 1.0);  // fallback
+    std::vector<double> point_weights;
+    if (obs.contains("weights") && obs["weights"].is_array()) {
+      for (auto& w : obs["weights"])
+        point_weights.push_back(w.get<double>());
+    }
 
     // V8: per-observation distortion params (Brown-Conrady)
     auto jdist = obs.value("distortion", json::array({0.0, 0.0, 0.0, 0.0, 0.0}));
@@ -359,6 +366,11 @@ int main(int argc, char** argv) {
 
     int n_pts = static_cast<int>(obj.size()) / 3;
     for (int k = 0; k < n_pts; ++k) {
+      // Per-point weight from array, or fall back to observation weight
+      double pt_weight = obs_weight;
+      if (k < static_cast<int>(point_weights.size()))
+        pt_weight = point_weights[k];
+
       auto* cost = new ceres::AutoDiffCostFunction<ReprojectionError, 2, 7, 7>(
           new ReprojectionError(fx, fy, cx, cy,
                                 img[2*k].get<double>(),
@@ -367,7 +379,7 @@ int main(int argc, char** argv) {
                                 obj[3*k+1].get<double>(),
                                 obj[3*k+2].get<double>(),
                                 dk1, dk2, dp1, dp2, dk3,
-                                obs_weight));
+                                pt_weight));
       problem.AddResidualBlock(cost, new ceres::HuberLoss(huber_threshold),
                                params.data() + cam_idx * 7,
                                params.data() + tgt_idx * 7);

@@ -98,8 +98,8 @@ def build_ceres_input(dataset: CalibrationDataset,
                 img_flat.extend([float(c.img_pt_raw[0]),
                                 float(c.img_pt_raw[1])])
 
-            # Composite weight
-            w = float(np.mean([c.weight for c in meas.corners])) if meas.corners else 1.0
+            # Per-corner weights (V8.1: individual point weights, not mean)
+            corner_weights = [float(c.weight) for c in meas.corners]
 
             obs_entry = {
                 "camera_idx": cam_idx,
@@ -108,7 +108,8 @@ def build_ceres_input(dataset: CalibrationDataset,
                 "cx": float(K[0, 2]), "cy": float(K[1, 2]),
                 "obj_pts": obj_flat,
                 "img_pts": img_flat,
-                "weight": w,
+                "weight": float(np.mean(corner_weights)) if corner_weights else 1.0,  # backward compat
+                "weights": corner_weights,  # V8.1: per-corner weights
             }
 
             # Add distortion if present

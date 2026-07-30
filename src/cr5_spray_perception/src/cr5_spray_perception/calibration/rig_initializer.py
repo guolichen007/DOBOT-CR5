@@ -47,7 +47,7 @@ def extract_nonplanar_measurements(dataset: CalibrationDataset
                         dtype=np.float64) if dataset.camera_infos[cam].get("D") else None
 
             T, _, _, stats = solve_pnp(
-                cam_meas.obj_pts, cam_meas.img_pts_undistorted, K, D)
+                cam_meas.obj_pts, cam_meas.img_pts_raw, K, D)  # raw pixels + distortion (V8: no pre-undistort)
 
             if T is None:
                 continue
@@ -206,7 +206,9 @@ def build_factor_graph(dataset: CalibrationDataset,
                             "n_groups": len(measurements)}
 
     # Build data arrays for optimization
-    # residuals = [(cam_idx, tgt_idx, T_measured)]
+    # residuals = [(cam, tgt_idx, T_measured)]
+    # ALL cameras (including FL) contribute to residuals.
+    # FL camera variable is fixed at identity, but its measurements anchor the targets.
     residuals_data = []
     cam_to_idx = {"cam_front_right": 0, "cam_rear": 1}
     tgt_to_idx = {}
@@ -214,8 +216,6 @@ def build_factor_graph(dataset: CalibrationDataset,
         if gid not in tgt_to_idx:
             tgt_to_idx[gid] = len(tgt_to_idx)
         for cam, (T, stats) in measurements[gid].items():
-            if cam == "cam_front_left":
-                continue  # fixed
             residuals_data.append((cam, gid, T, stats))
 
     n_targets = len(tgt_to_idx)
@@ -259,11 +259,12 @@ def build_factor_graph(dataset: CalibrationDataset,
     # Build residual function
     def residual_func(params):
         X_cams, Y_tgts = _params_to_poses(params, n_targets)
+        # Ensure FL is available (fixed identity)
+        X_cams["cam_front_left"] = np.eye(4)
         residuals = []
         for cam, gid, T_measured, stats in residuals_data:
-            ci = cam_to_idx[cam]
             ti = tgt_to_idx[gid]
-            X_c = X_cams[cam]
+            X_c = X_cams[cam]  # works for FL (identity) + FR + RE
             Y_g = Y_tgts[ti]
 
             # Predicted: T_camera_target_pred = inv(X_c) * Y_g

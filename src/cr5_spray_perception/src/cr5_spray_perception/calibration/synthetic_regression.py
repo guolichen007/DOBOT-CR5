@@ -47,43 +47,49 @@ except ImportError:
 #
 # Each T_rig_camera maps FROM camera optical frame TO rig frame.
 
-TARGET_CENTER_RIG = np.array([0.02, 0.0, 0.70])
+# ── Self-Consistent Synthetic Scene (V8.1: canonicalized) ──
+#
+# Rig frame = FL optical frame (identity by definition).
+# Step 1: Generate all poses in a "world" frame
+# Step 2: Canonicalize: T_rig = inv(T_world_FL) @ T_world
+# This ensures T_rig_FL = identity exactly (verified by assert).
 
-def _make_camera_pose(cam_pos_rig, look_at_rig):
-    """Build T_rig_camera: maps optical frame to rig frame.
+TARGET_CENTER_WORLD = np.array([0.0, 0.0, 0.70])  # centered on FL's forward axis
 
-    Optical convention: +z forward, +x right, -y down (OpenCV/pinhole).
-    Camera at cam_pos_rig looks at look_at_rig.
+def _make_camera_pose(cam_pos, look_at):
+    """Build T_world_camera in world frame.
+    Optical convention: +z forward, +x right, -y down.
     """
-    forward = look_at_rig - cam_pos_rig
+    forward = look_at - cam_pos
     forward = forward / np.linalg.norm(forward)
-
-    # World up in rig frame = +z, but avoid degeneracy when forward ∥ [0,0,1]
     world_up = np.array([0.0, 0.0, 1.0])
     if abs(np.dot(forward, world_up)) > 0.999:
-        world_up = np.array([0.0, 1.0, 0.0])  # use +y as reference
-
+        world_up = np.array([0.0, 1.0, 0.0])
     right = np.cross(world_up, forward)
     right = right / np.linalg.norm(right)
     down = np.cross(forward, right)
     down = down / np.linalg.norm(down)
-
-    # Columns of T_rig_camera are optical axes in rig frame:
-    #   col0 = camera +x in rig (right)
-    #   col1 = camera +y in rig (down)
-    #   col2 = camera +z in rig (forward)
     R = np.column_stack([right, down, forward])
-
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = cam_pos_rig
+    T = np.eye(4); T[:3,:3] = R; T[:3,3] = cam_pos
     return T
 
-TRUTH_CAM_POSES = {
-    "cam_front_left": _make_camera_pose(np.array([0.0, 0.0, 0.0]), TARGET_CENTER_RIG),
-    "cam_front_right": _make_camera_pose(np.array([0.0, 0.50, 0.02]), TARGET_CENTER_RIG),
-    "cam_rear": _make_camera_pose(np.array([0.0, 0.0, 1.35]), TARGET_CENTER_RIG),
+# World-frame camera poses
+T_WORLD_CAMS = {
+    "cam_front_left":  _make_camera_pose(np.array([0.0, 0.0, 0.0]), TARGET_CENTER_WORLD),
+    "cam_front_right": _make_camera_pose(np.array([0.0, 0.50, 0.02]), TARGET_CENTER_WORLD),
+    "cam_rear":        _make_camera_pose(np.array([0.0, 0.0, 1.35]), TARGET_CENTER_WORLD),
 }
+
+# Canonicalize: T_rig_cam = inv(T_world_FL) @ T_world_cam
+T_WORLD_FL = T_WORLD_CAMS["cam_front_left"]
+TRUTH_CAM_POSES = {
+    cam: np.linalg.inv(T_WORLD_FL) @ T_wc
+    for cam, T_wc in T_WORLD_CAMS.items()
+}
+
+# Verify FL is exactly identity
+assert np.allclose(TRUTH_CAM_POSES["cam_front_left"], np.eye(4), atol=1e-10), \
+    f"FL not identity: {TRUTH_CAM_POSES['cam_front_left']}"
 
 # Camera intrinsics (quality profile)
 CAMERA_K = [[462.138, 0, 320], [0, 462.138, 240], [0, 0, 1]]
@@ -99,14 +105,14 @@ FACE_POSES_TARGET = {
 
 
 def generate_target_poses(n_groups: int = 12) -> dict:
-    """Generate diverse target poses in front of the FL camera.
+    """Generate diverse target poses in world frame, centered on FL forward axis.
 
-    Target center at rig-frame position (0.1, 0.0, 0.70) — roughly where
-    the calibration target sits: ~0.7m in front of FL, centered.
-    Various yaw/pitch and small XYZ perturbations for diversity.
+    Target nominal at [0, 0, 0.70] in world — directly in front of FL.
+    Yaw/pitch rotations + small XYZ perturbations for diversity.
+    Canonicalized to rig frame: T_rig_target = inv(T_world_FL) @ T_world_target.
     """
     target_poses = {}
-    target_nominal = np.array([0.10, 0.0, 0.70])
+    target_nominal = TARGET_CENTER_WORLD.copy()  # [0, 0, 0.70]
 
     designs = [
         (0, 0, "center"),
@@ -125,9 +131,12 @@ def generate_target_poses(n_groups: int = 12) -> dict:
             np.random.uniform(-0.04, 0.04),
             np.random.uniform(-0.04, 0.04),
         ])
-        T = euler_matrix(0.0, math.radians(pitch_deg), math.radians(yaw_deg))
-        T[:3, 3] = pos
-        target_poses[i] = (T, label)
+        T_world_target = euler_matrix(0.0, math.radians(pitch_deg), math.radians(yaw_deg))
+        T_world_target[:3, 3] = pos
+
+        # Canonicalize to rig frame
+        T_rig_target = np.linalg.inv(T_WORLD_FL) @ T_world_target
+        target_poses[i] = (T_rig_target, label)
 
     return target_poses
 
@@ -353,39 +362,42 @@ def run_all_tests() -> dict:
 
     results = {}
 
-    # S0: noise-free factor graph init (PnP propagation limits accuracy)
+    # ── Strict V8.1 acceptance thresholds ──
+    # S0: noise-free → <0.1mm / <0.01°
     results["S0"] = run_test_scenario(
         "S0 — Noise-Free Factor Graph Init", lambda: generate_dataset(12, noise_sigma_px=0.0),
-        expected_max_t_mm=600.0, expected_max_r_deg=3.0)
+        expected_max_t_mm=0.1, expected_max_r_deg=0.01)
 
-    # S1: Gaussian 0.3px
+    # S1: Gaussian 0.3px → <2mm / <0.2°
     results["S1"] = run_test_scenario(
         "S1 — Gaussian 0.3px", lambda: generate_dataset(12, noise_sigma_px=0.3),
-        expected_max_t_mm=100.0, expected_max_r_deg=3.0)
+        expected_max_t_mm=2.0, expected_max_r_deg=0.2)
 
-    # S2: Gaussian 0.8px
+    # S2: Gaussian 0.8px → <5mm / <0.5°
     results["S2"] = run_test_scenario(
         "S2 — Gaussian 0.8px", lambda: generate_dataset(12, noise_sigma_px=0.8),
-        expected_max_t_mm=100.0, expected_max_r_deg=3.0)
+        expected_max_t_mm=5.0, expected_max_r_deg=0.5)
 
-    # S3: 10% outliers (PnP-level contamination, needs robust BA)
+    # S3: 10% outliers → factor graph with Cauchy handles at init level (<10mm/<1°)
     results["S3"] = run_test_scenario(
-        "S3 — 10% outliers (needs Ceres BA)",
+        "S3 — 10% outliers 5-15px",
         lambda: generate_dataset(12, noise_sigma_px=0.3,
                                  outlier_fraction=0.10, outlier_range=(5, 15)),
-        expected_max_t_mm=200.0, expected_max_r_deg=10.0)
+        expected_max_t_mm=10.0, expected_max_r_deg=1.0)
 
-    # S4: Back face bias (PnP contaminated, needs face bias detection)
+    # S4: Back face bias → factor graph init degraded (needs BA bias detection)
     results["S4"] = run_test_scenario(
-        "S4 — Back face bias (needs bias detection)",
+        "S4 — Back face bias (-5,-4)px",
         lambda: generate_dataset(12, noise_sigma_px=0.3,
                                  bias_face="back", bias_du=-5.0, bias_dv=-4.0),
-        expected_max_t_mm=200.0, expected_max_r_deg=10.0)
+        expected_max_t_mm=10.0, expected_max_r_deg=1.0, expect_bias_detection=True)
 
-    # S5: 5 groups — factor graph may converge but observability gate will reject
-    # (tested at pipeline level, skip at factor graph level)
-    results["S5"] = {"passed": True, "errors": {"note": "skipped at FG level, tested at pipeline level"},
-                      "status": "SKIP"}
+    # S5: 5 sparse groups → must fail observability (tested at pipeline level)
+    results["S5"] = run_test_scenario(
+        "S5 — 5 sparse groups",
+        lambda: generate_dataset(5, noise_sigma_px=0.3),
+        expected_max_t_mm=999, expected_max_r_deg=999,
+        expect_insufficient=True)
 
     return results
 

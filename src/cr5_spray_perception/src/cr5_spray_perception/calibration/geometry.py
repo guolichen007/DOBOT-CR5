@@ -122,9 +122,14 @@ def se3_log(T):
 
 
 def se3_exp(log):
-    """SE(3) exponential map: 6D tangent vector → 4x4 matrix.
+    """SE(3) exponential map: 6D vector → 4x4 matrix.
 
-    Inverse of se3_log. Rotation part uses Rodrigues formula.
+    Input: [rx, ry, rz, tx, ty, tz] where [rx,ry,rz] = angle-axis rotation,
+    [tx,ty,tz] = translation (simple copy, not proper Lie algebra velocity).
+
+    Inverse of se3_log. For small rotations, this is equivalent to the
+    proper Lie algebra exponential; for large rotations the translation
+    is used directly (sufficient for optimization residual normalization).
     """
     rx, ry, rz = log[0], log[1], log[2]
     tx, ty, tz = log[3], log[4], log[5]
@@ -133,17 +138,14 @@ def se3_exp(log):
     if theta < 1e-12:
         T[:3, 3] = [tx, ty, tz]
         return T
-    # Rotation: Rodrigues
     axis = np.array([rx, ry, rz]) / theta
     K = np.array([[0, -axis[2], axis[1]],
                   [axis[2], 0, -axis[0]],
                   [-axis[1], axis[0], 0]])
     R = np.eye(3) + math.sin(theta) * K + (1 - math.cos(theta)) * K @ K
-    # Translation: V * t where V = I + (1-cos)/theta * K + (theta-sin)/theta * K^2
-    V = np.eye(3) + (1.0 - math.cos(theta)) / theta * K + (theta - math.sin(theta)) / theta * K @ K
-    t = V @ np.array([tx, ty, tz])
+    # Translation: direct copy (consistent with se3_log)
     T[:3, :3] = R
-    T[:3, 3] = t
+    T[:3, 3] = [tx, ty, tz]
     return T
 
 
@@ -315,3 +317,64 @@ def look_at_rotation(cam_pos, target_pos):
         cam_z = cam_z / cam_z_norm
     R = np.column_stack([cam_x, cam_y, cam_z])
     return R, d, dist
+
+
+# ── SE3 Contract Self-Tests ──
+
+def _run_se3_contract_tests():
+    """Verify SE(3) mathematical contracts. Raises AssertionError on failure."""
+    import numpy as np
+
+    # Test 1: invert_transform
+    T = euler_matrix(0.3, -0.5, 1.2)
+    T[:3, 3] = [1.0, -2.0, 0.5]
+    Tinv = invert_transform(T)
+    assert np.allclose(T @ Tinv, np.eye(4), atol=1e-10), "T @ inv(T) ≠ I"
+    assert np.allclose(Tinv @ T, np.eye(4), atol=1e-10), "inv(T) @ T ≠ I"
+
+    # Test 2: se3_exp(se3_log(T)) ≈ T
+    log = se3_log(T)
+    T_recovered = se3_exp(log)
+    assert np.allclose(T, T_recovered, atol=1e-10), \
+        f"se3_exp(se3_log(T)) ≠ T:\n{T}\nvs\n{T_recovered}"
+
+    # Test 3: se3_log order: [rx,ry,rz, tx,ty,tz]
+    # Zero rotation should give zeros for rotation part
+    T_pure_trans = np.eye(4)
+    T_pure_trans[:3, 3] = [3.0, -1.0, 2.0]
+    log_pt = se3_log(T_pure_trans)
+    assert np.allclose(log_pt[0:3], [0, 0, 0], atol=1e-10), \
+        f"pure translation log rotation part not zero: {log_pt[0:3]}"
+    assert np.allclose(log_pt[3:6], [3.0, -1.0, 2.0], atol=1e-10), \
+        f"pure translation log translation part wrong: {log_pt[3:6]}"
+
+    # Test 4: Rotation geodesic distance
+    R1 = np.eye(3)
+    R2 = euler_matrix(0, 0, math.radians(90))[:3, :3]
+    assert abs(rotation_distance_deg(R1, R2) - 90.0) < 1e-6, \
+        f"90° rotation distance wrong: {rotation_distance_deg(R1, R2)}"
+
+    # Test 5: qt_to_T / T_to_qt round-trip
+    qt = T_to_qt(T)
+    T_rt = qt_to_T(qt)
+    assert np.allclose(T, T_rt, atol=1e-10), "qt_to_T(T_to_qt(T)) ≠ T"
+
+    # Test 6: T_rig_camera contract: p_rig = T_rig_camera @ p_camera
+    T_rc = euler_matrix(0.1, 0.2, 0.3)
+    T_rc[:3, 3] = [5.0, 3.0, -1.0]
+    p_camera = np.array([1.0, 2.0, 3.0, 1.0])
+    p_rig = T_rc @ p_camera
+    # Verify: this matches the contract
+    assert np.allclose(p_rig[:3], T_rc[:3, :3] @ p_camera[:3] + T_rc[:3, 3], atol=1e-10)
+
+    # Test 7: quaternion_average for identical quaternions
+    q = np.array([[1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]])
+    avg = quaternion_average(q)
+    assert np.allclose(avg, [1.0, 0.0, 0.0, 0.0], atol=1e-10), f"quat avg: {avg}"
+
+    return True
+
+
+if __name__ == "__main__":
+    _run_se3_contract_tests()
+    print("SE3 contract tests: ALL PASSED")
