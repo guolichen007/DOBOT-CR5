@@ -137,7 +137,7 @@ class FixedCameraSpawner:
                 rospy.logerr("Spawn %s failed: %s", name, resp.status_message)
                 self.failed += 1
         except Exception as e:
-            rospy.logerr("Spawn %s error: %s", e)
+            rospy.logerr("Spawn %s error: %s", name, e)
             self.failed += 1
 
 

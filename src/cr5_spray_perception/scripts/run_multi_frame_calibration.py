@@ -375,59 +375,274 @@ def undistort_points(img_pts, K, D):
     return undistorted.reshape(-1, 2).tolist()
 
 
+def _compute_reproj_stats(obj_pts, img_pts, rvec, tvec, K_arr, D_arr):
+    """计算重投影统计: rmse_all, rmse_inlier, median, P90, max, positive_depth_ratio."""
+    proj, _ = cv2.projectPoints(obj_pts, rvec, tvec, K_arr, D_arr)
+    errors = np.linalg.norm(img_pts - proj.reshape(-1, 2), axis=1)
+
+    # Cheirality: positive depth ratio
+    R, _ = cv2.Rodrigues(rvec)
+    t = np.asarray(tvec).flatten()
+    pts_cam = (R @ obj_pts.T).T + t  # Nx3
+    depth_pos = np.sum(pts_cam[:, 2] > 0)
+    pos_ratio = depth_pos / len(obj_pts) if len(obj_pts) > 0 else 0.0
+
+    return {
+        "rmse_all_px": float(np.sqrt(np.mean(errors ** 2))),
+        "median_px": float(np.median(errors)),
+        "p90_px": float(np.percentile(errors, 90)),
+        "max_px": float(np.max(errors)),
+        "positive_depth_ratio": float(pos_ratio),
+        "errors": errors,
+    }
+
+
+def _compute_planarity(obj_pts):
+    """SVD 平面分析: 返回 s1,s2,s3, s3/s2 ratio, planarity_score.
+
+    s3/s2 < 1e-3 通常表示共面 (ChArUco board),
+    非共面 (多面观测) 会给出更大值.
+    """
+    pts_mean = np.mean(obj_pts, axis=0)
+    pts_centered = obj_pts - pts_mean
+    _, S, _ = np.linalg.svd(pts_centered, full_matrices=False)
+    s1, s2, s3 = float(S[0]), float(S[1]), float(S[2]) if len(S) > 2 else 0.0
+    ratio = s3 / s2 if s2 > 1e-12 else 1.0
+    planarity_score = float(s3 / (s1 + s2 + s3)) if (s1 + s2 + s3) > 1e-12 else 0.0
+    return s1, s2, s3, ratio, planarity_score
+
+
+def _rvec_tvec_to_T(rvec, tvec):
+    """rvec, tvec → 4x4 T matrix."""
+    R, _ = cv2.Rodrigues(rvec)
+    T = np.eye(4)
+    T[:3, :3] = R
+    T[:3, 3] = np.asarray(tvec).flatten()
+    return T
+
+
 def solve_pnp(obj_pts, img_pts, K, D):
-    """PnP: 计算 T_camera_target (相机在 target 坐标系中的位姿).
+    """PnP: 计算 T_camera_target (相机在 target 坐标系中的位姿). V2: 新增 planarity/IPPE/统计.
 
     OpenCV solvePnP 返回的 rvec/tvec 满足:
       p_camera = R * p_target + t
     即 T_camera_target: 将 target 系 3D 点变换到 camera 系
 
+    Args:
+        obj_pts: Nx3 目标坐标 (calibration_target_frame)
+        img_pts: Nx2 像素坐标 (去畸变后)
+        K: 3x3 内参矩阵
+        D: 畸变系数 (可选, 已去畸变传 None)
+
     Returns:
-        T_cam_target: 4x4 变换矩阵 (p_camera = T_cam_target @ p_target)
+        T_cam_target: 4x4 变换矩阵
         rvec, tvec: OpenCV 格式
-        stats: dict with inliers, rmse_px
-        None 如果失败
+        stats: dict {
+            solver, planar, singular_values, planarity_score,
+            n_points, n_inliers, inlier_ratio,
+            rmse_all_px, rmse_inlier_px, median_px, p90_px, max_px,
+            candidates: [候选列表],
+            selected_candidate: int,  # 选中的 candidate 索引
+        }
+        失败返回 (None, None, None, {"error": ...})
     """
     if len(obj_pts) < 4:
-        return None, None, None, None
+        return None, None, None, {"error": "need >= 4 points", "solver": "none",
+                                   "planar": False, "n_points": len(obj_pts),
+                                   "n_inliers": 0, "inlier_ratio": 0.0,
+                                   "rmse_all_px": 0.0, "rmse_inlier_px": 0.0,
+                                   "singular_values": [0,0,0], "s3_s2_ratio": 0.0,
+                                   "planarity_score": 0.0, "candidates": [],
+                                   "selected_candidate": 0}
 
-    obj = np.array(obj_pts, dtype=np.float32).reshape(-1, 3)
-    img = np.array(img_pts, dtype=np.float32).reshape(-1, 2)
+    obj = np.array(obj_pts, dtype=np.float64).reshape(-1, 3)
+    img = np.array(img_pts, dtype=np.float64).reshape(-1, 2)
     K_arr = np.array(K, dtype=np.float64).reshape(3, 3)
     D_arr = np.array(D, dtype=np.float64).reshape(-1) if D is not None else np.zeros(4)
 
-    # EPNP + RANSAC; 失败时 fallback 到 IPPE (平面点友好)
-    ok, rvec, tvec, inliers = cv2.solvePnPRansac(
-        obj, img, K_arr, D_arr,
-        flags=cv2.SOLVEPNP_EPNP, reprojectionError=3.0,
-        confidence=0.99, iterationsCount=100)
-    if not ok or inliers is None or len(inliers) < 4:
-        ok, rvec, tvec, inliers = cv2.solvePnPRansac(
-            obj, img, K_arr, D_arr,
-            flags=cv2.SOLVEPNP_IPPE, reprojectionError=8.0,
-            confidence=0.99, iterationsCount=200)
-    if not ok or inliers is None or len(inliers) < 4:
-        return None, None, None, {"error": "PnP RANSAC failed"}
+    n_pts = len(obj)
 
-    # LM 精化
-    rvec, tvec = cv2.solvePnPRefineLM(
-        obj, img, K_arr, D_arr, rvec, tvec,
-        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-6))
+    # ── A. 计算 SVD 平面分析 ──
+    s1, s2, s3, sv_ratio, planarity_score = _compute_planarity(obj)
+    planar = sv_ratio < 1e-3  # 共面阈值
 
-    # 重投影误差
-    proj, _ = cv2.projectPoints(obj, rvec, tvec, K_arr, D_arr)
-    errors = np.linalg.norm(img - proj.reshape(-1, 2), axis=1)
-    rmse = float(np.sqrt(np.mean(errors ** 2)))
-
-    R, _ = cv2.Rodrigues(rvec)
-    T = np.eye(4)
-    T[:3, :3] = R
-    T[:3, 3] = tvec.flatten()
-
-    return T, rvec, tvec, {
-        "inliers": int(len(inliers)), "n_pts": len(obj_pts),
-        "rmse_px": rmse, "max_error_px": float(np.max(errors)),
+    # ── B. 统计基础 ──
+    stats = {
+        "planar": bool(planar),
+        "singular_values": [s1, s2, s3],
+        "s3_s2_ratio": float(sv_ratio),
+        "planarity_score": float(planarity_score),
+        "n_points": n_pts,
+        "candidates": [],
+        "selected_candidate": 0,
     }
+
+    rvec_final, tvec_final = None, None
+
+    if planar:
+        # ── C. 共面: 尝试 solvePnPGeneric(IPPE) 获取双解; 失败则 fallback solvePnPRansac(IPPE) ──
+        stats["solver"] = "IPPE"
+        candidates = []
+
+        def _try_solvePnPGeneric_IPPE():
+            """OpenCV 4.2 solvePnPGeneric 有 dtype bug. 用 named args 避开."""
+            try:
+                retval, rvecs, tvecs, _reproj = cv2.solvePnPGeneric(
+                    objectPoints=obj.astype(np.float32),
+                    imagePoints=img.astype(np.float32),
+                    cameraMatrix=K_arr.astype(np.float64),
+                    distCoeffs=D_arr.astype(np.float64),
+                    flags=cv2.SOLVEPNP_IPPE)
+                return retval, rvecs, tvecs
+            except Exception:
+                return None, None, None
+
+        retval, rvecs, tvecs = _try_solvePnPGeneric_IPPE()
+
+        if rvecs is None or len(rvecs) == 0:
+            # Fallback: 使用 solvePnPRansac(IPPE) 单解
+            stats["solver"] = "IPPE_fallback"
+            ok_fb, rvec_fb, tvec_fb, inliers_fb = cv2.solvePnPRansac(
+                obj.astype(np.float32), img.astype(np.float32),
+                K_arr.astype(np.float64), D_arr.astype(np.float64),
+                flags=cv2.SOLVEPNP_IPPE, reprojectionError=3.0,
+                confidence=0.99, iterationsCount=100)
+            if not ok_fb or inliers_fb is None or len(inliers_fb) < 4:
+                return None, None, None, {
+                    "error": "IPPE all methods failed", "solver": "IPPE_fallback",
+                    "planar": True, "n_points": n_pts, "n_inliers": 0,
+                    "inlier_ratio": 0.0, "rmse_all_px": 0.0, "rmse_inlier_px": 0.0,
+                    "singular_values": [s1, s2, s3], "s3_s2_ratio": float(sv_ratio),
+                    "planarity_score": float(planarity_score), "candidates": [],
+                    "selected_candidate": 0}
+            rvecs = [rvec_fb]
+            tvecs = [tvec_fb]
+
+        candidates = []
+        for idx, (rv, tv) in enumerate(zip(rvecs, tvecs)):
+            rv_arr = np.asarray(rv, dtype=np.float64).reshape(3, 1)
+            tv_arr = np.asarray(tv, dtype=np.float64).reshape(3, 1)
+
+            # 使用 RANSAC 提取 inliers (IPPE 候选需要验证)
+            ok_ransac, _, _, inliers = cv2.solvePnPRansac(
+                obj.astype(np.float32), img.astype(np.float32),
+                K_arr.astype(np.float64), D_arr.astype(np.float64),
+                rvec=rv_arr, tvec=tv_arr, useExtrinsicGuess=True,
+                flags=cv2.SOLVEPNP_ITERATIVE, reprojectionError=3.0,
+                confidence=0.99, iterationsCount=50)
+
+            n_inl = len(inliers) if inliers is not None else 0
+            inlier_pts = (obj[inliers.flatten()], img[inliers.flatten()]) if inliers is not None and len(inliers) >= 4 else (obj, img)
+
+            # RefineLM 仅 inliers
+            try:
+                rv_refined, tv_refined = cv2.solvePnPRefineLM(
+                    inlier_pts[0].astype(np.float32), inlier_pts[1].astype(np.float32),
+                    K_arr.astype(np.float64), D_arr.astype(np.float64),
+                    rv_arr, tv_arr,
+                    (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-6))
+            except Exception:
+                rv_refined, tv_refined = rv_arr, tv_arr
+
+            # 统计
+            s_all = _compute_reproj_stats(
+                obj.astype(np.float32), img.astype(np.float32),
+                rv_refined, tv_refined, K_arr, D_arr)
+            s_inl = _compute_reproj_stats(
+                inlier_pts[0].astype(np.float32), inlier_pts[1].astype(np.float32),
+                rv_refined, tv_refined, K_arr, D_arr)
+
+            T = _rvec_tvec_to_T(rv_refined, tv_refined)
+
+            candidates.append({
+                "rvec": rv_refined.flatten().tolist(),
+                "tvec": tv_refined.flatten().tolist(),
+                "T_camera_target": T.tolist(),
+                "n_inliers": n_inl,
+                "inlier_ratio": float(n_inl / n_pts) if n_pts > 0 else 0.0,
+                "positive_depth_ratio": s_all["positive_depth_ratio"],
+                "rmse_all_px": s_all["rmse_all_px"],
+                "rmse_inlier_px": s_inl["rmse_all_px"],
+                "median_px": s_all["median_px"],
+                "p90_px": s_all["p90_px"],
+                "max_px": s_all["max_px"],
+            })
+
+        if not candidates:
+            return None, None, None, {"error": "IPPE: no valid candidates"}
+
+        # 选候选: (1) positive depth > 0.5, (2) 最低 inlier RMSE
+        valid = [c for c in candidates if c["positive_depth_ratio"] > 0.5]
+        if not valid:
+            valid = candidates  # 全部无效就都保留
+        best = min(valid, key=lambda c: c["rmse_inlier_px"])
+        best_idx = candidates.index(best)
+
+        stats["candidates"] = candidates
+        stats["selected_candidate"] = best_idx
+        stats["n_inliers"] = best["n_inliers"]
+        stats["inlier_ratio"] = best["inlier_ratio"]
+        stats["rmse_all_px"] = best["rmse_all_px"]
+        stats["rmse_inlier_px"] = best["rmse_inlier_px"]
+        stats["median_px"] = best["median_px"]
+        stats["p90_px"] = best["p90_px"]
+        stats["max_px"] = best["max_px"]
+        stats["positive_depth_ratio"] = best["positive_depth_ratio"]
+
+        rvec_final = np.array(best["rvec"], dtype=np.float64).reshape(3, 1)
+        tvec_final = np.array(best["tvec"], dtype=np.float64).reshape(3, 1)
+
+    else:
+        # ── D. 非共面: EPNP + RANSAC → inlier-only RefineLM ──
+        stats["solver"] = "EPNP"
+
+        ok, rvec_init, tvec_init, inliers = cv2.solvePnPRansac(
+            obj.astype(np.float32), img.astype(np.float32),
+            K_arr.astype(np.float64), D_arr.astype(np.float64),
+            flags=cv2.SOLVEPNP_EPNP, reprojectionError=3.0,
+            confidence=0.99, iterationsCount=100)
+
+        if not ok or inliers is None or len(inliers) < 4:
+            return None, None, None, {"error": "EPNP RANSAC failed", "solver": "EPNP"}
+
+        n_inl = len(inliers)
+        inlier_mask = inliers.flatten()
+        obj_inl = obj[inlier_mask].astype(np.float32)
+        img_inl = img[inlier_mask].astype(np.float32)
+
+        # RefineLM 仅使用 inliers
+        try:
+            rvec_final, tvec_final = cv2.solvePnPRefineLM(
+                obj_inl, img_inl, K_arr.astype(np.float64), D_arr.astype(np.float64),
+                rvec_init, tvec_init,
+                (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-6))
+        except Exception:
+            rvec_final, tvec_final = rvec_init, tvec_init
+
+        # 统计
+        s_all = _compute_reproj_stats(
+            obj.astype(np.float32), img.astype(np.float32),
+            rvec_final, tvec_final, K_arr, D_arr)
+        s_inl = _compute_reproj_stats(
+            obj_inl, img_inl, rvec_final, tvec_final, K_arr, D_arr)
+
+        stats["n_inliers"] = n_inl
+        stats["inlier_ratio"] = float(n_inl / n_pts)
+        stats["rmse_all_px"] = s_all["rmse_all_px"]
+        stats["rmse_inlier_px"] = s_inl["rmse_all_px"]
+        stats["median_px"] = s_all["median_px"]
+        stats["p90_px"] = s_all["p90_px"]
+        stats["max_px"] = s_all["max_px"]
+        stats["positive_depth_ratio"] = s_all["positive_depth_ratio"]
+
+    # ── E. 构造 T 矩阵 ──
+    T = _rvec_tvec_to_T(rvec_final, tvec_final)
+
+    # 兼容旧接口: rmse_px = rmse_inlier_px (inlier 上的 RMSE)
+    stats["rmse_px"] = stats.get("rmse_inlier_px", stats.get("rmse_all_px", 0.0))
+    stats["n_pts"] = n_pts
+
+    return T, rvec_final, tvec_final, stats
 
 
 def T_to_quat_trans(T):

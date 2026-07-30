@@ -88,9 +88,11 @@ public:
 // ════════════════════════════════════════════════════════════
 struct ReprojectionError {
   ReprojectionError(double fx, double fy, double cx, double cy,
-                    double ox, double oy, double px, double py, double pz)
+                    double ox, double oy, double px, double py, double pz,
+                    double weight = 1.0)
       : fx_(fx), fy_(fy), cx_(cx), cy_(cy),
-        ox_(ox), oy_(oy), px_(px), py_(py), pz_(pz) {}
+        ox_(ox), oy_(oy), px_(px), py_(py), pz_(pz),
+        sqrt_weight_(std::sqrt(std::max(weight, 1e-12))) {}
 
   template <typename T>
   bool operator()(const T* const cam_pose, const T* const tgt_pose,
@@ -109,21 +111,21 @@ struct ReprojectionError {
 
     // 深度保护: z ≤ 0 时返回大残差, 避免除零/负深度
     if (pc[2] <= T(1e-6)) {
-      residual[0] = T(1e6);
-      residual[1] = T(1e6);
+      residual[0] = T(1e6) * T(sqrt_weight_);
+      residual[1] = T(1e6) * T(sqrt_weight_);
       return true;
     }
 
     T u_pred = T(fx_) * pc[0] / pc[2] + T(cx_);
     T v_pred = T(fy_) * pc[1] / pc[2] + T(cy_);
 
-    residual[0] = T(ox_) - u_pred;
-    residual[1] = T(oy_) - v_pred;
+    residual[0] = T(sqrt_weight_) * (T(ox_) - u_pred);
+    residual[1] = T(sqrt_weight_) * (T(oy_) - v_pred);
     return true;
   }
 
 private:
-  double fx_, fy_, cx_, cy_, ox_, oy_, px_, py_, pz_;
+  double fx_, fy_, cx_, cy_, ox_, oy_, px_, py_, pz_, sqrt_weight_;
 };
 
 // ════════════════════════════════════════════════════════════
@@ -316,7 +318,7 @@ int main(int argc, char** argv) {
   // Huber loss 门限: 默认 2.0px (实机), 仿真/噪声数据可用 ~20px
   double huber_threshold = input["options"].value("huber_threshold_px", 2.0);
 
-  // 添加观测
+  // 添加观测 (V7: per-observation weight)
   auto jobs = input.at("observations");
   int n_residuals = 0;
   for (auto& obs : jobs) {
@@ -328,6 +330,7 @@ int main(int argc, char** argv) {
     double fy = obs.at("fy").get<double>();
     double cx = obs.at("cx").get<double>();
     double cy = obs.at("cy").get<double>();
+    double obs_weight = obs.value("weight", 1.0);
 
     int n_pts = static_cast<int>(obj.size()) / 3;
     for (int k = 0; k < n_pts; ++k) {
@@ -337,7 +340,8 @@ int main(int argc, char** argv) {
                                 img[2*k+1].get<double>(),
                                 obj[3*k].get<double>(),
                                 obj[3*k+1].get<double>(),
-                                obj[3*k+2].get<double>()));
+                                obj[3*k+2].get<double>(),
+                                obs_weight));
       problem.AddResidualBlock(cost, new ceres::HuberLoss(huber_threshold),
                                params.data() + cam_idx * 7,
                                params.data() + tgt_idx * 7);
