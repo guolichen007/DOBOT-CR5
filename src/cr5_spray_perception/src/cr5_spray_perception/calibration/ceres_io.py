@@ -16,7 +16,9 @@ from .measurement import CalibrationDataset
 def build_ceres_input(dataset: CalibrationDataset,
                        camera_poses: Optional[Dict[str, np.ndarray]] = None,
                        target_poses: Optional[Dict[int, np.ndarray]] = None,
-                       options: Optional[dict] = None) -> Tuple[dict, List[str]]:
+                       options: Optional[dict] = None,
+                       require_complete_initialization: bool = True,
+                       allow_identity_fallback: bool = False) -> Tuple[dict, List[str]]:
     """Build Ceres BA input JSON from CalibrationDataset.
 
     Features vs legacy build_ceres_input:
@@ -24,20 +26,60 @@ def build_ceres_input(dataset: CalibrationDataset,
       - Per-observation composite weight
       - Distortion model: [k1,k2,p1,p2,k3] per observation
       - Staged optimization options
+      - V8.5: require_complete_initialization (default True) — every camera/target
+        must have a non-identity initial pose. Identity fallback is forbidden
+        in production; only allowed for synthetic/testing with explicit opt-in.
 
     Args:
         dataset: CalibrationDataset
         camera_poses: {cam_name: 4x4 T_rig_camera} initial camera poses
         target_poses: {group_id: 4x4 T_rig_target} initial target poses
         options: Ceres solver options dict
+        require_complete_initialization: if True (default), missing camera/target
+            poses cause a structured error instead of silent identity fallback
+        allow_identity_fallback: if True, missing poses default to identity
+            (legacy/test mode only; ignored if require_complete_initialization=True)
 
     Returns:
         (ceres_input_json_dict, camera_names_list)
+        If require_complete_initialization=True and any pose is missing,
+        returns (None, error_list).
     """
     if options is None:
         options = {}
 
     cam_names = sorted(dataset.camera_infos.keys())
+    expected_cameras = {"cam_front_left", "cam_front_right", "cam_rear"}
+    group_ids = sorted(dataset.groups.keys())
+
+    # ── V8.5: Complete initialization check ──
+    if require_complete_initialization:
+        errors = []
+        missing_cams = []
+        for cn in expected_cameras:
+            if cn not in dataset.camera_infos:
+                missing_cams.append(cn)
+            elif camera_poses is None or cn not in camera_poses:
+                missing_cams.append(cn)
+        if missing_cams:
+            errors.append(
+                "INCOMPLETE_INITIALIZATION: missing camera poses for {}".format(
+                    sorted(missing_cams)))
+
+        missing_targets = []
+        for gid in group_ids:
+            if target_poses is None or gid not in target_poses:
+                missing_targets.append(gid)
+        if missing_targets:
+            errors.append(
+                "INCOMPLETE_INITIALIZATION: missing target poses for groups {}".format(
+                    sorted(missing_targets)))
+
+        if errors:
+            return None, errors
+
+    def _identity_qt():
+        return [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
 
     # ── Cameras JSON ──
     cameras_json = []
@@ -47,8 +89,11 @@ def build_ceres_input(dataset: CalibrationDataset,
         if camera_poses and cam_name in camera_poses:
             from .geometry import T_to_qt
             qt = T_to_qt(camera_poses[cam_name])
+        elif allow_identity_fallback:
+            qt = _identity_qt()
         else:
-            qt = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            # V8.5: this path should be unreachable with require_complete_initialization
+            return None, [f"INCOMPLETE_INITIALIZATION: no pose for {cam_name}"]
 
         cameras_json.append({
             "name": cam_name,
@@ -59,13 +104,15 @@ def build_ceres_input(dataset: CalibrationDataset,
 
     # ── Targets JSON ──
     targets_json = []
-    group_ids = sorted(dataset.groups.keys())
     for gid in group_ids:
         if target_poses and gid in target_poses:
             from .geometry import T_to_qt
             qt = T_to_qt(target_poses[gid])
+        elif allow_identity_fallback:
+            qt = _identity_qt()
         else:
-            qt = [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            # V8.5: this path should be unreachable with require_complete_initialization
+            return None, [f"INCOMPLETE_INITIALIZATION: no pose for target group {gid}"]
 
         targets_json.append({
             "group_id": int(gid),

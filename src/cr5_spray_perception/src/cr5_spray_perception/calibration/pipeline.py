@@ -20,7 +20,8 @@ from .geometry import (se3_distance_mm_deg, invert_transform, T_to_qt, qt_to_T,
                        euler_matrix, rpy_from_rotation)
 from .measurement import CalibrationDataset, CameraGroupMeasurement, CornerObservation
 from .pnp_solver import solve_pnp, compute_planarity
-from .rig_initializer import build_factor_graph, extract_nonplanar_measurements
+from .rig_initializer import (build_factor_graph, extract_nonplanar_measurements,
+                              initialize_rig)
 from .quality import (detect_face_bias, compute_composite_weight, FaceBiasDiagnostic,
                       FaceQuality, INCIDENCE_WEIGHTS, classify_face_quality,
                       compute_incidence_angle)
@@ -109,38 +110,52 @@ def run_calibration_pipeline(dataset: CalibrationDataset,
             if T is not None:
                 pnp_measurements[gid][cam] = (T, stats)
 
-    # ── Step 2: Non-planar factor graph init ──
-    print("[pipeline] Step 2: Factor graph init")
-    np_meas = extract_nonplanar_measurements(dataset)
-    if len(np_meas) < 3:
-        # Try with all measurements that pass quality
-        result.diagnostics.append(f"only {len(np_meas)} non-planar groups for factor graph")
-        result.init_success = False
-        # Still try with minimal config
+    # ── Step 2: V8.5 Complete rig init with planar branch consensus ──
+    print("[pipeline] Step 2: V8.5 Rig init (planar + branch consensus)")
+    X_init, Y_init, init_diag = initialize_rig(dataset)
+    if X_init is None:
+        # Fallback to old nonplanar-only for backward compat
+        print("[pipeline]   V8.5 init failed, falling back to nonplanar-only")
+        np_meas = extract_nonplanar_measurements(dataset)
         if len(np_meas) < 2:
             result.status = "INIT_FAILED"
+            result.diagnostics.append(init_diag.get("error", "V8.5 init failed"))
+            result.diagnostics.append(f"only {len(np_meas)} non-planar groups")
+            return result
+        X_init, Y_init, fg_diag = build_factor_graph(dataset)
+        if X_init is None:
+            result.status = "INIT_FAILED"
+            result.diagnostics.append(f"factor graph: {fg_diag.get('error', 'unknown')}")
             return result
 
-    X_init, Y_init, fg_diag = build_factor_graph(dataset)
-    if X_init is None:
-        result.status = "INIT_FAILED"
-        result.diagnostics.append(f"factor graph: {fg_diag.get('error', 'unknown')}")
-        return result
-
+    # V8.5: Verify complete initialization
+    all_gids = sorted(dataset.groups.keys())
     result.init_camera_poses = {c: X_init[c] for c in X_init}
     result.init_target_poses = {g: Y_init[g] for g in Y_init}
-    result.init_success = True
-    result.diagnostics.append(f"factor graph: {fg_diag.get('n_targets', 0)} targets, "
-                              f"cost={fg_diag.get('final_cost', 0):.6f}")
+    result.init_success = (len(X_init) >= 2 and len(Y_init) >= 2)
+
+    missing_y = set(all_gids) - set(Y_init.keys())
+    if missing_y:
+        result.diagnostics.append(
+            f"WARNING: {len(missing_y)} groups without target init: {sorted(missing_y)}")
+    result.diagnostics.append(
+        f"V8.5 init: {len(Y_init)}/{len(all_gids)} targets, "
+        f"{len(X_init)} cameras, "
+        f"n_planar={init_diag.get('stages',{}).get('hypotheses',{}).get('n_planar_obs',0)}, "
+        f"n_ambiguous={init_diag.get('stages',{}).get('target_init',{}).get('n_ambiguous',0)}")
 
     # ── Step 3: Ceres BA-1 ──
     print("[pipeline] Step 3: Ceres BA-1")
     # Set initial per-corner weights from quality module
     _set_initial_weights(dataset)
 
+    # V8.5: For pipeline runs, allow_identity_fallback only if some targets are missing
+    _needs_fb = len(missing_y) > 0
     ba1_input, cam_names = build_ceres_input(
         dataset, camera_poses=X_init, target_poses=Y_init,
-        options={"huber_threshold_px": 2.0, "max_iterations": 300})
+        options={"huber_threshold_px": 2.0, "max_iterations": 300},
+        require_complete_initialization=False,
+        allow_identity_fallback=_needs_fb)
     ba1_output, ba1_errors = run_ceres_ba(ba1_input, output_dir, "ba1")
     if ba1_output is None:
         result.status = "BA1_FAILED"
@@ -195,7 +210,9 @@ def run_calibration_pipeline(dataset: CalibrationDataset,
     ba2_input, _ = build_ceres_input(
         dataset, camera_poses=result.ba1_camera_poses,
         target_poses=result.ba1_target_poses,
-        options={"huber_threshold_px": 2.0, "max_iterations": 300})
+        options={"huber_threshold_px": 2.0, "max_iterations": 300},
+        require_complete_initialization=False,
+        allow_identity_fallback=False)
     ba2_output, ba2_errors = run_ceres_ba(ba2_input, output_dir, "ba2")
     if ba2_output is None:
         result.diagnostics.extend(ba2_errors)

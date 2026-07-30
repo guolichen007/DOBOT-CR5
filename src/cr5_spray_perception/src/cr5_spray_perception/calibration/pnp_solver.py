@@ -264,11 +264,17 @@ def solve_pnp_planar(obj_pts: np.ndarray, img_pts: np.ndarray,
     if not candidates:
         return None, None, None, {"error": "IPPE: no valid candidates", **stats}
 
-    # Select best: positive depth > 0.5, then lowest inlier RMSE
-    valid = [c for c in candidates if c["positive_depth_ratio"] > 0.5]
-    if not valid:
-        valid = candidates
-    best = min(valid, key=lambda c: c["rmse_inlier_px"])
+    # V8.5: Stricter branch selection
+    # Hard filter: positive_depth_ratio >= 0.99 (all points must be in front)
+    cheirality_ok = [c for c in candidates if c["positive_depth_ratio"] >= 0.99]
+    if not cheirality_ok:
+        # Relax to 0.5 if no candidate passes strict check
+        cheirality_ok = [c for c in candidates if c["positive_depth_ratio"] > 0.5]
+    if not cheirality_ok:
+        cheirality_ok = candidates  # all fail, keep all
+
+    # Among cheirality-valid candidates, pick lowest reprojection RMSE
+    best = min(cheirality_ok, key=lambda c: c["rmse_inlier_px"])
     best_idx = candidates.index(best)
 
     stats["candidates"] = candidates
@@ -289,6 +295,195 @@ def solve_pnp_planar(obj_pts: np.ndarray, img_pts: np.ndarray,
     T = rvec_tvec_to_T(rvec_final, tvec_final)
 
     return T, rvec_final, tvec_final, stats
+
+
+def compute_face_facing_score(T_camera_target: np.ndarray,
+                              face_names: list,
+                              face_normals_target: dict,
+                              face_centers_target: dict) -> float:
+    """Compute face-facing consistency score for a PnP candidate.
+
+    For each detected face, check that its outward normal points toward the
+    camera (cos_incidence > 0). Returns the fraction of faces that are
+    physically facing the camera.
+
+    This uses only target geometry (known from calibration_target.yaml) and
+    the candidate pose — NO Gazebo truth.
+
+    Args:
+        T_camera_target: 4x4 candidate pose
+        face_names: list of face names detected in this observation
+        face_normals_target: {face_name: outward normal in target frame (3,)}
+        face_centers_target: {face_name: face center in target frame (3,)}
+
+    Returns:
+        dict with facing_scores, facing_ok flags, and per-face cos_incidence
+    """
+    cam_origin = np.array([0., 0., 0.])  # camera frame origin
+    T_target_camera = np.linalg.inv(T_camera_target)
+
+    facing_scores = {}
+    all_ok = True
+    for fn in face_names:
+        n_target = np.asarray(face_normals_target[fn])
+        fc_target = np.asarray(face_centers_target[fn])
+
+        # Transform face center and normal to camera frame
+        fc_cam = T_camera_target[:3, :3] @ fc_target + T_camera_target[:3, 3]
+        n_cam = T_camera_target[:3, :3] @ n_target
+
+        # Vector from face center to camera origin
+        v = -fc_cam  # camera is at origin, so v = cam - face_center = -face_center_in_cam
+        v = v / (np.linalg.norm(v) + 1e-12)
+
+        cos_inc = float(np.dot(n_cam, v))
+        facing_scores[fn] = {
+            "cos_incidence": cos_inc,
+            "facing_ok": cos_inc > 0.0,
+        }
+        if cos_inc <= 0.0:
+            all_ok = False
+
+    return {
+        "facing_ok": all_ok,
+        "n_facing_ok": sum(1 for v in facing_scores.values() if v["facing_ok"]),
+        "n_faces": len(face_names),
+        "per_face": facing_scores,
+    }
+
+
+class PnPHypothesis:
+    """A single PnP candidate with full diagnostics."""
+    __slots__ = ('T', 'rvec', 'tvec', 'planar', 'solver',
+                 'rmse_all_px', 'rmse_inlier_px', 'median_px', 'p90_px',
+                 'positive_depth_ratio', 'n_inliers', 'n_pts',
+                 'face_facing', 'branch_confidence')
+
+    def __init__(self, T, rvec, tvec, stats, face_facing=None):
+        self.T = T
+        self.rvec = rvec
+        self.tvec = tvec
+        self.planar = stats.get("planar", False)
+        self.solver = stats.get("solver", "unknown")
+        self.rmse_all_px = stats.get("rmse_all_px", 0)
+        self.rmse_inlier_px = stats.get("rmse_inlier_px", stats.get("rmse_all_px", 0))
+        self.median_px = stats.get("median_px", 0)
+        self.p90_px = stats.get("p90_px", 0)
+        self.positive_depth_ratio = stats.get("positive_depth_ratio", 0)
+        self.n_inliers = stats.get("n_inliers", 0)
+        self.n_pts = stats.get("n_points", stats.get("n_pts", 0))
+        self.face_facing = face_facing or {}
+        self.branch_confidence = 0.0  # set by consensus algorithm
+
+
+def solve_pnp_hypotheses(obj_pts, img_pts, K, D=None, weights=None,
+                         face_names=None,
+                         face_normals_target=None,
+                         face_centers_target=None):
+    """Run PnP and return ALL candidate hypotheses (no early branch selection).
+
+    For non-planar: returns single hypothesis.
+    For planar (IPPE): returns 1-2 hypotheses with face-facing scores.
+
+    Branch selection is deferred to the multi-camera consensus algorithm.
+
+    Returns:
+        list of PnPHypothesis objects (empty list on failure)
+    """
+    obj = np.asarray(obj_pts, dtype=np.float64)
+    img = np.asarray(img_pts, dtype=np.float64)
+    K_arr = np.asarray(K, dtype=np.float64)
+    D_arr = np.asarray(D, dtype=np.float64) if D is not None else np.zeros(4)
+
+    _, _, _, sv_ratio, _ = compute_planarity(obj)
+    planar = sv_ratio < 1e-3
+    hypotheses = []
+
+    if planar:
+        # ── IPPE: generate both candidates ──
+        rvecs, tvecs = [], []
+        try:
+            _, _rvecs, _tvecs, _ = cv2.solvePnPGeneric(
+                objectPoints=obj.astype(np.float32),
+                imagePoints=img.astype(np.float32),
+                cameraMatrix=K_arr.astype(np.float64),
+                distCoeffs=D_arr.astype(np.float64),
+                flags=cv2.SOLVEPNP_IPPE)
+            if _rvecs is not None and len(_rvecs) > 0:
+                rvecs, tvecs = _rvecs, _tvecs
+        except Exception:
+            pass
+
+        if len(rvecs) == 0:
+            # Fallback: solvePnPRansac(IPPE) single solution
+            ok_fb, rvec_fb, tvec_fb, inliers_fb = cv2.solvePnPRansac(
+                obj.astype(np.float32), img.astype(np.float32),
+                K_arr.astype(np.float64), D_arr.astype(np.float64),
+                flags=cv2.SOLVEPNP_IPPE, reprojectionError=3.0,
+                confidence=0.99, iterationsCount=100)
+            if ok_fb and inliers_fb is not None and len(inliers_fb) >= 4:
+                rvecs = [rvec_fb]
+                tvecs = [tvec_fb]
+
+        for rv, tv in zip(rvecs, tvecs):
+            rv_arr = np.asarray(rv, dtype=np.float64).reshape(3, 1)
+            tv_arr = np.asarray(tv, dtype=np.float64).reshape(3, 1)
+
+            # Refine with RANSAC + RefineLM
+            ok_ransac, _, _, inliers = cv2.solvePnPRansac(
+                obj.astype(np.float32), img.astype(np.float32),
+                K_arr.astype(np.float64), D_arr.astype(np.float64),
+                rvec=rv_arr, tvec=tv_arr, useExtrinsicGuess=True,
+                flags=cv2.SOLVEPNP_ITERATIVE, reprojectionError=3.0,
+                confidence=0.99, iterationsCount=50)
+
+            n_inl = len(inliers) if inliers is not None else 0
+            inlier_obj = obj[inliers.flatten()] if inliers is not None and len(inliers) >= 4 else obj
+            inlier_img = img[inliers.flatten()] if inliers is not None and len(inliers) >= 4 else img
+
+            try:
+                rv_ref, tv_ref = cv2.solvePnPRefineLM(
+                    inlier_obj.astype(np.float32), inlier_img.astype(np.float32),
+                    K_arr, D_arr, rv_arr, tv_arr,
+                    (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 100, 1e-6))
+            except Exception:
+                rv_ref, tv_ref = rv_arr, tv_arr
+
+            T = rvec_tvec_to_T(rv_ref, tv_ref)
+            s_all = compute_reproj_stats(obj, img, rv_ref, tv_ref, K_arr, D_arr, weights)
+
+            stats = {
+                "solver": "IPPE",
+                "planar": True,
+                "n_points": len(obj),
+                "n_inliers": n_inl,
+                "inlier_ratio": float(n_inl / len(obj)) if len(obj) > 0 else 0,
+                "rmse_all_px": s_all["rmse_all_px"],
+                "rmse_inlier_px": s_all["rmse_all_px"],
+                "median_px": s_all["median_px"],
+                "p90_px": s_all["p90_px"],
+                "positive_depth_ratio": s_all["positive_depth_ratio"],
+            }
+
+            # Face-facing check
+            face_facing = None
+            if face_names and face_normals_target and face_centers_target:
+                face_facing = compute_face_facing_score(
+                    T, face_names, face_normals_target, face_centers_target)
+
+            hypotheses.append(PnPHypothesis(T, rv_ref, tv_ref, stats, face_facing))
+    else:
+        # ── Non-planar: single hypothesis from EPNP ──
+        from .pnp_solver import solve_pnp_nonplanar
+        Tnp, rv, tv, stats_np = solve_pnp_nonplanar(obj_pts, img_pts, K, D, weights)
+        if Tnp is not None:
+            face_facing = None
+            if face_names and face_normals_target and face_centers_target:
+                face_facing = compute_face_facing_score(
+                    Tnp, face_names, face_normals_target, face_centers_target)
+            hypotheses.append(PnPHypothesis(Tnp, rv, tv, stats_np, face_facing))
+
+    return hypotheses
 
 
 def solve_pnp(obj_pts: np.ndarray, img_pts: np.ndarray,
