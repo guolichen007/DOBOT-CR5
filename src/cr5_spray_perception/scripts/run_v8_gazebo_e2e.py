@@ -72,11 +72,15 @@ def build_T_target_face(face_name):
 def detect_on_image(cv_img, K, D):
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
     results = {}
-    # ChArUco
+    # ChArUco (use more permissive params for oblique views)
     for fk, fc in CHARUCO_FACES.items():
         board = fc["board"]; id_start = fc["id_start"]
         params = aruco_compat.detector_parameters()
         params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+        params.adaptiveThreshWinSizeMin = 3  # smaller window for small markers
+        params.adaptiveThreshWinSizeMax = 23
+        params.minMarkerPerimeterRate = 0.01  # detect smaller markers at oblique angles
+        params.polygonalApproxAccuracyRate = 0.05  # more tolerant
         corners, ids, _ = aruco_compat.detect_markers(gray, board.dictionary, params)
         obj_pts, img_pts = [], []
         if ids is not None:
@@ -99,6 +103,9 @@ def detect_on_image(cv_img, K, D):
     aruco_4x4 = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
     params4 = aruco_compat.detector_parameters()
     params4.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+    params4.adaptiveThreshWinSizeMin = 3
+    params4.minMarkerPerimeterRate = 0.01
+    params4.polygonalApproxAccuracyRate = 0.05
     corners4, ids4, _ = aruco_compat.detect_markers(gray, aruco_4x4, params4)
     for fk, fc in ARUCO_FACES.items():
         obj_pts, img_pts = [], []
@@ -116,6 +123,9 @@ def detect_on_image(cv_img, K, D):
     tag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
     params_t = aruco_compat.detector_parameters()
     params_t.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
+    params_t.adaptiveThreshWinSizeMin = 3
+    params_t.minMarkerPerimeterRate = 0.01
+    params_t.polygonalApproxAccuracyRate = 0.05
     corners_t, ids_t, _ = aruco_compat.detect_markers(gray, tag_dict, params_t)
     for fk, fc in APRILTAG_FACES.items():
         obj_pts, img_pts = [], []
