@@ -84,14 +84,16 @@ public:
 };
 
 // ════════════════════════════════════════════════════════════
-// 重投影误差 (自动微分)
+// 重投影误差 (自动微分) — V8: Brown-Conrady 畸变支持
 // ════════════════════════════════════════════════════════════
 struct ReprojectionError {
   ReprojectionError(double fx, double fy, double cx, double cy,
                     double ox, double oy, double px, double py, double pz,
+                    double k1, double k2, double p1, double p2, double k3,
                     double weight = 1.0)
       : fx_(fx), fy_(fy), cx_(cx), cy_(cy),
         ox_(ox), oy_(oy), px_(px), py_(py), pz_(pz),
+        k1_(k1), k2_(k2), p1_(p1), p2_(p2), k3_(k3),
         sqrt_weight_(std::sqrt(std::max(weight, 1e-12))) {}
 
   template <typename T>
@@ -116,8 +118,21 @@ struct ReprojectionError {
       return true;
     }
 
-    T u_pred = T(fx_) * pc[0] / pc[2] + T(cx_);
-    T v_pred = T(fy_) * pc[1] / pc[2] + T(cy_);
+    // Normalized coordinates
+    T xp = pc[0] / pc[2];
+    T yp = pc[1] / pc[2];
+
+    // Brown-Conrady distortion (k1,k2,k3 radial + p1,p2 tangential)
+    T r2 = xp * xp + yp * yp;
+    T r4 = r2 * r2;
+    T r6 = r2 * r4;
+    T radial = T(1.0) + T(k1_) * r2 + T(k2_) * r4 + T(k3_) * r6;
+    T x_dist = xp * radial + T(2.0) * T(p1_) * xp * yp + T(p2_) * (r2 + T(2.0) * xp * xp);
+    T y_dist = yp * radial + T(p1_) * (r2 + T(2.0) * yp * yp) + T(2.0) * T(p2_) * xp * yp;
+
+    // Pixel coordinates
+    T u_pred = T(fx_) * x_dist + T(cx_);
+    T v_pred = T(fy_) * y_dist + T(cy_);
 
     residual[0] = T(sqrt_weight_) * (T(ox_) - u_pred);
     residual[1] = T(sqrt_weight_) * (T(oy_) - v_pred);
@@ -125,7 +140,9 @@ struct ReprojectionError {
   }
 
 private:
-  double fx_, fy_, cx_, cy_, ox_, oy_, px_, py_, pz_, sqrt_weight_;
+  double fx_, fy_, cx_, cy_, ox_, oy_, px_, py_, pz_;
+  double k1_, k2_, p1_, p2_, k3_;
+  double sqrt_weight_;
 };
 
 // ════════════════════════════════════════════════════════════
@@ -332,6 +349,14 @@ int main(int argc, char** argv) {
     double cy = obs.at("cy").get<double>();
     double obs_weight = obs.value("weight", 1.0);
 
+    // V8: per-observation distortion params (Brown-Conrady)
+    auto jdist = obs.value("distortion", json::array({0.0, 0.0, 0.0, 0.0, 0.0}));
+    double dk1 = jdist.size() > 0 ? jdist[0].get<double>() : 0.0;
+    double dk2 = jdist.size() > 1 ? jdist[1].get<double>() : 0.0;
+    double dp1 = jdist.size() > 2 ? jdist[2].get<double>() : 0.0;
+    double dp2 = jdist.size() > 3 ? jdist[3].get<double>() : 0.0;
+    double dk3 = jdist.size() > 4 ? jdist[4].get<double>() : 0.0;
+
     int n_pts = static_cast<int>(obj.size()) / 3;
     for (int k = 0; k < n_pts; ++k) {
       auto* cost = new ceres::AutoDiffCostFunction<ReprojectionError, 2, 7, 7>(
@@ -341,6 +366,7 @@ int main(int argc, char** argv) {
                                 obj[3*k].get<double>(),
                                 obj[3*k+1].get<double>(),
                                 obj[3*k+2].get<double>(),
+                                dk1, dk2, dp1, dp2, dk3,
                                 obs_weight));
       problem.AddResidualBlock(cost, new ceres::HuberLoss(huber_threshold),
                                params.data() + cam_idx * 7,
