@@ -130,18 +130,19 @@ class ObservabilityGateResult:
 
 
 def check_observability(dataset: CalibrationDataset,
+                         target_poses: Optional[Dict[int, np.ndarray]] = None,
                          min_groups_per_camera: int = 6,
                          min_nonplanar_per_camera: int = 3,
                          min_yaw_span_deg: float = 25.0,
                          min_pitch_span_deg: float = 20.0
                          ) -> ObservabilityGateResult:
-    """Validate that the dataset provides sufficient observability.
+    """Validate dataset observability using real target poses.
 
     Checks:
     1. Each non-reference camera: >= min_groups_per_camera independent groups
     2. >= min_nonplanar_per_camera high-quality non-planar groups
-    3. Camera-target graph connected (through shared groups)
-    4. Pose diversity: yaw span >= min_yaw_span, pitch span >= min_pitch_span
+    3. Camera-target graph connected
+    4. Pose diversity from T_rig_target: yaw/pitch span + xyz spread
     """
     failures = []
     warnings = []
@@ -166,7 +167,6 @@ def check_observability(dataset: CalibrationDataset,
             failures.append(f"{cam}: {n_np} non-planar groups < {min_nonplanar_per_camera}")
 
     # Check 3: graph connectivity
-    # Build which cams share which groups
     cam_adj = {c: set() for c in dataset.CAMERAS}
     for gid, gdata in dataset.groups.items():
         cams_in_group = list(gdata.keys())
@@ -189,33 +189,62 @@ def check_observability(dataset: CalibrationDataset,
     if visited != all_cams:
         missing = all_cams - visited
         failures.append(f"graph disconnected: {sorted(missing)} not connected to {ref_cam}")
+    stats["graph_connected"] = (visited == all_cams)
 
-    # Check 4: pose diversity
-    # Use target_initial_pose from observations
-    yaws, pitches = [], []
-    for gid, gdata in dataset.groups.items():
-        # Approximate yaw/pitch from face normals or from target pose
-        # For now, check if we have diverse enough face visibility
-        all_faces = set()
-        for meas in gdata.values():
-            all_faces.update(meas.detected_faces)
-        if "top" in all_faces:
-            pitches.append(10.0)  # top face visible → some pitch variation
-        else:
-            pitches.append(0.0)
+    # Check 4: Real pose diversity from target poses
+    if target_poses is not None and len(target_poses) >= 2:
+        yaws, pitches, rolls = [], [], []
+        translations = []
 
-    if pitches:
+        for gid, T in target_poses.items():
+            r, p, y = rpy_from_rotation(T[:3, :3])
+            rolls.append(math.degrees(r))
+            pitches.append(math.degrees(p))
+            yaws.append(math.degrees(y))
+            translations.append(T[:3, 3].copy())
+
+        # Compute spans (handle wrap-around for yaw via circular stats)
+        yaw_span = _circular_span_deg(yaws)
         pitch_span = max(pitches) - min(pitches)
+        roll_span = max(rolls) - min(rolls)
+
+        translations = np.array(translations)
+        xyz_span_mm = np.max(translations, axis=0) - np.min(translations, axis=0)
+
+        stats["yaw_span_deg"] = round(yaw_span, 1)
         stats["pitch_span_deg"] = round(pitch_span, 1)
+        stats["roll_span_deg"] = round(roll_span, 1)
+        stats["xyz_span_mm"] = [round(v, 1) for v in (xyz_span_mm * 1000)]
+
+        if yaw_span < min_yaw_span_deg:
+            failures.append(f"yaw span {yaw_span:.1f}° < {min_yaw_span_deg}°")
         if pitch_span < min_pitch_span_deg:
-            warnings.append(f"pitch span {pitch_span:.1f}° < {min_pitch_span_deg}°")
+            failures.append(f"pitch span {pitch_span:.1f}° < {min_pitch_span_deg}°")
 
     passed = len(failures) == 0
     return ObservabilityGateResult(
-        passed=passed,
-        failures=failures,
-        warnings=warnings,
-        stats=stats)
+        passed=passed, failures=failures, warnings=warnings, stats=stats)
+
+
+def _circular_span_deg(angles_deg):
+    """Compute circular span of angles in degrees (handle wrap-around)."""
+    if len(angles_deg) < 2:
+        return 0.0
+    angles_rad = [math.radians(a) for a in angles_deg]
+    # Compute mean direction
+    c = sum(math.cos(a) for a in angles_rad)
+    s = sum(math.sin(a) for a in angles_rad)
+    # Span = max angular distance from mean
+    mean_angle = math.atan2(s / len(angles_rad), c / len(angles_rad))
+    max_dist = max(abs(_angle_diff_rad(a, mean_angle)) for a in angles_rad)
+    # Span estimate: 2 × max_deviation from mean
+    return math.degrees(2 * max_dist)
+
+
+def _angle_diff_rad(a, b):
+    """Signed angular difference (radians) in [-π, π]."""
+    d = a - b
+    return (d + math.pi) % (2 * math.pi) - math.pi
 
 
 # ── Leave-One-Out Validation ──
