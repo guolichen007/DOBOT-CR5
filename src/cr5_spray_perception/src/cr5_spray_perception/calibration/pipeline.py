@@ -175,12 +175,7 @@ def run_calibration_pipeline(dataset: CalibrationDataset,
     result.point_outlier_report = point_report
 
     # Apply point quarantine
-    quarantined_points = set()
-    for entry in residual_table:
-        if point_report.get("classification", {}).get(str(entry.get("corner_idx", "")), "") == "QUARANTINE":
-            quarantined_points.add((entry["camera"], entry["group_id"],
-                                   entry.get("marker_id"), entry.get("corner_idx")))
-    _apply_point_quarantine(dataset, quarantined_points, residual_table)
+    _apply_point_quarantine(dataset, residual_table)
 
     # ── Step 6: Face bias detection ──
     print("[pipeline] Step 6: Face bias audit")
@@ -252,12 +247,22 @@ def run_calibration_pipeline(dataset: CalibrationDataset,
         result.held_out_result = _run_held_out(dataset, output_dir, options)
 
     # ── Final status ──
-    loo_pass = result.loo_result.get("passed", True) if result.loo_result else True
-    sh_pass = result.split_half_result.get("passed", True) if result.split_half_result else True
-    ho_pass = result.held_out_result.get("passed", True) if result.held_out_result else True
+    cv_available = (result.loo_result is not None and
+                    result.split_half_result is not None and
+                    result.held_out_result is not None)
 
-    result.final_status, _ = determine_final_status(
-        result.observability, loo_pass, sh_pass, ho_pass)
+    if not cv_available:
+        if skip_cross_validation:
+            result.final_status = "CALIBRATION_CORE_CONVERGED_VALIDATION_INCOMPLETE"
+        else:
+            result.final_status = "CALIBRATION_VALIDATION_INCOMPLETE"
+    else:
+        loo_pass = result.loo_result.get("passed", False)
+        sh_pass = result.split_half_result.get("passed", False)
+        ho_pass = result.held_out_result.get("passed", False)
+
+        result.final_status, _ = determine_final_status(
+            result.observability, loo_pass, sh_pass, ho_pass)
 
     # Truth comparison (validation only, if provided)
     if truth_cam_poses is not None:
@@ -362,11 +367,51 @@ def _audit_point_outliers(residual_table, mad_multiplier=5.0):
     }
 
 
-def _apply_point_quarantine(dataset, quarantined_points, residual_table):
-    """Set weight=0 for quarantined outlier corners."""
-    # Not applied by default — point outlier audit is informational
-    # Only apply if error is extreme (> 3x robust sigma)
-    pass
+def _apply_point_quarantine(dataset, residual_table, mad_multiplier=5.0, abs_floor_px=2.5):
+    """Apply point quarantine based on residual statistics.
+
+    Each corner classified: GOOD (ok), DOWNWEIGHT (×0.25), QUARANTINE (×0).
+    Uses robust MAD-based threshold with absolute floor.
+    """
+    errors = np.array([r["error_px"] for r in residual_table])
+    if len(errors) < 10:
+        return {"n_total": len(errors), "n_quarantined": 0, "n_downweighted": 0}
+
+    median = np.median(errors)
+    mad = np.median(np.abs(errors - median))
+    robust_sigma = 1.4826 * mad
+    threshold = max(median + mad_multiplier * robust_sigma, abs_floor_px)
+    mild_threshold = max(median + 3.0 * robust_sigma, abs_floor_px * 0.8)
+
+    # Build classification for every corner
+    classifications = {}
+    n_q, n_dw = 0, 0
+    for r in residual_table:
+        key = (r["camera"], r["group_id"], r.get("face_name",""), r.get("marker_id",0), r.get("corner_idx",0))
+        if r["error_px"] > threshold:
+            classifications[key] = "QUARANTINE"
+            n_q += 1
+        elif r["error_px"] > mild_threshold:
+            classifications[key] = "DOWNWEIGHT"
+            n_dw += 1
+        else:
+            classifications[key] = "GOOD"
+
+    # Apply to dataset corners
+    for gid, gdata in dataset.groups.items():
+        for cam, meas in gdata.items():
+            for c in meas.corners:
+                key = (cam, gid, c.face_name, c.marker_id, c.corner_idx)
+                cls = classifications.get(key, "GOOD")
+                if cls == "QUARANTINE":
+                    c.weight = 0.0
+                elif cls == "DOWNWEIGHT":
+                    c.weight *= 0.25
+
+    return {"n_total": len(errors), "median_px": float(median),
+            "threshold_px": float(threshold), "mild_threshold_px": float(mild_threshold),
+            "n_quarantined": n_q, "n_downweighted": n_dw,
+            "n_remaining": len(errors) - n_q}
 
 
 def _audit_face_bias(residual_table, min_groups=3, bias_threshold_px=2.0):
@@ -411,6 +456,7 @@ def _run_loo(dataset, output_dir, options, min_groups=4):
 
     changes = {"cam_front_right": {"t_mm": [], "r_deg": []},
                "cam_rear": {"t_mm": [], "r_deg": []}}
+    failed_runs, valid_runs = [], []
 
     for remove_gid in group_ids:
         subset = CalibrationDataset(
@@ -419,12 +465,14 @@ def _run_loo(dataset, output_dir, options, min_groups=4):
             groups={gid: dataset.groups[gid] for gid in group_ids if gid != remove_gid},
             source_type=dataset.source_type)
         if subset.n_groups < 3:
+            failed_runs.append({"group": remove_gid, "reason": "too few remaining groups"})
             continue
 
         sub_result = run_calibration_pipeline(subset,
                                               os.path.join(output_dir, f"loo_{remove_gid}"),
                                               options=options, skip_cross_validation=True)
         if not sub_result.final_camera_poses:
+            failed_runs.append({"group": remove_gid, "reason": "solver failed"})
             continue
 
         for cam in ["cam_front_right", "cam_rear"]:
@@ -435,7 +483,7 @@ def _run_loo(dataset, output_dir, options, min_groups=4):
                 changes[cam]["t_mm"].append(t_err)
                 changes[cam]["r_deg"].append(r_err)
 
-    stats = {}
+    stats = {"n_runs": len(group_ids), "n_valid": len(valid_runs), "n_failed": len(failed_runs)}
     for cam in ["cam_front_right", "cam_rear"]:
         t = changes[cam]["t_mm"]
         r = changes[cam]["r_deg"]
@@ -473,7 +521,11 @@ def _run_split_half(dataset, output_dir, options):
     res_odd = solve_subset(odd_ids)
     res_even = solve_subset(even_ids)
 
-    stats = {}
+    if not res_odd.final_camera_poses or not res_even.final_camera_poses:
+        return {"passed": False, "error": "one or both halves failed to solve"}
+
+    stats = {"odd_n_groups": len(odd_ids), "even_n_groups": len(even_ids)}
+    valid = 0
     for cam in ["cam_front_right", "cam_rear"]:
         if (cam in res_odd.final_camera_poses and cam in res_even.final_camera_poses):
             t_err, r_err, _ = se3_distance_mm_deg(
@@ -481,9 +533,13 @@ def _run_split_half(dataset, output_dir, options):
                 res_even.final_camera_poses[cam], 30, 3)
             stats[f"{cam}_t_mm"] = round(t_err, 2)
             stats[f"{cam}_r_deg"] = round(r_err, 3)
+            valid += 1
 
-    all_t = [v for k, v in stats.items() if k.endswith("_t_mm")]
-    all_r = [v for k, v in stats.items() if k.endswith("_r_deg")]
+    if valid < 2:
+        return {"passed": False, "error": f"only {valid}/2 cameras comparable", **stats}
+
+    all_t = [stats.get(f"{c}_t_mm", 999) for c in ["cam_front_right", "cam_rear"]]
+    all_r = [stats.get(f"{c}_r_deg", 999) for c in ["cam_front_right", "cam_rear"]]
     passed = all(t <= 5.0 for t in all_t) and all(r <= 0.5 for r in all_r)
     stats["passed"] = passed
     return stats
@@ -529,11 +585,17 @@ def _run_held_out(dataset, output_dir, options, hold_fraction=0.2):
     stats = {"n_train": n_train, "n_hold": n_hold}
     if ho_output is not None:
         per_cam = ho_output.get("per_camera_rmse", {})
+        all_rmse, all_p95 = [], []
         for cam, cam_stats in per_cam.items():
-            stats[f"{cam}_rmse_px"] = cam_stats.get("rmse_px", 0)
+            rmse = cam_stats.get("rmse_px", 99)
+            stats[f"{cam}_rmse_px"] = rmse
             stats[f"{cam}_max_px"] = cam_stats.get("max_error_px", 0)
-        stats["overall_rmse_px"] = ho_output.get("overall_rmse_px", 0)
-        stats["passed"] = True
+            all_rmse.append(rmse)
+        stats["overall_rmse_px"] = ho_output.get("overall_rmse_px", 99)
+
+        # Real gates: RMSE <= 2.0px, individual cam RMSE <= 2.5px
+        stats["passed"] = (stats["overall_rmse_px"] <= 2.0 and
+                           all(r <= 2.5 for r in all_rmse))
     else:
         stats["passed"] = False
         stats["errors"] = ho_errors
