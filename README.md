@@ -114,10 +114,10 @@ START → CAMERA CHECK → TIME SYNC → TARGET POSE → DETECT
 - 检测: 三台相机均能检测到标定图案
 - 工具: PnP / BA 程序可运行并输出结果
 
-**标定精度参考（用户人工判断，非平台验收条件）：**
-- PnP: 建议 ≥ 8 points/camera, RMSE ≤ 1.5px
-- BA: 建议 overall RMSE ≤ 1.0px, per-camera ≤ 1.5px
-- Truth: 建议 translation ≤ 10mm, rotation ≤ 0.5°
+**标定精度参考 (Gazebo Stable V1):**
+- Pairwise 成对求解器: FR=14.78mm/0.680°, RE=11.04mm/0.816°
+- Gazebo 工程基线: ≤15mm / ≤1° — PASS
+- 实机精度待 D455 安装后首次验证
 
 ## 7. 数据边界
 
@@ -136,7 +136,7 @@ Python:  ${CR5_VENV_DIR}           (默认 ~/.venvs/cr5-spray)
 - [项目架构与代码说明](docs/项目架构与代码说明.md)
 - [仿真环境安装与运行](docs/仿真环境安装与运行.md)
 - [三相机人工标定操作手册](docs/三相机人工标定操作手册.md)
-- [三相机标定与三维重建（算法设计）](docs/三相机标定与三维重建.md)
+- [三相机标定算法说明](docs/三相机标定算法说明.md)
 - [实机接入与安全操作](docs/实机接入与安全操作.md)
 - [工程维护与发布](docs/工程维护与发布.md)
 - [项目状态与验收](docs/项目状态与验收.md)

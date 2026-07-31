@@ -28,5 +28,5 @@ rosrun cr5_spray_perception estimate_camera_extrinsics.py \
 
 ## 文档
 
-- [三相机标定与三维重建](../../docs/三相机标定与三维重建.md)
+- [三相机标定算法说明](../../docs/三相机标定算法说明.md)
 - [项目架构与代码说明](../../docs/项目架构与代码说明.md)
