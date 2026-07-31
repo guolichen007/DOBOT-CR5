@@ -1,29 +1,37 @@
 # DOBOT CR5 三相机标定、三维重建与喷涂研发平台
 
 基于 ROS Noetic + Gazebo Classic 11 的 DOBOT CR5 多相机标定系统。
-集成三台固定 RGB-D 相机 (D455-like)、多面标定目标、PnP + Ceres Bundle Adjustment、TSDF 三维重建模块。
+集成三台固定 RGB-D 相机、多面标定目标、成对相机相对标定、TSDF 三维重建模块。
 
 ## 1. 当前能力
 
-**仿真环境已验收：**
-- Gazebo CR5 + 三台固定相机 + 多面标定目标
-- 3/3 color + 3/3 depth + CameraInfo + TF 完整链路
-- 精确跨相机同步采集 (exact_stamp_ns, inter-camera skew ≤ 5ms)
-- 五面标定目标 (ChArUco + AprilTag + ArUco)
-- PnP 多帧外参初值
-- C++ Ceres Bundle Adjustment (SE(3) LM, Huber 2px)
-- schema v2 T_rig_camera 外参输出
-- Gazebo truth 外参对比验证
+### 三相机标定 (稳定版 V1)
 
-**模块已实现（待实机验收）：**
-- TSDF 三维重建 (Open3D ScalableTSDFVolume)
-- 重建质量评估 (Accuracy / Completeness / Chamfer)
+**算法主线：** 标定靶检测 → 单相机 PnP → 成对相机相对变换 → RANSAC 共识 → SE(3) 平均
 
-**后续阶段：**
-- TSDF calibrated-rig bridge (BA 外参驱动多相机融合)
-- 喷涂路径生成
-- CR5 实机运动
-- 三台真实 D455 联合标定
+- 五面标定目标 (前/后 ChArUco, 左 AprilTag, 右 ArUco, 顶 AprilTag)
+- 三相机同步采集 (skew ≤ 5ms, 640×480@10Hz)
+- truth-free 成对相机相对求解器 (pairwise_solver.py)
+- 前左相机固定为 rig 基准, 输出 FL→FR 和 FL→RE
+- Gazebo 仿真场景完整验证
+
+**Gazebo 稳定基线 (20 组固定姿态):**
+- FR: 14.78 mm / 0.680° — PASS (≤15mm / ≤1°)
+- RE: 11.04 mm / 0.816° — PASS (≤15mm / ≤1°)
+
+> 15mm / 1° 为 Gazebo 工程基线, 不代表真实 D455 精度上限.
+> 实机精度需在三台 D455 安装后独立验证.
+
+### 其它模块
+
+- TSDF 三维重建 (Open3D) — 已实现
+- Ceres Bundle Adjustment — 历史/研究组件, 不用于稳定版外参求解
+- 喷涂路径生成 / CR5 实机运动 — 待开发
+
+### 实机状态
+
+- 三台真实 D455 联合标定: **待进行**
+- 实机标定入口: `run_three_camera_calibration.py`
 
 ## 2. 系统结构
 
