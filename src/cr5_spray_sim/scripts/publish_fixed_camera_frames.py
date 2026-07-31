@@ -49,7 +49,7 @@ def publish_camera_frames():
     scene = load_scene_config()
     profiles = scene.get("cameras", {})
     cam_cfg = profiles.get("cameras", [])
-    target = profiles.get("target", {"x": 0.68, "y": 0, "z": 0.98})
+    target = profiles.get("target", {"x": 0.72, "y": 0, "z": 0.62})
     tgt = [target["x"], target["y"], target["z"]]
 
     if not cam_cfg:

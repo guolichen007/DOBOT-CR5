@@ -4,11 +4,13 @@ CR5 Calibration Scene Geometry Absolute Check.
 
 在 paused 状态下验证所有模型绝对坐标，并设置 CR5 零位。
 
-1. 读取 config/simulation_scene.yaml 作为唯一真值
+1. 从 simulation_scene.yaml (唯一真值) 动态构造期望位置表
 2. 验证每个模型绝对位置 (位置 ≤ 2mm, 姿态 ≤ 0.2°)
 3. 验证静态模型 is_static=true
 4. 调用 /gazebo/set_model_configuration 设 CR5 六轴零位
 5. 验证 joint1~joint6 ≤ 0.01rad
+
+V8.15: 不再硬编码 EXPECTED_POSITIONS，全部从 YAML 动态读取.
 
 用法:
   rosrun cr5_spray_sim check_scene_geometry.py
@@ -36,20 +38,8 @@ from gazebo_msgs.srv import (
 )
 from tf.transformations import euler_from_quaternion
 
-# ---- 从 simulation_scene.yaml 派生的唯一真值 ----
-EXPECTED_POSITIONS = {
-    "cr5_robot":                  (0.0,   0.0,  0.0),
-    "simple_goalpost_frame":      (0.68,  0.0,  0.0),
-    "simple_hanging_workpiece":   (0.68,  0.0,  0.60),
-    "pedestal_fl":                (-0.28, -0.68, 0.0),
-    "pedestal_fr":                (-0.28,  0.68, 0.0),
-    "pedestal_rear":              (1.36,  0.0,  0.0),
-    "cam_front_left":             (-0.05, -0.55, 0.75),
-    "cam_front_right":            (-0.05,  0.55, 0.75),
-    "cam_rear":                   (1.20,  0.0,  0.75),
-}
 
-# 静态模型
+# 静态模型列表
 STATIC_MODELS = {
     "simple_goalpost_frame",
     "simple_hanging_workpiece",
@@ -69,12 +59,12 @@ MAX_POSITION_MM = 2.0      # mm
 MAX_ORIENTATION_DEG = 0.2  # 度
 MAX_JOINT_RAD = 0.01       # rad
 
-# 相机模型不检查方向 (由 compute_look_at 动态计算，pitch 约 12-13°)
+# 相机模型不检查方向 (由 compute_look_at 动态计算)
 SKIP_ORIENTATION_CHECK = {"cam_front_left", "cam_front_right", "cam_rear"}
 
 
-def load_expected():
-    """从 simulation_scene.yaml 加载并验证期望坐标."""
+def load_scene_config():
+    """加载 simulation_scene.yaml."""
     try:
         rp = rospkg.RosPack()
         config_path = os.path.join(
@@ -82,30 +72,52 @@ def load_expected():
     except Exception:
         config_path = os.path.join(
             os.path.dirname(__file__), "..", "config", "simulation_scene.yaml")
-
     with open(config_path) as f:
-        config = yaml.safe_load(f)
+        return yaml.safe_load(f)
 
-    # 从 YAML 验证坐标一致性
-    cam_cfg = config.get("cameras", {})
-    for cam in cam_cfg.get("cameras", []):
-        name = cam["name"]
-        yaml_pos = (cam["position"]["x"], cam["position"]["y"], cam["position"]["z"])
-        if name in EXPECTED_POSITIONS:
-            expected = EXPECTED_POSITIONS[name]
-            # 允许 0.01m 偏差在 YAML 到硬编码之间
-            for i, axis in enumerate(["x", "y", "z"]):
-                if abs(yaml_pos[i] - expected[i]) > 0.01:
-                    rospy.logerr(
-                        "YAML mismatch: %s.%s: yaml=%.3f hardcoded=%.3f",
-                        name, axis, yaml_pos[i], expected[i])
 
-    return EXPECTED_POSITIONS
+def build_expected_positions(config):
+    """从 YAML 动态构造 EXPECTED_POSITIONS 字典.
+
+    这是 V8.15 的关键变更: 不再硬编码任何世界坐标.
+    """
+    expected = {}
+
+    # CR5 base
+    cr5 = config.get("cr5_base", {}).get("position", {"x": 0.0, "y": 0.0, "z": 0.0})
+    expected["cr5_robot"] = (float(cr5["x"]), float(cr5["y"]), float(cr5["z"]))
+
+    # Goalpost frame
+    gp = config.get("simple_goalpost_frame", {})
+    gx = gp.get("center_x", 0.72)
+    expected["simple_goalpost_frame"] = (float(gx), 0.0, 0.0)
+
+    # Target
+    wp = config.get("simple_hanging_workpiece", {}).get("position", {"x": 0.72, "y": 0.0, "z": 0.62})
+    expected["simple_hanging_workpiece"] = (float(wp["x"]), float(wp["y"]), float(wp["z"]))
+
+    # Pedestals
+    for ped in config.get("pedestals", []):
+        name = ped.get("name", "")
+        base = ped.get("base", {"x": 0, "y": 0, "z": 0})
+        expected[name] = (float(base["x"]), float(base["y"]), float(base["z"]))
+
+    # Cameras
+    for cam in config.get("cameras", {}).get("cameras", []):
+        name = cam.get("name", "")
+        pos = cam.get("position", {"x": 0, "y": 0, "z": 0})
+        expected[name] = (float(pos["x"]), float(pos["y"]), float(pos["z"]))
+
+    return expected
 
 
 class GeometryChecker:
     def __init__(self):
-        self.expected = load_expected()
+        config = load_scene_config()
+        self.expected = build_expected_positions(config)
+        rospy.loginfo("Expected positions (from YAML): %d models", len(self.expected))
+        for name, pos in sorted(self.expected.items()):
+            rospy.loginfo("  %s: (%.3f, %.3f, %.3f)", name, *pos)
 
         # 初始化 services
         rospy.wait_for_service("/gazebo/get_model_state", timeout=10.0)
@@ -155,8 +167,6 @@ class GeometryChecker:
 
     def _check_orientation(self, name, actual_rpy):
         """检查姿态偏差."""
-        # 对于大多数模型，期望水平放置 (roll=0, pitch=0)
-        # yaw 可以自由
         roll_err = abs(actual_rpy[0]) * 180 / math.pi
         pitch_err = abs(actual_rpy[1]) * 180 / math.pi
 
@@ -252,10 +262,7 @@ class GeometryChecker:
         return True
 
     def verify_cr5_zero(self):
-        """通过 GetModelState 验证六轴零位 (读取 joint positions)."""
-        # 使用 get_model_state 也能给出 pose
-        # 但要精确检查关节角，需要用 get_link_state 检查多个 link 的相对关系
-        # 这里我们用 get_model_state 确认模型 rooting 正确
+        """通过 GetModelState 验证 CR5 rooting 正确."""
         req = GetModelStateRequest()
         req.model_name = "cr5_robot"
         req.relative_entity_name = "world"
@@ -269,10 +276,9 @@ class GeometryChecker:
             rospy.logerr("CR5 get_model_state failed: %s", resp.status_message)
             return False
 
-        # 检查 CR5 在原点
         xyz = self._pose_to_xyz_rpy(resp.pose)[:3]
         for i, axis, expected in [(0, "x", 0.0), (1, "y", 0.0), (2, "z", 0.0)]:
-            if abs(xyz[i] - expected) > 0.005:  # 5mm 容差
+            if abs(xyz[i] - expected) > 0.005:
                 rospy.logerr("CR5 root %s=%.4f, expected %.4f", axis, xyz[i], expected)
                 return False
 
@@ -309,7 +315,6 @@ def main():
             rospy.logerr("Static check failures: %s", checker.static_failures)
         sys.stderr.write("ABSOLUTE_SCENE_GEOMETRY_FAIL\n")
         sys.stderr.flush()
-        # 继续尝试 CR5 零位设置（即使几何有问题）
 
     # ---- 第三阶段：设置并验证 CR5 零位 ----
     rospy.loginfo("=== Phase 3: CR5 zero configuration ===")

@@ -115,7 +115,7 @@ def T_to_qt(T):
 def compute_nominal_camera_poses(scene_config):
     profiles = scene_config.get("cameras", {})
     cam_cfg = profiles.get("cameras", [])
-    target = profiles.get("target", {"x": 0.68, "y": 0.0, "z": 0.60})
+    target = profiles.get("target", {"x": 0.72, "y": 0.0, "z": 0.62})
     tgt = [target["x"], target["y"], target["z"]]
 
     R_link_optical = _euler_matrix(*LINK_TO_OPTICAL_RPY)[:3, :3]

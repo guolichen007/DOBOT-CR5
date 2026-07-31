@@ -44,10 +44,15 @@ catkin_install_python(PROGRAMS
   scripts/bootstrap_controllers.py
   scripts/wait_scene_models.py
   scripts/capture_scene_snapshot.py
+  # 场景 spawner (V8.15: 统一入口)
+  scripts/spawn_calibration_scene.py
   # 场景检查
   scripts/check_scene_geometry.py
   scripts/check_scene_runtime.py
   scripts/check_runtime_signals.py
+  scripts/validate_scene_geometry.py
+  # 标定目标位姿
+  scripts/set_calibration_target_pose.py
   # 喷涂
   scripts/spray_simulator.py
   # 标定目标 (仿真模型职责)

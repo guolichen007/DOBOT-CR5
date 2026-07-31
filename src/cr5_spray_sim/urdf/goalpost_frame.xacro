@@ -4,25 +4,28 @@
   前方完全开放，CR5 从 -X 方向接近。
   不使用悬臂，不使用 U 型结构。
 
-  尺寸:
-    框架 X: 0.68 (spawn 位置)
-    立柱 Y: ±0.62
-    高度: 1.65m
-    顶梁长度(Y): 1.28m
-    型材截面: 0.05m
+  所有尺寸参数可通过 xacro args 覆盖 (V8.15)。
+  运行时由 spawn_calibration_scene.py 从 simulation_scene.yaml 读取并传入。
 
-  单一 static model，root link 在 (0,0,0) 局部坐标。
   World pose 由 spawn_model 的 -x -y -z 参数设置。
 -->
 <robot name="simple_goalpost_frame" xmlns:xacro="http://ros.org/wiki/xacro">
 
-  <xacro:property name="post_y" value="0.62"/>
-  <xacro:property name="height" value="1.65"/>
-  <xacro:property name="beam_len_y" value="1.28"/>
-  <xacro:property name="profile" value="0.05"/>
-  <xacro:property name="base_sx" value="0.24"/>
-  <xacro:property name="base_sy" value="0.18"/>
-  <xacro:property name="base_sz" value="0.025"/>
+  <xacro:arg name="post_y" default="0.62"/>
+  <xacro:arg name="height" default="1.65"/>
+  <xacro:arg name="beam_len_y" default="1.28"/>
+  <xacro:arg name="profile" default="0.05"/>
+  <xacro:arg name="base_sx" default="0.24"/>
+  <xacro:arg name="base_sy" default="0.18"/>
+  <xacro:arg name="base_sz" default="0.025"/>
+
+  <xacro:property name="post_y" value="$(arg post_y)"/>
+  <xacro:property name="height" value="$(arg height)"/>
+  <xacro:property name="beam_len_y" value="$(arg beam_len_y)"/>
+  <xacro:property name="profile" value="$(arg profile)"/>
+  <xacro:property name="base_sx" value="$(arg base_sx)"/>
+  <xacro:property name="base_sy" value="$(arg base_sy)"/>
+  <xacro:property name="base_sz" value="$(arg base_sz)"/>
 
   <material name="frame_light_gray">
     <color rgba="0.52 0.52 0.54 1"/>

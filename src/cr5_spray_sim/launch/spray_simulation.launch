@@ -7,6 +7,9 @@
     +Y: 朝向目标左侧
     +Z: 向上
 
+  V8.15: 所有 world-level pose 从 simulation_scene.yaml 唯一来源读取,
+  spawn_calibration_scene.py 统一 spawn goalpost + target + pedestals.
+
   TF 树:
     world → dummy_link → base_link → ... → Link6 → spray_nozzle_frame
     world → object_frame → calibration_target_frame
@@ -34,19 +37,31 @@
   <!-- ===== Load Configs ===== -->
   <rosparam file="$(find cr5_spray_sim)/config/spray_simulation.yaml" command="load" ns="spray_simulator"/>
 
+  <!-- V8.15: 场景配置作为 rosparam 加载，所有节点从此读取 -->
+  <rosparam file="$(find cr5_spray_sim)/config/simulation_scene.yaml" command="load" ns="scene_config"/>
+
   <!-- ===== Generate Descriptions ===== -->
   <param name="robot_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/cr5_sim.urdf.xacro
              enable_spray_tool:=$(arg enable_spray_tool)
              robot_gravity:=$(arg robot_gravity)"/>
 
+  <!-- Goalpost description: V8.15 由 spawn_calibration_scene.py 动态生成并 spawn,
+       此处保留默认参数以兼容旧版直接调用 spawn_model -->
   <param name="goalpost_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/goalpost_frame.xacro"/>
 
+  <!-- Pedestal descriptions: V8.15 由 spawn_calibration_scene.py 动态生成并 spawn -->
   <param name="pedestal_fl_description"
-    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro"/>
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro
+             pedestal_height:=1.07 arm_length:=0.10"/>
   <param name="pedestal_fr_description"
-    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro"/>
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro
+             pedestal_height:=1.07 arm_length:=0.10"/>
+  <param name="pedestal_rear_description"
+    command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro
+             pedestal_height:=0.84 arm_length:=0.10"/>
+
   <param name="camera_profile" value="$(arg camera_profile)"/>
 
   <!-- ===== Start Gazebo ===== -->
@@ -84,30 +99,11 @@
     name="publish_calibration_target_frames" pkg="cr5_spray_sim"
     type="publish_calibration_target_frames.py" respawn="false" output="screen"/>
 
-  <!-- Goalpost frame -->
-  <node name="spawn_goalpost" pkg="gazebo_ros" type="spawn_model"
-    args="-urdf -param goalpost_description -model simple_goalpost_frame -x 0.68 -y 0 -z 0"
-    respawn="false" output="screen"/>
+  <!-- V8.15: 统一场景 Spawner — goalpost + target + pedestals, 从 YAML 唯一真值读取 -->
+  <node name="spawn_calibration_scene" pkg="cr5_spray_sim"
+    type="spawn_calibration_scene.py" output="screen" respawn="false"/>
 
-  <!-- Calibration Target: 自包含 SDF 模型 -->
-  <node if="$(eval object_type == 'calibration_target')"
-    name="spawn_calibration_target" pkg="gazebo_ros" type="spawn_model"
-    args="-sdf -file $(find cr5_spray_sim)/models/calibration_target/model.sdf
-          -model simple_hanging_workpiece -x 0.68 -y 0 -z 0.60"
-    respawn="false" output="screen"/>
-
-  <!-- Camera pedestals -->
-  <node name="spawn_pedestal_fl" pkg="gazebo_ros" type="spawn_model"
-    args="-urdf -param pedestal_fl_description -model pedestal_fl -x -0.28 -y -0.68 -z 0"
-    respawn="false" output="screen"/>
-  <node name="spawn_pedestal_fr" pkg="gazebo_ros" type="spawn_model"
-    args="-urdf -param pedestal_fr_description -model pedestal_fr -x -0.28 -y 0.68 -z 0"
-    respawn="false" output="screen"/>
-  <node name="spawn_pedestal_rear" pkg="gazebo_ros" type="spawn_model"
-    args="-urdf -param pedestal_fl_description -model pedestal_rear -x 1.36 -y 0 -z 0"
-    respawn="false" output="screen"/>
-
-  <!-- Three fixed cameras -->
+  <!-- Three fixed cameras (从 YAML 读取并 spawn, 独立于场景 spawner) -->
   <node name="spawn_fixed_cameras" pkg="cr5_spray_sim"
     type="spawn_fixed_cameras.py" output="screen">
     <param name="camera_profile" value="$(arg camera_profile)"/>
