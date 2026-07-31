@@ -36,18 +36,18 @@ simple_hanging_workpiece:
       max_axis_m: 0.50
 
 pedestals:
-  # V8.15: 每个 pedestal 独立 base/height/arm, bracket tip 与 camera 位置重合 (误差 <20mm)
+  # V8.20: 同步调整，bracket tip = camera position (delta=0mm)
   - name: pedestal_fl
-    base: {x: -0.15, y: -0.72, z: 0}
-    height: 1.07
+    base: {x: 0.00, y: -0.66, z: 0}
+    height: 0.85
     arm_length: 0.10
   - name: pedestal_fr
-    base: {x: -0.15, y: 0.72, z: 0}
-    height: 1.07
+    base: {x: 0.00, y: 0.66, z: 0}
+    height: 0.85
     arm_length: 0.10
   - name: pedestal_rear
-    base: {x: 1.30, y: 0.0, z: 0}
-    height: 0.84
+    base: {x: 1.14, y: 0.0, z: 0}
+    height: 0.79
     arm_length: 0.10
 
 cameras:
@@ -71,26 +71,27 @@ cameras:
     fps: 10
 
   cameras:
-    # 前左相机 — FL pedestal bracket tip, 高于靶心, 看 right+top
+    # V8.20: 恢复历史已验证的成像距离 (~0.93m FL/FR, ~0.54m RE)
+    # 前左相机 — FL pedestal bracket tip, 距目标0.93m, 俯角13°
     - name: cam_front_left
-      position: {x: -0.05, y: -0.72, z: 1.05}
+      position: {x: 0.10, y: -0.66, z: 0.83}
       roll_offset_deg: 0.0
       keep_horizon: true
-      description: "前左侧，距目标约1.13m, 高于靶心0.43m, 看right+top"
+      description: "前左侧，距目标0.93m, 俯角13°, 看right+top"
 
-    # 前右相机 — FR pedestal bracket tip, 高于靶心, 看 left+top
+    # 前右相机 — FR pedestal bracket tip, 对称
     - name: cam_front_right
-      position: {x: -0.05, y: 0.72, z: 1.05}
+      position: {x: 0.10, y: 0.66, z: 0.83}
       roll_offset_deg: 0.0
       keep_horizon: true
-      description: "前右侧，距目标约1.13m, 高于靶心0.43m, 对称布局"
+      description: "前右侧，距目标0.93m, 俯角13°, 看left+top"
 
-    # 后相机 — RE pedestal bracket tip, 稍高于靶心, 正对 front ChArUco
+    # 后相机 — RE pedestal bracket tip, 距目标0.54m
     - name: cam_rear
-      position: {x: 1.40, y: 0.0, z: 0.82}
+      position: {x: 1.24, y: 0.0, z: 0.77}
       roll_offset_deg: 0.0
       keep_horizon: true
-      description: "正后方，距目标约0.71m, 前面ChArUco近距离高清"
+      description: "正后方，距目标0.54m, front ChArUco近距离高清"
 
   # 图像质量验收阈值
   image_acceptance:

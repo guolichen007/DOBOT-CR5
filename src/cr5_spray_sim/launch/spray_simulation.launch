@@ -54,13 +54,13 @@
   <!-- Pedestal descriptions: V8.15 由 spawn_calibration_scene.py 动态生成并 spawn -->
   <param name="pedestal_fl_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro
-             pedestal_height:=1.07 arm_length:=0.10"/>
+             pedestal_height:=0.85 arm_length:=0.10"/>
   <param name="pedestal_fr_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro
-             pedestal_height:=1.07 arm_length:=0.10"/>
+             pedestal_height:=0.85 arm_length:=0.10"/>
   <param name="pedestal_rear_description"
     command="$(find xacro)/xacro $(find cr5_spray_sim)/urdf/camera_pedestal.xacro
-             pedestal_height:=0.84 arm_length:=0.10"/>
+             pedestal_height:=0.79 arm_length:=0.10"/>
 
   <param name="camera_profile" value="$(arg camera_profile)"/>
 
