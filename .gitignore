@@ -88,3 +88,4 @@ CLAUDE_DESKTOP_EXECUTION_PROMPT.md
 build/
 devel/
 /artifacts/
+/docs/会话上下文.md

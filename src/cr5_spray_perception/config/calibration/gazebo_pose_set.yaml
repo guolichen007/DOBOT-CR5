@@ -1,0 +1,95 @@
+# 三相机标定 Gazebo 验收姿态集 (稳定版 V1)
+# 所有姿态均为 BASE_TARGET + 相对偏移，不硬编码世界坐标。
+# BASE_TARGET 从 simulation_scene.yaml 读取，当前为 (0.72, 0.00, 0.62)。
+
+# 20 组固定相对姿态，经 V8.20 验证为当前 Gazebo 工位最优集。
+# V8.21 追加 4 组未改善精度，因此不纳入稳定基线。
+
+poses:
+  # ── Bank A: 前左相机 (FL) 右侧面观测 ──
+  - id: A02
+    dx: -0.04; dy: -0.02; dz: 0.03
+    roll_deg: 15; pitch_deg: 6; yaw_deg: -12
+    desc: "FL 右侧面 + 俯仰复合"
+  - id: A03
+    dx: 0.00; dy: -0.04; dz: -0.04
+    roll_deg: 14; pitch_deg: -3; yaw_deg: -12
+    desc: "FL 右侧面组合"
+  - id: A05
+    dx: -0.08; dy: -0.02; dz: 0.02
+    roll_deg: 10; pitch_deg: 8; yaw_deg: -8
+    desc: "FL 近距右侧面 + 俯仰"
+  - id: A06
+    dx: -0.04; dy: -0.02; dz: 0.00
+    roll_deg: 14; pitch_deg: -3; yaw_deg: 10
+    desc: "FL 右侧面 + 正偏航"
+
+  # ── Bank B: 前右相机 (FR) 左侧面观测 ──
+  - id: B02
+    dx: -0.04; dy: 0.02; dz: 0.03
+    roll_deg: -15; pitch_deg: 6; yaw_deg: 12
+    desc: "FR 左侧面 + 俯仰复合"
+  - id: B04
+    dx: -0.08; dy: 0.02; dz: 0.02
+    roll_deg: -10; pitch_deg: 8; yaw_deg: 8
+    desc: "FR 近距左侧面 + 俯仰"
+
+  # ── Bank C: 深度变化 (关键组) ──
+  - id: C01
+    dx: -0.10; dy: 0.00; dz: 0.00
+    roll_deg: 0; pitch_deg: 5; yaw_deg: 0
+    desc: "远距 -100mm"
+  - id: C02
+    dx: -0.06; dy: 0.00; dz: 0.00
+    roll_deg: 0; pitch_deg: 0; yaw_deg: 0
+    desc: "近距 -60mm (基准)"
+  - id: C03
+    dx: 0.04; dy: 0.00; dz: 0.00
+    roll_deg: 0; pitch_deg: -5; yaw_deg: 0
+    desc: "靠近 +40mm"
+  - id: C04
+    dx: 0.08; dy: 0.00; dz: 0.00
+    roll_deg: 0; pitch_deg: 0; yaw_deg: 0
+    desc: "最近 +80mm"
+  - id: C05
+    dx: -0.04; dy: 0.00; dz: 0.06
+    roll_deg: 0; pitch_deg: -5; yaw_deg: 0
+    desc: "高位 +60mm"
+  - id: C06
+    dx: -0.04; dy: 0.00; dz: -0.12
+    roll_deg: 0; pitch_deg: 8; yaw_deg: 0
+    desc: "低位 -120mm"
+
+  # ── Bank D: 旋转多样性 ──
+  - id: D01
+    dx: -0.04; dy: 0.00; dz: 0.00
+    roll_deg: 0; pitch_deg: 0; yaw_deg: 15
+    desc: "正偏航 +15°"
+  - id: D04
+    dx: -0.04; dy: 0.00; dz: 0.00
+    roll_deg: 0; pitch_deg: -10; yaw_deg: 0
+    desc: "负俯仰 -10°"
+  - id: D06
+    dx: -0.04; dy: 0.03; dz: 0.06
+    roll_deg: -10; pitch_deg: -15; yaw_deg: 10
+    desc: "镜像复合"
+  - id: D08
+    dx: -0.04; dy: 0.05; dz: -0.05
+    roll_deg: 0; pitch_deg: 0; yaw_deg: 10
+    desc: "左侧组合"
+  - id: D09
+    dx: -0.04; dy: -0.05; dz: -0.05
+    roll_deg: 0; pitch_deg: 0; yaw_deg: -10
+    desc: "右侧组合"
+  - id: D10
+    dx: 0.00; dy: 0.05; dz: 0.00
+    roll_deg: 0; pitch_deg: 0; yaw_deg: 0
+    desc: "基准 +Y 偏移"
+  - id: D11
+    dx: -0.04; dy: -0.03; dz: 0.02
+    roll_deg: 15; pitch_deg: 0; yaw_deg: -5
+    desc: "正滚转 +15° 右侧"
+  - id: D12
+    dx: -0.04; dy: 0.03; dz: 0.02
+    roll_deg: -15; pitch_deg: 0; yaw_deg: 5
+    desc: "负滚转 -15° 左侧"

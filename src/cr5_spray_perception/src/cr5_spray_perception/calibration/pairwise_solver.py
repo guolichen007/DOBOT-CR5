@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """
-Pairwise Camera-Relative Calibration Solver (V8.14 equivalent).
+成对相机相对标定求解器 (三相机稳定版 V1).
 
-Pure geometry solver: 不接受任何 Gazebo truth / TF / 外部位姿。
-仅从 PnP 观测 (per-group per-camera T_camera_target) 计算相机外参。
+纯几何求解器: 不接受任何 Gazebo truth / TF / 外部位姿.
+仅从 PnP 观测 (per-group per-camera T_camera_target) 计算相机外参.
 
 Truth-free by construction — 本模块禁止导入:
   - gazebo_msgs
   - tf2_ros / tf2_geometry_msgs
   - 任何 Gazebo model state / commanded pose API
 
-Algorithm (V8.13-14):
-  1. Per-group PnP → T_camera_target per camera
-  2. Camera-relative transform: T_camA_camB = T_camA_target @ inv(T_camB_target)
-  3. RANSAC robust consensus on pairwise SE(3) estimates
-  4. Weighted SE(3) mean of inliers → final camera extrinsics
-
-V8.17: Extracted from run_v813_pairwise_calib.py, numerical behavior preserved.
+算法流程:
+  1. 每组 PnP 求解 → 每台相机的 T_camera_target
+  2. 相机间相对变换: T_camA_camB = T_camA_target @ inv(T_camB_target)
+  3. RANSAC 鲁棒共识筛选成对 SE(3) 估计
+  4. 内点加权 SE(3) 平均 → 最终相机外参
 """
 
 import math
@@ -29,7 +27,7 @@ from cr5_spray_perception.calibration.geometry import se3_distance_mm_deg, inver
 
 
 # ═══════════════════════════════════════════════════════════════
-# SE(3) Lie algebra operations (exactly as V8.13)
+# SE(3) 李代数运算 (数值行为与已验证基线一致)
 # ═══════════════════════════════════════════════════════════════
 
 def se3_log(T: np.ndarray) -> np.ndarray:
@@ -87,7 +85,7 @@ def se3_exp(xi: np.ndarray) -> np.ndarray:
 
 def se3_weighted_mean(transforms: List[np.ndarray], weights: Optional[np.ndarray] = None,
                       max_iter: int = 20, tol: float = 1e-8) -> Optional[np.ndarray]:
-    """Iterative weighted SE(3) mean via log/exp averaging. (V8.13 exact)"""
+    """迭代加权 SE(3) 平均 (log/exp 方法)."""
     n = len(transforms)
     if n == 0:
         return None
@@ -116,7 +114,7 @@ def se3_weighted_mean(transforms: List[np.ndarray], weights: Optional[np.ndarray
 
 
 # ═══════════════════════════════════════════════════════════════
-# Robust consensus (V8.13 exact)
+# 鲁棒共识 (RANSAC)
 # ═══════════════════════════════════════════════════════════════
 
 def robust_se3_consensus(transforms: List[np.ndarray],
@@ -284,7 +282,7 @@ def compute_pairwise_rig(
 
     report = {
         "solver": "pairwise_camera_relative",
-        "version": "V8.17",
+        "version": "stable-v1",
         "n_groups": len(per_group_pnp),
         "pairs": pair_stats,
         "triangle_closure_t_mm": triangle_t_mm,

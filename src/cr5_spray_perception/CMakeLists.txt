@@ -35,6 +35,9 @@ install(DIRECTORY launch config
 )
 
 install(PROGRAMS
+  # 三相机标定 — 正式算法入口
+  scripts/run_three_camera_calibration.py
+  scripts/score_gazebo_calibration.py
   # 标定感知 — 可见性验证与外参估计
   scripts/validate_calibration_visibility.py
   scripts/estimate_camera_extrinsics.py
