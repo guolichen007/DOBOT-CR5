@@ -1,5 +1,5 @@
 # CR5 三相机标定仿真 — 场景配置 (唯一真值)
-# V8.15: 门架 + 标定目标 + 三台固定相机 + 三台独立支架 + 基座
+# 三相机标定稳定仿真工位: 门架 + 标定目标 + 三台固定相机 + 三台独立支架 + 基座
 # 所有世界级位姿以此文件为唯一来源，禁止在其他位置硬编码
 
 cr5_base:
@@ -15,7 +15,7 @@ simple_goalpost_frame:
   color_frame: [0.52, 0.52, 0.54, 1.0]
 
 simple_hanging_workpiece:
-  # V8.15: target 位于门架中心，spreader_top = target_z + 0.620 ≈ beam_bottom
+  # target 位于门架中心，spreader_top = target_z + 0.620 ≈ beam_bottom
   position: {x: 0.72, y: 0.0, z: 0.62}
   default_type: motor_housing_cylinder
   types:
@@ -36,7 +36,7 @@ simple_hanging_workpiece:
       max_axis_m: 0.50
 
 pedestals:
-  # V8.20: 同步调整，bracket tip = camera position (delta=0mm)
+  # bracket tip 与 camera 位置重合 (delta=0mm)
   - name: pedestal_fl
     base: {x: 0.00, y: -0.66, z: 0}
     height: 0.85
@@ -51,7 +51,7 @@ pedestals:
     arm_length: 0.10
 
 cameras:
-  # V8.15: 靶中心为 look-at 目标
+  # 靶中心为 look-at 目标
   target: {x: 0.72, y: 0.0, z: 0.62}
 
   # VM profile: 低分辨率快速刷新
@@ -71,7 +71,7 @@ cameras:
     fps: 10
 
   cameras:
-    # V8.20: 恢复历史已验证的成像距离 (~0.93m FL/FR, ~0.54m RE)
+    # 三相机稳定成像距离: FL/FR ~0.93m, RE ~0.54m
     # 前左相机 — FL pedestal bracket tip, 距目标0.93m, 俯角13°
     - name: cam_front_left
       position: {x: 0.10, y: -0.66, z: 0.83}

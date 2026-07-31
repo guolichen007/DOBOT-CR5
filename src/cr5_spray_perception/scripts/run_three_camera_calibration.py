@@ -128,14 +128,47 @@ def calibrate(dataset_dir, camera_info, output_path=None):
 
     X_cameras, report = compute_pairwise_rig(per_group_pnp)
 
+    # 有效性检查: 禁止静默填充 identity
+    missing_cameras = [cam for cam in CAMERAS if cam not in X_cameras]
+    if missing_cameras:
+        return {
+            "error": "相机外参缺失: {}".format(missing_cameras),
+            "status": "CALIBRATION_NOT_RELIABLE",
+        }
+
+    # 检查矩阵有效性
+    for cam, T in X_cameras.items():
+        if not np.all(np.isfinite(T)):
+            return {
+                "error": "{} 外参矩阵含非有限值".format(cam),
+                "status": "CALIBRATION_NOT_RELIABLE",
+            }
+        R = T[:3, :3]
+        det = np.linalg.det(R)
+        if abs(det - 1.0) > 0.01:
+            return {
+                "error": "{} 旋转矩阵 det={:.4f}, 期望约 1.0".format(cam, det),
+                "status": "CALIBRATION_NOT_RELIABLE",
+            }
+
+    # 检查共识可靠性
+    pair_stats = report.get("pairs", {})
+    for pn in ["FL_FR", "FL_RE"]:
+        ps = pair_stats.get(pn, {})
+        if ps.get("n_inliers", 0) < 3:
+            return {
+                "error": "{} 共识内点不足 ({} < 3)".format(pn, ps.get("n_inliers", 0)),
+                "status": "CALIBRATION_NOT_RELIABLE",
+            }
+
     result = {
         "solver": "pairwise_camera_relative",
         "version": "stable-v1",
         "n_groups": len(per_group_pnp),
         "group_ids": sorted(per_group_pnp.keys()),
         "cameras": {
-            cam: X_cameras.get(cam, np.eye(4)).tolist()
-            for cam in CAMERAS
+            cam: X_cameras[cam].tolist()
+            for cam in CAMERAS if cam in X_cameras
         },
         "pair_stats": report.get("pairs", {}),
         "triangle_closure_t_mm": report.get("triangle_closure_t_mm"),

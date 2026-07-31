@@ -14,7 +14,7 @@ Truth-free by construction — 本模块禁止导入:
   1. 每组 PnP 求解 → 每台相机的 T_camera_target
   2. 相机间相对变换: T_camA_camB = T_camA_target @ inv(T_camB_target)
   3. RANSAC 鲁棒共识筛选成对 SE(3) 估计
-  4. 内点加权 SE(3) 平均 → 最终相机外参
+  4. RANSAC 内点等权 SE(3) 平均 → 最终相机外参
 """
 
 import math
@@ -159,8 +159,17 @@ def robust_se3_consensus(transforms: List[np.ndarray],
         if len(inliers) > len(best_inliers):
             best_inliers = inliers
 
+    consensus_reliable = True
     if len(best_inliers) < max(2, n // 3):
-        best_inliers = list(range(n))
+        # 共识不足: 不 fallback 到全数据, 标记为不可靠
+        consensus_reliable = False
+
+    if not consensus_reliable and len(best_inliers) == 0:
+        return {"median": None, "n_total": n, "n_inliers": 0, "n_outliers": n,
+                "outlier_indices": list(range(n)),
+                "t_median": 0.0, "t_mad": 0.0, "t_p95": 0.0,
+                "r_median": 0.0, "r_mad": 0.0, "r_p95": 0.0,
+                "reliable": False}
 
     outliers = [j for j in range(n) if j not in best_inliers]
 
@@ -188,6 +197,7 @@ def robust_se3_consensus(transforms: List[np.ndarray],
         "r_median": float(np.median(rr)),
         "r_mad": float(np.median(np.abs(rr - np.median(rr)))),
         "r_p95": float(np.percentile(rr, 95)) if len(rr) >= 20 else float(np.max(rr)),
+        "reliable": consensus_reliable,
     }
 
 

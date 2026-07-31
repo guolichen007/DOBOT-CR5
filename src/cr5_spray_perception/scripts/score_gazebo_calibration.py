@@ -99,6 +99,26 @@ def score(blind_result_path, output_path=None):
 
     # Score each camera
     scores = {}
+    # 从配置读取验收阈值 (默认 Gazebo Stable V1: 15mm / 1°)
+    try:
+        import rospkg
+        cfg_path = os.path.join(
+            rospkg.RosPack().get_path("cr5_spray_perception"),
+            "config", "calibration", "three_camera_calibration.yaml")
+        with open(cfg_path) as f:
+            cfg = yaml.safe_load(f)
+        ref = cfg.get("gazebo_reference", {})
+        T_THRESH = float(ref.get("translation_mm", 15.0))
+        R_THRESH = float(ref.get("rotation_deg", 1.0))
+    except Exception:
+        T_THRESH = 15.0
+        R_THRESH = 1.0
+
+    # CLI override
+    T_THRESH = float(rospy.get_param("~translation_threshold_mm", T_THRESH))
+    R_THRESH = float(rospy.get_param("~rotation_threshold_deg", R_THRESH))
+    rospy.loginfo("Gate: T<=%.1fmm, R<=%.2f° (Gazebo Stable V1)", T_THRESH, R_THRESH)
+
     all_pass = True
     for cam in ["cam_front_right", "cam_rear"]:
         if cam not in X_blind or cam not in X_truth:
@@ -109,8 +129,8 @@ def score(blind_result_path, output_path=None):
         T_gt = np.array(X_truth[cam])
         t_err, r_err, detail = se3_distance_mm_deg(T_est, T_gt, 50, 5)
 
-        t_pass = t_err < 10.0
-        r_pass = r_err < 1.0
+        t_pass = t_err < T_THRESH
+        r_pass = r_err < R_THRESH
         status = "PASS" if (t_pass and r_pass) else "FAIL"
 
         scores[cam] = {

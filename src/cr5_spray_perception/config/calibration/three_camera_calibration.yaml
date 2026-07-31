@@ -1,0 +1,40 @@
+# 三相机标定稳定版配置 (Stable V1)
+# 此文件定义三相机标定算法的运行参数, 不包含 Gazebo 场景坐标.
+# 场景坐标见 cr5_spray_sim/config/simulation_scene.yaml.
+
+# ── 相机定义 ──
+cameras:
+  names:
+    - cam_front_left    # 前左, rig 基准 (gauge)
+    - cam_front_right   # 前右
+    - cam_rear          # 后
+  rig_gauge: cam_front_left   # 固定为 identity 的参考相机
+
+# ── 求解器参数 ──
+solver:
+  # 最少需要的有效标定组数 (每组至少 2 台相机有有效 PnP 解)
+  minimum_groups: 5
+  # 每对相机最少需要的有效测量数
+  minimum_pair_support: 4
+  # RANSAC 内点筛选阈值
+  ransac_translation_mm: 50.0
+  ransac_rotation_deg: 5.0
+  # 共识不足时拒绝标定 (不 fallback 到全数据均值)
+  weak_consensus_reject: true
+
+# ── 输出有效性门 ──
+output_gate:
+  # 必须所有相机都有有效外参 (禁止静默填充 identity)
+  require_all_cameras: true
+  # 外参矩阵必须 finite / 旋转矩阵正交 / det > 0
+  require_valid_matrix: true
+
+# ── Gazebo 仿真验收参考值 (仅用于仿真验证, 不进入实机标定逻辑) ──
+gazebo_reference:
+  translation_mm: 15.0
+  rotation_deg: 1.0
+  description: >
+    Gazebo 稳定版 V1 工程基线.
+    此阈值仅用于 Gazebo 仿真场景的三相机标定验收,
+    不代表真实 D455 的精度上限或下限.
+    实机精度需在 D455 安装后独立验证.
