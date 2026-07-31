@@ -25,304 +25,87 @@ from std_srvs.srv import Trigger
 from datetime import datetime
 
 from cr5_spray_perception import aruco_compat
+from cr5_spray_perception.calibration.target_geometry import load_target_geometry
+from cr5_spray_perception.calibration.target_detector import (
+    detect_target, create_default_profiles)
 
-# ── 面板定义 ──
-CHARUCO_FACES = {
-    "front": {"sx": 8, "sy": 6, "sq_m": 0.027, "mk_m": 0.020,
-              "dict_id": aruco.DICT_5X5_1000, "id_start": 100,
-              "face_frame": "calibration_target_front_frame"},
-    "back":  {"sx": 8, "sy": 6, "sq_m": 0.027, "mk_m": 0.020,
-              "dict_id": aruco.DICT_5X5_1000, "id_start": 300,
-              "face_frame": "calibration_target_back_frame"},
-}
-
-APRILTAG_FACES = {
-    "left": {"tag_size": 0.07, "tag_ids": [4,5,6,7],
-             "face_frame": "calibration_target_left_frame",
-             "positions": {4:(-0.0425,0.0425,0), 5:(0.0425,0.0425,0),
-                          6:(-0.0425,-0.0425,0), 7:(0.0425,-0.0425,0)}},
-    "top":  {"tag_size": 0.12, "tag_ids": [8],
-             "face_frame": "calibration_target_top_frame",
-             "positions": {8:(0,0,0)}},
-}
-
-# V3: YAML 为几何真值来源, 此处仅保留 import 阶段 fallback.
-# 正式运行时 main() 从 calibration_target.yaml 覆盖.
-ARUCO_FACES = {
-    "right": {"marker_size_m": 0.076, "marker_ids": [10, 11, 12, 13],
-              "dict_id": aruco.DICT_4X4_50,
-              "face_frame": "calibration_target_right_frame",
-              "positions": {10: (-0.047, 0.044, 0), 11: (0.047, 0.044, 0),
-                           12: (-0.047, -0.044, 0), 13: (0.047, -0.044, 0)}},
-}
+# V8.9: 公共 target_geometry + target_detector 模块 — calibration_target.yaml 为唯一权威来源.
+# 以下硬编码仅作 import 阶段 fallback, 正式运行时 main() 从 YAML 覆盖.
+CHARUCO_FACES = {}
+APRILTAG_FACES = {}
+ARUCO_FACES = {}
 
 CAMERAS = ["cam_front_left", "cam_front_right", "cam_rear"]
 
 # ── 从 calibration_target.yaml 加载面板位姿 ──
-# 硬编码值仅做 fallback (与仓库中 YAML 保持一致)
-_FALLBACK_FACE_POSES = {
-    "front": {"xyz": [0.171, 0.0, 0.0],     "rpy": [0.0,  math.pi/2, 0.0]},
-    "left":  {"xyz": [0.0, 0.141, 0.0],     "rpy": [-math.pi/2, 0.0, 0.0]},
-    "right": {"xyz": [0.0, -0.141, 0.0],    "rpy": [math.pi/2, 0.0, 0.0]},
-    "top":   {"xyz": [0.0, 0.0, 0.121],     "rpy": [0.0, 0.0, 0.0]},
-    "back":  {"xyz": [-0.171, 0.0, 0.0],    "rpy": [0.0, -math.pi/2, 0.0]},
-}
-
+# V8.9: 使用公共 target_geometry 模块 (消除硬编码 fallback)
 
 def _load_face_poses_from_yaml():
-    """从 calibration_target.yaml 读取面板位姿.
-
-    确保单一真值来源. YAML 不可用时返回 None (由调用者决定是否 fallback).
-    """
-    search_paths = []
-    # 通过 rospack 查找
+    """从 calibration_target.yaml 读取面板位姿 (使用公共 geometry loader)."""
     try:
-        import rospkg
-        rp = rospkg.RosPack()
-        sim_path = rp.get_path("cr5_spray_sim")
-        search_paths.append(os.path.join(
-            sim_path, "config", "calibration", "calibration_target.yaml"))
-    except Exception:
-        pass
-    # 相对于本脚本的路径
-    search_paths.append(os.path.join(
-        os.path.dirname(__file__), "..", "..", "cr5_spray_sim",
-        "config", "calibration", "calibration_target.yaml"))
-
-    for p in search_paths:
-        if os.path.isfile(p):
-            try:
-                with open(p, "r") as f:
-                    cfg = yaml.safe_load(f)
-                panels = cfg.get("panels", {})
-                poses = {}
-                for name, panel in panels.items():
-                    pt = panel.get("pose_target", {})
-                    if pt and "xyz" in pt and "rpy" in pt:
-                        poses[name] = {
-                            "xyz": list(pt["xyz"]),
-                            "rpy": list(pt["rpy"]),
-                        }
-                if len(poses) >= 5:
-                    rospy.loginfo("Loaded %d face poses from %s",
-                                  len(poses), p)
-                    return poses
-            except Exception as e:
-                rospy.logwarn("Failed to load face poses from %s: %s", p, e)
-
-    # YAML 不可用 → 返回 None, 由调用者决定是否 fallback
-    rospy.logwarn("calibration_target.yaml not found — returning None")
-    return None
-
-
-# P0-2 修复: 使用 fallback 作为模块顶层默认值, 避免 import 时迭代 None.
-# 正式运行时 main() 会用 calibration_target.yaml 覆盖.
-FACE_POSES_TARGET = dict(_FALLBACK_FACE_POSES)
+        geom = load_target_geometry()
+        rospy.loginfo("Loaded %d face poses from %s (sha256=%s)",
+                      len(geom.face_poses_target), geom.yaml_path,
+                      geom.yaml_sha256[:16])
+        return dict(geom.face_poses_target)
+    except Exception as e:
+        rospy.logerr("Cannot load calibration_target.yaml: %s", e)
+        raise RuntimeError(
+            "calibration_target.yaml is required for production calibration. "
+            "Install cr5_spray_sim or set CR5_CALIBRATION_TARGET_YAML env var."
+        ) from e
 
 
 def _load_full_yaml():
-    """加载完整 calibration_target.yaml (含面板级 marker center 定义)."""
-    search_paths = []
+    """加载完整 calibration_target.yaml."""
     try:
-        import rospkg
-        rp = rospkg.RosPack()
-        sim_path = rp.get_path("cr5_spray_sim")
-        search_paths.append(os.path.join(
-            sim_path, "config", "calibration", "calibration_target.yaml"))
-    except Exception:
-        pass
-    search_paths.append(os.path.join(
-        os.path.dirname(__file__), "..", "..", "cr5_spray_sim",
-        "config", "calibration", "calibration_target.yaml"))
-    for p in search_paths:
-        if os.path.isfile(p):
-            try:
-                with open(p, "r") as f:
-                    return yaml.safe_load(f)
-            except Exception as e:
-                rospy.logwarn("Failed to load full YAML from %s: %s", p, e)
+        geom = load_target_geometry()
+        return {
+            "panels": geom.panels,
+            "yaml_sha256": geom.yaml_sha256,
+        }
+    except Exception as e:
+        rospy.logwarn("Failed to load full YAML: %s", e)
     return None
 
 
-def _euler_matrix(ai, aj, ak):
-    """tf.transformations.euler_matrix 等价实现, 避免 ROS tf 依赖."""
-    from math import cos, sin
-    Rx = np.array([[1, 0, 0], [0, cos(ai), -sin(ai)], [0, sin(ai), cos(ai)]])
-    Ry = np.array([[cos(aj), 0, sin(aj)], [0, 1, 0], [-sin(aj), 0, cos(aj)]])
-    Rz = np.array([[cos(ak), -sin(ak), 0], [sin(ak), cos(ak), 0], [0, 0, 1]])
-    R = Rz @ Ry @ Rx
-    T = np.eye(4)
-    T[:3, :3] = R
-    return T
+# 正式运行时 main() 会用 calibration_target.yaml 覆盖
+_FALLBACK_FACE_POSES = {}
+FACE_POSES_TARGET = {}
 
 
-def _quaternion_from_matrix(T):
-    """从 4x4 旋转矩阵提取四元数 [x,y,z,w]."""
-    R = np.asarray(T[:3, :3], dtype=np.float64)
-    q = np.empty(4)
-    t = R.trace()
-    if t > 0:
-        s = 0.5 / math.sqrt(t + 1.0)
-        q[3] = 0.25 / s
-        q[0] = (R[2,1] - R[1,2]) * s
-        q[1] = (R[0,2] - R[2,0]) * s
-        q[2] = (R[1,0] - R[0,1]) * s
-    else:
-        if R[0,0] > R[1,1] and R[0,0] > R[2,2]:
-            s = 2.0 * math.sqrt(1.0 + R[0,0] - R[1,1] - R[2,2])
-            q[3] = (R[2,1] - R[1,2]) / s
-            q[0] = 0.25 * s
-            q[1] = (R[0,1] + R[1,0]) / s
-            q[2] = (R[0,2] + R[2,0]) / s
-        elif R[1,1] > R[2,2]:
-            s = 2.0 * math.sqrt(1.0 + R[1,1] - R[0,0] - R[2,2])
-            q[3] = (R[0,2] - R[2,0]) / s
-            q[0] = (R[0,1] + R[1,0]) / s
-            q[1] = 0.25 * s
-            q[2] = (R[1,2] + R[2,1]) / s
-        else:
-            s = 2.0 * math.sqrt(1.0 + R[2,2] - R[0,0] - R[1,1])
-            q[3] = (R[1,0] - R[0,1]) / s
-            q[0] = (R[0,2] + R[2,0]) / s
-            q[1] = (R[1,2] + R[2,1]) / s
-            q[2] = 0.25 * s
-    return [float(v) for v in q]
-
-
-def build_T_target_face(face_name):
-    """构建 T_target_face 4x4 矩阵."""
-    p = FACE_POSES_TARGET[face_name]
-    T = _euler_matrix(p["rpy"][0], p["rpy"][1], p["rpy"][2])
-    T[:3, 3] = p["xyz"]
-    return T
-
-
-# 预构建
-T_TARGET_FACE = {name: build_T_target_face(name) for name in FACE_POSES_TARGET}
-
-# 预创建 Charuco boards
-for v in CHARUCO_FACES.values():
-    v["board"] = aruco.CharucoBoard_create(
-        v["sx"], v["sy"], v["sq_m"], v["mk_m"],
-        aruco.getPredefinedDictionary(v["dict_id"]))
+# V8.9: 使用公共 target_geometry 模块
+# T_TARGET_FACE 和 boards 在 main() 中从 target_geom 构建
+T_TARGET_FACE = {}
 
 
 # ═══════════════════════════════════════════════════════════════
-# 检测
+# 检测 — V8.9: 使用公共 target_detector 模块
 # ═══════════════════════════════════════════════════════════════
+
+# 模块级缓存 (在 main() 中初始化)
+_target_geom = None
+_profiles = None
+
 
 def detect_on_image(cv_img, K, D):
-    """检测所有 ChArUco/AprilTag 面, 返回 face-keyed 检测结果.
+    """检测所有面板 — 委托给公共 target_detector.detect_target().
 
-    返回格式: {face_name: {object_points_3d_face, image_points_2d, corner_count}}
-    object_points_3d_face: 面板局部坐标系 (z=0 平面)
+    V8.9: 所有检测逻辑统一到 target_detector 模块.
+    ChArUco: SUBPIX (保留当前策略).
+    ArUco (right): NONE (V8.8 因果闭环 — 消除 4-7% 边缘尺度膨胀).
+    AprilTag: SUBPIX (保留当前策略).
     """
-    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-    results = {}
+    global _target_geom, _profiles
+    if _target_geom is None or _profiles is None:
+        # 延迟初始化 (兼容直接 import 场景)
+        try:
+            _target_geom = load_target_geometry()
+        except Exception:
+            _target_geom = None
+        _profiles = create_default_profiles()
 
-    # ── ChArUco 面 ──
-    for fk, fc in CHARUCO_FACES.items():
-        board = fc["board"]
-        id_start = fc["id_start"]
-        params = aruco_compat.detector_parameters()
-        params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
-        corners, ids, rejected = aruco_compat.detect_markers(
-            gray, board.dictionary, params)
-
-        obj_pts_face, img_pts_face = [], []
-        if ids is not None:
-            ids_flat = [int(i) for i in ids.flatten()]
-            idx_list, local_ids = aruco_compat.remap_custom_ids(
-                ids_flat, id_start, board)
-            if len(idx_list) >= 2:
-                local_corners = tuple(corners[i] for i in idx_list)
-                cc, cids = aruco_compat.interpolate_charuco_corners(
-                    local_corners, local_ids, gray, board,
-                    cameraMatrix=K, distCoeffs=D)
-                if cids is not None and len(cids) >= 4:
-                    board_pts = np.asarray(board.chessboardCorners,
-                                          dtype=np.float32).reshape(-1, 3)
-                    bw = fc["sx"] * fc["sq_m"]
-                    bh = fc["sy"] * fc["sq_m"]
-                    board_pts[:, 0] -= bw / 2.0
-                    board_pts[:, 1] -= bh / 2.0
-                    cids_flat = [int(i) for i in cids.flatten()]
-                    obj_pts_face = [board_pts[i].tolist() for i in cids_flat]
-                    img_pts_face = cc.reshape(-1, 2).astype(np.float32).tolist()
-
-        results[fk] = {
-            "object_points_3d_face": obj_pts_face,
-            "image_points_2d": img_pts_face,
-            "corner_count": len(obj_pts_face),
-        }
-
-    # ── ArUco 面 (DICT_4X4_50, 右面) ──
-    aruco_dict_4x4 = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-    params_4x4 = aruco_compat.detector_parameters()
-    # V8.8: CORNER_REFINE_NONE — SUBPIX produces 4-7% edge scale expansion
-    # on right-face ArUco, causing 40mm planar PnP depth bias.
-    # NONE eliminates this systematic scale bias (PnP: 49.6→11.0mm).
-    params_4x4.cornerRefinementMethod = 0  # CORNER_REFINE_NONE
-    corners_4x4, ids_4x4, _ = aruco_compat.detect_markers(
-        gray, aruco_dict_4x4, params_4x4)
-
-    for fk, fc in ARUCO_FACES.items():
-        obj_pts_face, img_pts_face = [], []
-        if ids_4x4 is not None:
-            ids_flat = [int(i) for i in ids_4x4.flatten()]
-            for i, tid in enumerate(ids_flat):
-                if tid not in fc["marker_ids"]:
-                    continue
-                pos = fc["positions"][tid]
-                half = fc["marker_size_m"] / 2.0
-                marker_obj = [
-                    [pos[0]-half, pos[1]+half, 0],
-                    [pos[0]+half, pos[1]+half, 0],
-                    [pos[0]+half, pos[1]-half, 0],
-                    [pos[0]-half, pos[1]-half, 0],
-                ]
-                obj_pts_face.extend(marker_obj)
-                img_pts_face.extend(corners_4x4[i][0].tolist())
-
-        results[fk] = {
-            "object_points_3d_face": obj_pts_face,
-            "image_points_2d": img_pts_face,
-            "corner_count": len(obj_pts_face),
-        }
-
-    # ── AprilTag 面 ──
-    tag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
-    params = aruco_compat.detector_parameters()
-    params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
-    corners, ids, rejected = aruco_compat.detect_markers(
-        gray, tag_dict, params)
-
-    for fk, fc in APRILTAG_FACES.items():
-        obj_pts_face, img_pts_face = [], []
-        if ids is not None:
-            ids_flat = [int(i) for i in ids.flatten()]
-            for i, tid in enumerate(ids_flat):
-                if tid not in fc["tag_ids"]:
-                    continue
-                pos = fc["positions"][tid]
-                half = fc["tag_size"] / 2.0
-                tag_obj = [
-                    [pos[0]-half, pos[1]+half, 0],
-                    [pos[0]+half, pos[1]+half, 0],
-                    [pos[0]+half, pos[1]-half, 0],
-                    [pos[0]-half, pos[1]-half, 0],
-                ]
-                obj_pts_face.extend(tag_obj)
-                # P1-2: 展平 - corners[i][0] 是 4 个角点 [[u,v],...], 需要 expand
-                img_pts_face.extend(corners[i][0].tolist())
-
-        results[fk] = {
-            "object_points_3d_face": obj_pts_face,
-            "image_points_2d": img_pts_face,
-            "corner_count": len(obj_pts_face),
-        }
-
-    return results
+    return detect_target(cv_img, K, D, _target_geom, _profiles)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -648,6 +431,40 @@ def solve_pnp(obj_pts, img_pts, K, D):
     return T, rvec_final, tvec_final, stats
 
 
+def _quaternion_from_matrix(T):
+    """从 4x4 旋转矩阵提取四元数 [x,y,z,w]."""
+    import math
+    R = np.asarray(T[:3, :3], dtype=np.float64)
+    q = np.empty(4)
+    t = R.trace()
+    if t > 0:
+        s = 0.5 / math.sqrt(t + 1.0)
+        q[3] = 0.25 / s
+        q[0] = (R[2, 1] - R[1, 2]) * s
+        q[1] = (R[0, 2] - R[2, 0]) * s
+        q[2] = (R[1, 0] - R[0, 1]) * s
+    else:
+        if R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+            s = 2.0 * math.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+            q[3] = (R[2, 1] - R[1, 2]) / s
+            q[0] = 0.25 * s
+            q[1] = (R[0, 1] + R[1, 0]) / s
+            q[2] = (R[0, 2] + R[2, 0]) / s
+        elif R[1, 1] > R[2, 2]:
+            s = 2.0 * math.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+            q[3] = (R[0, 2] - R[2, 0]) / s
+            q[0] = (R[0, 1] + R[1, 0]) / s
+            q[1] = 0.25 * s
+            q[2] = (R[1, 2] + R[2, 1]) / s
+        else:
+            s = 2.0 * math.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+            q[3] = (R[1, 0] - R[0, 1]) / s
+            q[0] = (R[0, 2] + R[2, 0]) / s
+            q[1] = (R[1, 2] + R[2, 1]) / s
+            q[2] = 0.25 * s
+    return [float(v) for v in q]
+
+
 def T_to_quat_trans(T):
     """从 4x4 矩阵提取 [qw,qx,qy,qz,tx,ty,tz] (Ceres 格式)."""
     q = _quaternion_from_matrix(T)
@@ -776,60 +593,21 @@ def main():
         args.output = os.path.join(data_root, "calibration", "runs", ts)
     os.makedirs(args.output, exist_ok=True)
 
-    # P0-2/P1-3: 从 calibration_target.yaml 加载面板位姿 (权威来源)
-    # fallback 仅用于 import 阶段; 正式标定 YAML 缺失直接 FAIL
-    global FACE_POSES_TARGET, T_TARGET_FACE
-    yaml_poses = _load_face_poses_from_yaml()
-    if yaml_poses is None or len(yaml_poses) < 5:
-        rospy.logerr("FATAL: calibration_target.yaml not found or incomplete. "
-                     "Cannot run formal calibration with fallback poses.")
+    # V8.9: 从 calibration_target.yaml 加载 (公共 target_geometry 模块)
+    global FACE_POSES_TARGET, T_TARGET_FACE, _target_geom, _profiles
+    try:
+        _target_geom = load_target_geometry()
+    except Exception as e:
+        rospy.logerr("FATAL: calibration_target.yaml not found or incomplete: %s", e)
         sys.exit(1)
-    FACE_POSES_TARGET = yaml_poses
-    T_TARGET_FACE = {name: build_T_target_face(name) for name in FACE_POSES_TARGET}
-    rospy.loginfo("Face poses loaded from YAML: %d faces", len(FACE_POSES_TARGET))
 
-    # ── 从 YAML 覆盖面定义 (schema v2: tag_centers_face_m / marker_centers_face_m) ──
-    # 加载完整 YAML 读取面级几何真值
-    yaml_full = _load_full_yaml()
-    if yaml_full:
-        panels = yaml_full.get("panels", {})
-        global APRILTAG_FACES, ARUCO_FACES
-        # 左面 (AprilTag)
-        left_cfg = panels.get("left", {})
-        if left_cfg.get("tag_centers_face_m"):
-            APRILTAG_FACES["left"] = {
-                "tag_size": left_cfg["tag_size_m"],
-                "tag_ids": left_cfg["tag_ids"],
-                "face_frame": left_cfg["frame"],
-                "positions": {int(k): tuple(v) for k, v
-                             in left_cfg["tag_centers_face_m"].items()},
-            }
-            rospy.loginfo("Left face loaded from YAML: %d tags",
-                          len(APRILTAG_FACES["left"]["tag_ids"]))
-        # 顶面 (AprilTag)
-        top_cfg = panels.get("top", {})
-        if top_cfg.get("tag_centers_face_m"):
-            APRILTAG_FACES["top"] = {
-                "tag_size": top_cfg["tag_size_m"],
-                "tag_ids": top_cfg["tag_ids"],
-                "face_frame": top_cfg["frame"],
-                "positions": {int(k): tuple(v) for k, v
-                             in top_cfg["tag_centers_face_m"].items()},
-            }
-        # 右面 (ArUco)
-        right_cfg = panels.get("right", {})
-        if right_cfg.get("marker_centers_face_m"):
-            ARUCO_FACES["right"] = {
-                "marker_size_m": right_cfg["marker_size_m"],
-                "marker_ids": right_cfg["tag_ids"],
-                "dict_id": aruco.DICT_4X4_50,
-                "face_frame": right_cfg["frame"],
-                "positions": {int(k): tuple(v) for k, v
-                             in right_cfg["marker_centers_face_m"].items()},
-            }
-            rospy.loginfo("Right face loaded from YAML: markers at %s",
-                          {k: (v[0], v[1]) for k, v
-                           in ARUCO_FACES["right"]["positions"].items()})
+    FACE_POSES_TARGET = dict(_target_geom.face_poses_target)
+    T_TARGET_FACE = dict(_target_geom.T_target_face)
+    _profiles = create_default_profiles()
+
+    rospy.loginfo("Face poses from target_geometry: %d faces, YAML sha256=%s",
+                  len(FACE_POSES_TARGET), _target_geom.yaml_sha256[:16])
+    rospy.loginfo("Detector profiles: %s", _profiles.profile_summary())
 
     # ── 等待 joint_capture_manager 服务 ──
     svc_name = "/joint_capture_manager/capture_sync_group"

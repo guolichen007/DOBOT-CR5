@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""V8 Gazebo E2E calibration — live capture + V8 pipeline + truth validation."""
+"""V8 Gazebo E2E calibration — live capture + V8 pipeline + truth validation.
+
+V8.9: 使用公共 target_geometry + target_detector 模块 (消除硬编码).
+"""
 import sys, os, math, time, json, yaml, subprocess
 import numpy as np
 import cv2
@@ -8,7 +11,6 @@ from std_srvs.srv import Trigger
 from gazebo_msgs.srv import SetModelState, SetModelStateRequest, GetModelState
 from geometry_msgs.msg import Pose, Point, Quaternion
 from sensor_msgs.msg import CameraInfo
-from cv2 import aruco
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from cr5_spray_perception.calibration.geometry import (euler_matrix, se3_distance_mm_deg,
@@ -16,130 +18,13 @@ from cr5_spray_perception.calibration.geometry import (euler_matrix, se3_distanc
 from cr5_spray_perception.calibration.measurement import (CalibrationDataset,
     CameraGroupMeasurement, CornerObservation)
 from cr5_spray_perception.calibration.pipeline import run_calibration_pipeline
+from cr5_spray_perception.calibration.target_geometry import load_target_geometry
+from cr5_spray_perception.calibration.target_detector import (
+    detect_target, create_default_profiles, DetectorProfiles)
 from cr5_spray_perception import aruco_compat
 
 CAMERAS = ["cam_front_left", "cam_front_right", "cam_rear"]
 FIRST_CAM = CAMERAS[0]
-
-# Face definitions (same as run_multi_frame_calibration.py)
-CHARUCO_FACES = {
-    "front": {"sx": 8, "sy": 6, "sq_m": 0.027, "mk_m": 0.020,
-              "dict_id": aruco.DICT_5X5_1000, "id_start": 100},
-    "back":  {"sx": 8, "sy": 6, "sq_m": 0.027, "mk_m": 0.020,
-              "dict_id": aruco.DICT_5X5_1000, "id_start": 300},
-}
-APRILTAG_FACES = {
-    "left": {"tag_size": 0.07, "tag_ids": [4,5,6,7],
-             "positions": {4:(-0.0425,0.0425,0), 5:(0.0425,0.0425,0),
-                          6:(-0.0425,-0.0425,0), 7:(0.0425,-0.0425,0)}},
-    "top":  {"tag_size": 0.12, "tag_ids": [8], "positions": {8:(0,0,0)}},
-}
-ARUCO_FACES = {
-    "right": {"marker_size_m": 0.076, "marker_ids": [10,11,12,13],
-              "dict_id": aruco.DICT_4X4_50,
-              "positions": {10:(-0.047,0.044,0), 11:(0.047,0.044,0),
-                           12:(-0.047,-0.044,0), 13:(0.047,-0.044,0)}},
-}
-
-FACE_POSES_TARGET = {}
-T_TARGET_FACE = {}
-
-# Pre-create boards
-for v in CHARUCO_FACES.values():
-    v["board"] = aruco.CharucoBoard_create(v["sx"],v["sy"],v["sq_m"],v["mk_m"],
-                                            aruco.getPredefinedDictionary(v["dict_id"]))
-
-def load_face_poses():
-    import rospkg
-    sim_path = rospkg.RosPack().get_path("cr5_spray_sim")
-    yaml_path = os.path.join(sim_path, "config", "calibration", "calibration_target.yaml")
-    with open(yaml_path) as f:
-        cfg = yaml.safe_load(f)
-    panels = cfg.get("panels", {})
-    poses = {}
-    for name, panel in panels.items():
-        pt = panel.get("pose_target", {})
-        if pt and "xyz" in pt and "rpy" in pt:
-            poses[name] = {"xyz": list(pt["xyz"]), "rpy": list(pt["rpy"])}
-    return poses
-
-def build_T_target_face(face_name):
-    p = FACE_POSES_TARGET[face_name]
-    T = euler_matrix(p["rpy"][0], p["rpy"][1], p["rpy"][2])
-    T[:3, 3] = p["xyz"]
-    return T
-
-def detect_on_image(cv_img, K, D):
-    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-    results = {}
-    # ChArUco (use more permissive params for oblique views)
-    for fk, fc in CHARUCO_FACES.items():
-        board = fc["board"]; id_start = fc["id_start"]
-        params = aruco_compat.detector_parameters()
-        params.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
-        params.adaptiveThreshWinSizeMin = 3  # smaller window for small markers
-        params.adaptiveThreshWinSizeMax = 23
-        params.minMarkerPerimeterRate = 0.01  # detect smaller markers at oblique angles
-        params.polygonalApproxAccuracyRate = 0.05  # more tolerant
-        corners, ids, _ = aruco_compat.detect_markers(gray, board.dictionary, params)
-        obj_pts, img_pts = [], []
-        if ids is not None:
-            ids_flat = [int(i) for i in ids.flatten()]
-            idx_list, local_ids = aruco_compat.remap_custom_ids(ids_flat, id_start, board)
-            if len(idx_list) >= 2:
-                local_corners = tuple(corners[i] for i in idx_list)
-                cc, cids = aruco_compat.interpolate_charuco_corners(
-                    local_corners, local_ids, gray, board, cameraMatrix=K, distCoeffs=D)
-                if cids is not None and len(cids) >= 4:
-                    board_pts = np.asarray(board.chessboardCorners, dtype=np.float32).reshape(-1,3)
-                    bw, bh = fc["sx"]*fc["sq_m"], fc["sy"]*fc["sq_m"]
-                    board_pts[:,0] -= bw/2.0; board_pts[:,1] -= bh/2.0
-                    cids_flat = [int(i) for i in cids.flatten()]
-                    obj_pts = [board_pts[i].tolist() for i in cids_flat]
-                    img_pts = cc.reshape(-1,2).astype(np.float32).tolist()
-        results[fk] = {"object_points_3d_face": obj_pts, "image_points_2d": img_pts,
-                       "corner_count": len(obj_pts)}
-    # ArUco
-    aruco_4x4 = aruco.getPredefinedDictionary(aruco.DICT_4X4_50)
-    params4 = aruco_compat.detector_parameters()
-    params4.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
-    params4.adaptiveThreshWinSizeMin = 3
-    params4.minMarkerPerimeterRate = 0.01
-    params4.polygonalApproxAccuracyRate = 0.05
-    corners4, ids4, _ = aruco_compat.detect_markers(gray, aruco_4x4, params4)
-    for fk, fc in ARUCO_FACES.items():
-        obj_pts, img_pts = [], []
-        if ids4 is not None:
-            ids_flat = [int(i) for i in ids4.flatten()]
-            for i, tid in enumerate(ids_flat):
-                if tid not in fc["marker_ids"]: continue
-                pos = fc["positions"][tid]; half = fc["marker_size_m"]/2.0
-                obj_pts.extend([[pos[0]-half,pos[1]+half,0],[pos[0]+half,pos[1]+half,0],
-                               [pos[0]+half,pos[1]-half,0],[pos[0]-half,pos[1]-half,0]])
-                img_pts.extend(corners4[i][0].tolist())
-        results[fk] = {"object_points_3d_face": obj_pts, "image_points_2d": img_pts,
-                       "corner_count": len(obj_pts)}
-    # AprilTag
-    tag_dict = aruco.getPredefinedDictionary(aruco.DICT_APRILTAG_36h11)
-    params_t = aruco_compat.detector_parameters()
-    params_t.cornerRefinementMethod = aruco.CORNER_REFINE_SUBPIX
-    params_t.adaptiveThreshWinSizeMin = 3
-    params_t.minMarkerPerimeterRate = 0.01
-    params_t.polygonalApproxAccuracyRate = 0.05
-    corners_t, ids_t, _ = aruco_compat.detect_markers(gray, tag_dict, params_t)
-    for fk, fc in APRILTAG_FACES.items():
-        obj_pts, img_pts = [], []
-        if ids_t is not None:
-            ids_flat = [int(i) for i in ids_t.flatten()]
-            for i, tid in enumerate(ids_flat):
-                if tid not in fc["tag_ids"]: continue
-                pos = fc["positions"][tid]; half = fc["tag_size"]/2.0
-                obj_pts.extend([[pos[0]-half,pos[1]+half,0],[pos[0]+half,pos[1]+half,0],
-                               [pos[0]+half,pos[1]-half,0],[pos[0]-half,pos[1]-half,0]])
-                img_pts.extend(corners_t[i][0].tolist())
-        results[fk] = {"object_points_3d_face": obj_pts, "image_points_2d": img_pts,
-                       "corner_count": len(obj_pts)}
-    return results
 
 def rpy_to_quat(roll_deg, pitch_deg, yaw_deg):
     roll = math.radians(roll_deg); pitch = math.radians(pitch_deg); yaw = math.radians(yaw_deg)
@@ -182,11 +67,14 @@ def main():
         os.path.expanduser("~/cr5_data")), "calibration", "runs", "sim_v8_e2e_001")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load face geometry
-    global FACE_POSES_TARGET, T_TARGET_FACE
-    FACE_POSES_TARGET = load_face_poses()
-    T_TARGET_FACE = {name: build_T_target_face(name) for name in FACE_POSES_TARGET}
-    rospy.loginfo("Loaded %d face poses", len(FACE_POSES_TARGET))
+    # V8.9: 统一 geometry loader — calibration_target.yaml 为唯一权威来源
+    target_geom = load_target_geometry()
+    rospy.loginfo("Loaded target geometry: %d faces, YAML sha256=%s",
+                  len(target_geom.face_poses_target), target_geom.yaml_sha256[:16])
+
+    # V8.9: 公共 detector profiles — right ArUco=NONE (V8.8 因果闭环)
+    profiles = create_default_profiles()
+    rospy.loginfo("Detector profiles: %s", profiles.profile_summary())
 
     # Read camera infos
     camera_infos = {}
@@ -208,7 +96,8 @@ def main():
     print("  V8 Gazebo E2E — Auto Capture")
     print("="*60)
 
-    dataset = CalibrationDataset(camera_infos=camera_infos, face_poses_target=FACE_POSES_TARGET,
+    dataset = CalibrationDataset(camera_infos=camera_infos,
+                                  face_poses_target=target_geom.face_poses_target,
                                   groups={}, source_type="gazebo")
 
     for pose_label, xyz, rpy_deg in TARGET_POSES:
@@ -243,14 +132,14 @@ def main():
             K_arr = np.array(camera_infos[cam]["K"]).reshape(3,3)
             D_arr = np.array(camera_infos[cam]["D"] if camera_infos[cam]["D"] else [0.,0.,0.,0.], dtype=np.float64)
             if D_arr.ndim == 0: D_arr = np.array([0.,0.,0.,0.], dtype=np.float64)
-            detection = detect_on_image(cv_img, K_arr, D_arr)
+            detection = detect_target(cv_img, K_arr, D_arr, target_geom, profiles)
 
             corners = []
             for face_name, fd in detection.items():
                 obj_face = fd.get("object_points_3d_face", [])
                 img_face = fd.get("image_points_2d", [])
                 if not obj_face: continue
-                T = T_TARGET_FACE[face_name]
+                T = target_geom.T_target_face[face_name]
                 for pi in range(len(obj_face)):
                     pt = np.array([*obj_face[pi], 1.0])
                     pt_tgt = (T @ pt)[:3]
@@ -260,7 +149,7 @@ def main():
                         obj_pt_target=tuple(pt_tgt.tolist()),
                         img_pt_raw=tuple(img_face[pi]),
                         img_pt_undistorted=tuple(img_face[pi]),
-                        detector_type="charuco" if face_name in ("front","back") else "apriltag"))
+                        detector_type=target_geom.face_pattern_types.get(face_name, "unknown")))
 
             if corners:
                 group_data[cam] = CameraGroupMeasurement(camera=cam, group_id=gid, corners=corners)
