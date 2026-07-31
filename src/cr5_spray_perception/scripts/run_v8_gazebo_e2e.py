@@ -86,9 +86,19 @@ def main():
         rospy.loginfo("%s: K=[%.1f,%.1f] %dx%d D=%s", cam,
                        info.K[0], info.K[4], info.width, info.height, list(info.D))
 
-    # Wait for capture service
-    svc_name = "/capture_manager/capture_sync_group"
-    rospy.wait_for_service(svc_name, timeout=5.0)
+    # Wait for capture service (joint_capture_manager)
+    for svc_candidate in ["/joint_capture_manager/capture_sync_group",
+                           "/capture_manager/capture_sync_group"]:
+        try:
+            rospy.wait_for_service(svc_candidate, timeout=2.0)
+            svc_name = svc_candidate
+            break
+        except rospy.ROSException:
+            continue
+    else:
+        rospy.logerr("No capture service found (tried joint_capture_manager, capture_manager)")
+        return
+    rospy.loginfo("Using capture service: %s", svc_name)
     capture_svc = rospy.ServiceProxy(svc_name, Trigger)
 
     # ── Auto-capture ──

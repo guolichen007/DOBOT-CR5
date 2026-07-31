@@ -53,38 +53,73 @@ def _compute_sha256(filepath):
 
 
 def _find_yaml_path():
-    """查找 calibration_target.yaml (通过 rospack 或相对路径)."""
-    search = []
+    """查找 calibration_target.yaml.
 
-    # 方式 1: rospack
+    搜索顺序:
+      1. 显式环境变量 CR5_CALIBRATION_TARGET_YAML
+      2. rospkg cr5_spray_sim
+      3. 相对本脚本位置推断 (适用于已安装的包)
+      4. 相对 CWD 的 workspace 结构 (适用于开发环境)
+      5. FAIL — 生产脚本不允许静默 fallback
+    """
+    searched = []
+
+    # 1: 环境变量 (最高优先级)
+    env_p = os.environ.get("CR5_CALIBRATION_TARGET_YAML", "")
+    if env_p:
+        searched.append(f"env:CR5_CALIBRATION_TARGET_YAML={env_p}")
+        if os.path.exists(env_p):
+            return env_p
+
+    # 2: rospkg
     try:
         import rospkg
         rp = rospkg.RosPack()
         sim_path = rp.get_path("cr5_spray_sim")
         p = os.path.join(sim_path, "config", "calibration", "calibration_target.yaml")
+        searched.append(f"rospkg:{p}")
         if os.path.exists(p):
             return p
     except Exception:
         pass
 
-    # 方式 2: 相对于本脚本推断
-    this_file = os.path.abspath(__file__)
-    # .../src/cr5_spray_perception/calibration/target_geometry.py
-    # → .../src/cr5_spray_sim/config/calibration/calibration_target.yaml
-    base = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(this_file))))
-    p = os.path.join(base, "cr5_spray_sim", "config", "calibration", "calibration_target.yaml")
+    # 3: 相对本脚本推断
+    _dir = os.path.abspath(os.path.dirname(__file__))
+    # .../cr5_spray_perception/src/cr5_spray_perception/calibration → .../src
+    for _ in range(4):
+        _dir = os.path.dirname(_dir)
+    p = os.path.join(_dir, "cr5_spray_sim", "config", "calibration", "calibration_target.yaml")
+    searched.append(f"script-relative:{p}")
     if os.path.exists(p):
         return p
 
-    # 方式 3: 环境变量
-    env_p = os.environ.get("CR5_CALIBRATION_TARGET_YAML", "")
-    if env_p and os.path.exists(env_p):
-        return env_p
+    # 4: 从 CWD 查找 workspace 结构
+    cwd = os.getcwd()
+    for candidate_dir in [cwd] + list(_parent_dirs(cwd, max_depth=5)):
+        p = os.path.join(candidate_dir, "src", "cr5_spray_sim", "config",
+                         "calibration", "calibration_target.yaml")
+        searched.append(f"cwd:{p}")
+        if os.path.exists(p):
+            return p
 
     raise FileNotFoundError(
-        "Cannot locate calibration_target.yaml. "
-        "Install cr5_spray_sim or set CR5_CALIBRATION_TARGET_YAML env var."
+        "Cannot locate calibration_target.yaml. Searched:\n  " +
+        "\n  ".join(searched) +
+        "\nInstall cr5_spray_sim or set CR5_CALIBRATION_TARGET_YAML env var."
     )
+
+
+def _parent_dirs(start_path, max_depth=5):
+    """向上遍历目录, 返回 [parent, grandparent, ...]."""
+    dirs = []
+    current = os.path.abspath(start_path)
+    for _ in range(max_depth):
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        dirs.append(parent)
+        current = parent
+    return dirs
 
 
 def load_target_geometry(yaml_path=None) -> TargetGeometry:
