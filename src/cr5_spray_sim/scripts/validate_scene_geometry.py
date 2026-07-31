@@ -32,7 +32,7 @@ from gazebo_msgs.srv import GetModelState, GetModelStateRequest
 # 容差
 BEAM_SPREADER_MAX_DELTA_MM = 5.0
 CAMERA_MOUNT_MAX_DIST_MM = 20.0
-COLLISION_CLEARANCE_MM = 10.0  # AABB 膨胀量
+COLLISION_CLEARANCE_M = 0.010  # 10mm AABB 膨胀量 (单位: 米)
 
 # 从 SDF 模型得出的相对几何 (不再写死世界坐标)
 # calibration_target/model.sdf:
@@ -80,10 +80,10 @@ def load_scene_config():
 
 def aabb_overlap_2d(min1, max1, min2, max2):
     """检查两个 AABB 在 XY 平面是否重叠 (带 CLEARANCE)."""
-    return (min1[0] - COLLISION_CLEARANCE_MM < max2[0] + COLLISION_CLEARANCE_MM and
-            max1[0] + COLLISION_CLEARANCE_MM > min2[0] - COLLISION_CLEARANCE_MM and
-            min1[1] - COLLISION_CLEARANCE_MM < max2[1] + COLLISION_CLEARANCE_MM and
-            max1[1] + COLLISION_CLEARANCE_MM > min2[1] - COLLISION_CLEARANCE_MM)
+    return (min1[0] - COLLISION_CLEARANCE_M < max2[0] + COLLISION_CLEARANCE_M and
+            max1[0] + COLLISION_CLEARANCE_M > min2[0] - COLLISION_CLEARANCE_M and
+            min1[1] - COLLISION_CLEARANCE_M < max2[1] + COLLISION_CLEARANCE_M and
+            max1[1] + COLLISION_CLEARANCE_M > min2[1] - COLLISION_CLEARANCE_M)
 
 
 class ContractValidator:
