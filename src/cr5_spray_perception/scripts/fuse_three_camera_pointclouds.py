@@ -1,24 +1,6 @@
 #!/usr/bin/env python3
-"""
-CR5 Reconstruction — 三相机点云融合脚本.
-
-使用 Stable V1 calibrated_rig 外参, 将三台相机的深度图反投影并转换到
-rig frame, 输出独立 PLY、按相机着色融合 PLY (raw+deduplicated)、
-RGB 融合 PLY、以及 raw + common 重叠度量.
-
-生产链路: 禁止读取 T_world_camera.yaml / Gazebo TF / gazebo_msgs.
-默认禁止 ICP 对齐.
-
-用法:
-  rosrun cr5_spray_perception fuse_three_camera_pointclouds.py \
-    --dataset ~/cr5_data/reconstruction/runs/run_001 \
-    --rig ~/cr5_data/reconstruction/calibrated_rig.yaml \
-    --config $(rospack find cr5_spray_perception)/config/reconstruction/three_camera_reconstruction.yaml \
-    --output ~/cr5_data/reconstruction/output/run_001_fused \
-    --group-id 0
-"""
-
-import os, sys, argparse, json, yaml, logging
+"""CR5 Reconstruction — 三相机点云融合脚本 (v2)."""
+import os, sys, argparse, json, yaml, logging, hashlib
 import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -32,21 +14,22 @@ from cr5_spray_perception.reconstruction.rgbd_io import (
 )
 from cr5_spray_perception.reconstruction.extrinsics import load_calibrated_rig
 from cr5_spray_perception.reconstruction.pointcloud_fusion import (
-    fuse_three_camera_pointclouds, CAMERA_COLORS, OVERLAP_PAIRS,
+    fuse_three_camera_pointclouds, CAMERA_COLORS, OVERLAP_PAIRS, GATE_DEFAULTS,
 )
 from cr5_spray_perception.reconstruction.contracts import REQUIRED_CAMERAS
 from cr5_spray_perception.reconstruction.dataset_layout import (
-    resolve_capture_group, load_group_manifest, DatasetLayout,
+    resolve_capture_group, load_group_manifest,
 )
+from cr5_spray_perception.reconstruction.registration import load_registration_evidence
+
+EXIT_OK = 0
+EXIT_DATA_FAIL = 2
+EXIT_GATE_FAIL = 3
+EXIT_INTERNAL = 4
 
 
-def _merge_config_with_cli(config_file: str, args) -> tuple:
-    """统一 CLI/YAML 优先级: 显式 CLI > YAML > 默认值.
-
-    Returns:
-        (config_dict, source_map) — source_map 记录每个参数来源.
-    """
-    # 加载 YAML
+def _merge_config_with_cli(config_file, args):
+    """CLI/YAML 优先级: 显式 CLI > YAML > 默认值."""
     if config_file and os.path.isfile(config_file):
         with open(config_file, "r") as f:
             config = yaml.safe_load(f) or {}
@@ -55,214 +38,153 @@ def _merge_config_with_cli(config_file: str, args) -> tuple:
         config = {}
 
     sources = {}
+    yaml_keys_formal = set(config.keys()) if config_file and os.path.isfile(config_file) else set()
 
-    # CLI 覆盖参数 (仅当显式传入时, 非 None 值)
-    cli_overrides = {
-        "depth_min_m": args.depth_min,
-        "depth_max_m": args.depth_max,
-        "voxel_downsample_m": args.voxel_size,
-    }
-
-    for key, val in cli_overrides.items():
+    # depth parameters (非 None 才覆盖)
+    for key, attr in [("depth_min_m", "depth_min"), ("depth_max_m", "depth_max"),
+                       ("voxel_downsample_m", "voxel_size")]:
+        val = getattr(args, attr, None)
         if val is not None:
-            config[key] = val
-            sources[key] = "cli"
+            config[key] = val; sources[key] = "cli"
 
-    # roi_min / roi_max (仅当非默认值或显式传入)
-    if args.roi_min != [-0.5, -0.5, 0.0] or hasattr(args, '_explicit_roi_min'):
+    # roi_min / roi_max: 只有显式传入才覆盖 (None 时不覆盖)
+    if args.roi_min is not None:
         config.setdefault("roi_rig", {})["min"] = list(args.roi_min)
         sources["roi_rig.min"] = "cli"
-    if args.roi_max != [1.5, 0.5, 2.0] or hasattr(args, '_explicit_roi_max'):
+    if args.roi_max is not None:
         config.setdefault("roi_rig", {})["max"] = list(args.roi_max)
         sources["roi_rig.max"] = "cli"
 
-    # 设置默认值 (未被 YAML 或 CLI 覆盖的)
+    # 默认值
     config.setdefault("camera_names", REQUIRED_CAMERAS)
     config.setdefault("overlap_thresholds_mm", [10, 20, 30])
-    config.setdefault("common_overlap_max_distance_m", 0.05)
-    config.setdefault("min_common_points", 1000)
-
+    if "common_overlap" not in config:
+        config["common_overlap"] = dict(GATE_DEFAULTS)
     if "roi_rig" not in config:
         config["roi_rig"] = {"min": [-0.5, -1.0, 0.0], "max": [2.0, 1.0, 2.5]}
 
-    # 确定所有参数来源 (用于可追溯性)
+    # 记录每个参数来源
     full_sources = {}
-    for key in config:
-        if key in sources:
-            full_sources[key] = sources[key]
-        elif key not in cli_overrides or cli_overrides[key] is None:
-            full_sources[key] = "yaml" if config_file else "default"
-        else:
-            full_sources[key] = "cli"
+    def _trace(cfg, prefix=""):
+        for k, v in cfg.items():
+            fk = f"{prefix}.{k}" if prefix else k
+            if isinstance(v, dict) and k not in ("min", "max"):
+                _trace(v, fk)
+            else:
+                if fk in sources:
+                    full_sources[fk] = sources[fk]
+                elif k in sources:
+                    full_sources[fk] = sources[k]
+                elif k in yaml_keys_formal or (prefix and prefix.split(".")[0] in yaml_keys_formal):
+                    full_sources[fk] = "yaml"
+                else:
+                    full_sources[fk] = "default"
+    _trace(config)
 
     config["_effective_config_sources"] = full_sources
     return config, full_sources
 
 
-def print_overlap_summary(raw_metrics: dict, common_metrics: dict):
-    """打印重叠指标摘要 (raw + common)."""
-    print("\n=== Raw Pairwise 重叠指标 ===")
-    _print_metrics_dict(raw_metrics)
-
-    print("\n=== Common Overlap 指标 (共同可见区域) ===")
-    for pair_key, pair_data in sorted(common_metrics.items()):
-        print(f"\n{pair_key}:")
-        support = pair_data.get("support", {})
-        print(f"  支持: A={support.get('n_common_a',0)}/{support.get('n_a_total',0)} "
-              f"({support.get('common_ratio_a',0)*100:.1f}%), "
-              f"B={support.get('n_common_b',0)}/{support.get('n_b_total',0)} "
-              f"({support.get('common_ratio_b',0)*100:.1f}%)")
-        cm = pair_data.get("common_metrics", {})
-        for direction, d in cm.items():
-            if isinstance(d, dict) and "median_mm" in d:
-                print(f"  {direction}: median={d.get('median_mm',0):.2f}mm  "
-                      f"p95={d.get('p95_mm',0):.2f}mm  "
-                      f"rmse={d.get('rmse_mm',0):.2f}mm")
-                for k, v in d.items():
-                    if k.startswith("coverage_"):
-                        print(f"    {k}: {v*100:.1f}%")
-
-
-def _print_metrics_dict(metrics: dict):
-    for pair_key, pair_metrics in sorted(metrics.items()):
-        print(f"\n{pair_key}:")
-        for direction in sorted(pair_metrics.keys()):
-            d = pair_metrics[direction]
-            if isinstance(d, dict) and "median_mm" in d:
-                print(f"  {direction}: n={d.get('n_source',0)}, "
-                      f"median={d.get('median_mm',0):.2f}mm, "
-                      f"p95={d.get('p95_mm',0):.2f}mm, "
-                      f"rmse={d.get('rmse_mm',0):.2f}mm")
-
-
 def main():
-    parser = argparse.ArgumentParser(
-        description="三相机点云融合 — Stable V1 calibrated_rig")
-    parser.add_argument("--dataset", "-d", required=True,
-                        help="数据集路径 (run 根目录 / groups 根目录 / 直接 group 目录)")
-    parser.add_argument("--rig", "-r", required=True,
-                        help="calibrated_rig.yaml 路径")
-    parser.add_argument("--config", "-c", default=None,
-                        help="融合配置 YAML 路径")
-    parser.add_argument("--output", "-o", required=True,
-                        help="输出目录")
-    parser.add_argument("--group-id", "-g", type=int, default=0,
-                        help="融合的 group ID (默认 0)")
-    parser.add_argument("--allow-icp", action="store_true", default=False,
-                        help="[DIAGNOSTIC ONLY] 允许 ICP")
-    # CLI 参数: 默认 None, 只有显式传入时才覆盖 YAML
-    parser.add_argument("--depth-min", type=float, default=None,
-                        help="最小深度 (m), 覆盖 YAML")
-    parser.add_argument("--depth-max", type=float, default=None,
-                        help="最大深度 (m), 覆盖 YAML")
-    parser.add_argument("--voxel-size", type=float, default=None,
-                        help="体素下采样尺寸 (m), 覆盖 YAML")
-    parser.add_argument("--roi-min", nargs=3, type=float, default=None,
-                        help="rig-frame AABB 最小角 (x y z)")
-    parser.add_argument("--roi-max", nargs=3, type=float, default=None,
-                        help="rig-frame AABB 最大角 (x y z)")
+    parser = argparse.ArgumentParser(description="三相机点云融合 — Stable V1 calibrated_rig")
+    parser.add_argument("--dataset", "-d", required=True, help="数据集路径")
+    parser.add_argument("--rig", "-r", required=True, help="calibrated_rig.yaml 路径")
+    parser.add_argument("--config", "-c", default=None, help="融合配置 YAML")
+    parser.add_argument("--output", "-o", required=True, help="输出目录")
+    parser.add_argument("--group-id", "-g", type=int, default=0, help="group ID")
+    parser.add_argument("--depth-min", type=float, default=None, help="最小深度 (m)")
+    parser.add_argument("--depth-max", type=float, default=None, help="最大深度 (m)")
+    parser.add_argument("--voxel-size", type=float, default=None, help="体素尺寸 (m)")
+    parser.add_argument("--roi-min", nargs=3, type=float, default=None, help="AABB 最小角 x y z")
+    parser.add_argument("--roi-max", nargs=3, type=float, default=None, help="AABB 最大角 x y z")
+    parser.add_argument("--registration-evidence", default=None, help="depth_registration.json 路径 (默认: group 目录下)")
     args = parser.parse_args()
 
-    # 统一配置优先级
     config, config_sources = _merge_config_with_cli(args.config, args)
 
-    # 解析数据集路径
-    logger.info("解析数据集路径: %s (group %d)", args.dataset, args.group_id)
     try:
         layout = resolve_capture_group(args.dataset, args.group_id)
     except FileNotFoundError as e:
-        logger.error(str(e))
-        sys.exit(1)
-    logger.info("  group_dir: %s", layout.group_dir)
-    logger.info("  layout_type: %s", layout.layout_type)
+        logger.error(str(e)); sys.exit(EXIT_DATA_FAIL)
+    logger.info("group_dir: %s", layout.group_dir)
 
-    # 加载 calibrated_rig
-    logger.info("加载 calibrated_rig: %s", args.rig)
     rig = load_calibrated_rig(args.rig)
-    logger.info("  rig_frame: %s, status: %s", rig["rig_frame"], rig["status"])
+    if rig.get("status") != "PASS":
+        logger.error("calibrated_rig status=%s, 期望 PASS", rig.get("status"))
+        sys.exit(EXIT_DATA_FAIL)
+    logger.info("rig_frame: %s, status: %s", rig["rig_frame"], rig["status"])
 
-    # 加载 manifest (如有)
-    manifest = load_group_manifest(layout.group_dir)
-    if manifest:
-        logger.info("  manifest: success=%s, captured=%d/%d, skew=%.2fms",
-                    manifest.get("success"),
-                    manifest.get("captured", 0), manifest.get("expected", 0),
-                    manifest.get("cross_camera_sync", {}).get("max_inter_camera_skew_s", 0) * 1000)
+    # 加载 registration evidence
+    evidence = None
+    ev_path = args.registration_evidence or os.path.join(layout.group_dir, "depth_registration.json")
+    evidence = load_registration_evidence(ev_path)
+    if evidence:
+        logger.info("registration evidence: %s (source=%s)", ev_path, evidence.get("source", "?"))
     else:
-        logger.warning("  group_manifest.json 不存在")
+        logger.warning("无 depth_registration.json, color≠depth frame 配准将失败")
 
-    # 加载三台相机数据
+    manifest = load_group_manifest(layout.group_dir)
+
     rgbd_list = []
     for cam_name in REQUIRED_CAMERAS:
-        cam_dir = layout.camera_dirs.get(cam_name)
-        if cam_dir is None:
-            cam_dir = os.path.join(layout.group_dir, cam_name)
+        cam_dir = layout.camera_dirs.get(cam_name) or os.path.join(layout.group_dir, cam_name)
         if not os.path.isdir(cam_dir):
-            logger.error("相机目录不存在: %s", cam_dir)
-            sys.exit(1)
+            logger.error("相机目录不存在: %s", cam_dir); sys.exit(EXIT_DATA_FAIL)
 
         rgbd = load_rgbd_data(cam_dir, cam_name)
-        rgbd = validate_rgbd_contract(rgbd, require_registered_to_color=True)
-
+        rgbd = validate_rgbd_contract(rgbd, require_registered_to_color=True,
+                                       registration_evidence=evidence)
         if not rgbd.is_valid:
             logger.error("%s 数据验证失败:", cam_name)
-            for e in rgbd.errors:
-                logger.error("  %s", e)
-            sys.exit(1)
-        for w in rgbd.warnings:
-            logger.warning("  [%s] %s", cam_name, w)
+            for e in rgbd.errors: logger.error("  %s", e)
+            sys.exit(EXIT_DATA_FAIL)
+        for w in rgbd.warnings: logger.warning("  [%s] %s", cam_name, w)
         rgbd_list.append(rgbd)
 
-    # 点云融合
-    logger.info("开始三相机点云融合...")
-    if args.allow_icp:
-        logger.warning("⚠️ ICP 模式 — 仅诊断用途!")
+    try:
+        result = fuse_three_camera_pointclouds(rgbd_list, rig, config, args.output, allow_icp=False)
+    except RuntimeError as e:
+        logger.error("融合失败: %s", e); sys.exit(EXIT_INTERNAL)
 
-    result = fuse_three_camera_pointclouds(
-        rgbd_list=rgbd_list,
-        calibrated_rig=rig,
-        config=config,
-        output_dir=args.output,
-        allow_icp=args.allow_icp,
-    )
-
-    # 输出摘要
     print("\n=== 融合统计 ===")
     for cam_name, stats in result["per_camera_stats"].items():
-        print(f"  {cam_name}: raw={stats['n_raw']}, crop={stats['n_after_crop']}, "
-              f"final={stats['n_final']}, reg={stats.get('registration_status','?')}")
-    print(f"  fused: raw={result['fused_stats']['n_points_raw']}, "
-          f"dedup={result['fused_stats']['n_points_deduplicated']}")
+        print(f"  {cam_name}: raw={stats['n_raw']}, crop={stats['n_after_crop']}, final={stats['n_final']}, pixel_safe={stats.get('pixel_correspondence_safe','?')}")
+    print(f"  fused: raw={result['fused_stats']['n_points_raw']}, dedup={result['fused_stats']['n_points_deduplicated']}")
+
+    gate = result["gate"]
+    print(f"\n=== Gate: {'PASS' if gate['passed'] else 'FAIL'} ===")
+    for r in gate.get("reasons", []): print(f"  {'❌' if 'FAIL' in str(r) else '⚠️'} {r}")
+    for pk, pr in gate.get("pair_results", {}).items():
+        print(f"  {pk}: support={pr.get('support_passed')}, median={pr.get('median_passed')}, p95={pr.get('p95_passed')}, coverage={pr.get('coverage_passed')}")
 
     print("\n=== 输出文件 ===")
     for key, path in result["paths"].items():
-        print(f"  {key}: {path}")
+        status = "✅" if path and os.path.isfile(path) else "❌ (skipped)"
+        print(f"  {key}: {path or 'N/A'} {status}")
+    for label, v in result.get("ply_verification", {}).items():
+        print(f"  PLY verify [{label}]: exists={v['file_exists']}, size={v['file_size_bytes']}, readback={v['readback_points']}")
 
-    print_overlap_summary(
-        result.get("raw_pairwise_metrics", {}),
-        result.get("common_overlap_metrics", {}))
-
-    # 保存完整结果
     result_path = os.path.join(args.output, "fusion_result.json")
     result_serializable = {
-        "paths": result["paths"],
-        "per_camera_stats": result["per_camera_stats"],
+        "paths": result["paths"], "per_camera_stats": result["per_camera_stats"],
         "fused_stats": result["fused_stats"],
         "raw_pairwise_metrics": result["raw_pairwise_metrics"],
         "common_overlap_metrics": result["common_overlap_metrics"],
+        "gate": gate, "ply_verification": result.get("ply_verification", {}),
+        "rgb_output_suppressed": result.get("rgb_output_suppressed", False),
         "config_effective": result["config_effective"],
         "config_sources": config_sources,
         "input_rig_sha256": rig.get("source_calibration", {}).get("sha256", "N/A"),
-        "dataset": os.path.abspath(args.dataset),
-        "group_id": args.group_id,
+        "dataset": os.path.abspath(args.dataset), "group_id": args.group_id,
         "manifest_available": manifest is not None,
-        "allow_icp": args.allow_icp,
+        "registration_evidence_available": evidence is not None,
     }
     with open(result_path, "w") as f:
         json.dump(result_serializable, f, indent=2, default=str)
-    logger.info("融合结果已保存: %s", result_path)
 
-    print("\n✅ 三相机点云融合完成!")
+    if not gate["passed"]:
+        print("\n❌ Gate FAILED"); sys.exit(EXIT_GATE_FAIL)
+    print("\n✅ 融合完成, Gate PASS"); sys.exit(EXIT_OK)
 
 
 if __name__ == "__main__":

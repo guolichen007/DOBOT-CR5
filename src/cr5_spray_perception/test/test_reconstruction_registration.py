@@ -24,19 +24,21 @@ class TestRegistrationStatus(unittest.TestCase):
         )
         self.assertEqual(reg.status, "REGISTERED")
         self.assertTrue(reg.is_registered)
-        self.assertTrue(reg.rgb_indexing_safe)
+        self.assertTrue(reg.pixel_correspondence_safe)
 
-    def test_diff_frame_same_size_colocated(self):
-        """Gazebo 情况: color_optical_frame != depth_optical_frame, 但重合."""
+    def test_diff_frame_same_size_with_evidence_colocated(self):
+        """frame 名不同但有显式 T_color_depth → COLOCATED."""
+        T = np.eye(4)
         reg = determine_registration_status(
             "cam_fl_color_optical_frame",
             "cam_fl_depth_optical_frame",
             color_width=640, color_height=480,
             depth_width=640, depth_height=480,
+            T_color_depth=T,
         )
         self.assertEqual(reg.status, "COLOCATED")
         self.assertTrue(reg.is_registered)
-        self.assertFalse(reg.rgb_indexing_safe)  # frame 名不同
+        self.assertTrue(reg.pixel_correspondence_safe)  # identity T + 同尺寸
         self.assertLessEqual(reg.translation_mm, 0.1)
         self.assertLessEqual(reg.rotation_deg, 0.01)
 
@@ -52,9 +54,9 @@ class TestRegistrationStatus(unittest.TestCase):
         self.assertFalse(reg.is_registered)
 
     def test_translation_exceeds_threshold(self):
-        """T_color_depth 平移超限 → UNREGISTERED."""
+        """T_color_depth 平移超限 → UNREGISTERED (有显式 T 但平移太大)."""
         T = np.eye(4)
-        T[:3, 3] = [0.01, 0, 0]  # 10mm → 远超 0.1mm 门限
+        T[:3, 3] = [0.01, 0, 0]  # 10mm >> 0.1mm
         reg = determine_registration_status(
             "cam_fl_color_optical_frame",
             "cam_fl_depth_optical_frame",
@@ -63,6 +65,17 @@ class TestRegistrationStatus(unittest.TestCase):
             T_color_depth=T,
         )
         self.assertEqual(reg.status, "UNREGISTERED")
+
+    def test_diff_frame_no_evidence_unregistered(self):
+        """frame 名不同且无 T_color_depth → UNREGISTERED (不再按名称猜)."""
+        reg = determine_registration_status(
+            "cam_fl_color_optical_frame",
+            "cam_fl_depth_optical_frame",  # 无 T_color_depth!
+            color_width=640, color_height=480,
+            depth_width=640, depth_height=480,
+        )
+        self.assertEqual(reg.status, "UNREGISTERED")
+        self.assertFalse(reg.verified)
 
     def test_rotation_exceeds_threshold(self):
         """T_color_depth 旋转超限 → UNREGISTERED."""
@@ -90,15 +103,17 @@ class TestRegistrationStatus(unittest.TestCase):
         self.assertEqual(reg.status, "UNREGISTERED")
 
     def test_K_diff_warns(self):
-        """K 矩阵差异大时给出警告但不改变状态."""
+        """K 矩阵差异大时需要显式 T_color_depth 才能 COLOCATED."""
         K_color = np.eye(3)
-        K_depth = np.eye(3) * 3.0  # 差异很大 (K_depth[0,0]=3, diff=2)
+        K_depth = np.eye(3) * 3.0  # 差异很大
+        T = np.eye(4)  # 显式 identity
         reg = determine_registration_status(
             "cam_fl_color_optical_frame",
             "cam_fl_depth_optical_frame",
             color_width=640, color_height=480,
             depth_width=640, depth_height=480,
             color_K=K_color, depth_K=K_depth,
+            T_color_depth=T,
         )
         self.assertEqual(reg.status, "COLOCATED")
         self.assertGreater(reg.K_max_abs_diff, 1.0)

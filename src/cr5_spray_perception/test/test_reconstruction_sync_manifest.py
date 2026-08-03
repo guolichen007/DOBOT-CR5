@@ -58,7 +58,7 @@ class TestSyncManifest(unittest.TestCase):
         self.assertTrue(passed, msg="; ".join(errors))
         self.assertEqual(report["source"], "group_manifest.json")
         self.assertEqual(report["method"], "exact_stamp_ns")
-        self.assertEqual(report["actual_skew_ms"], 0.0)
+        self.assertEqual(report["recomputed_skew_ms"], 0.0)
 
     def test_manifest_skew_exceeded_fails(self):
         """manifest skew 超限 → FAIL."""
@@ -144,7 +144,7 @@ class TestSyncManifest(unittest.TestCase):
         passed, errors, warnings, report = validate_sync_group(
             rgbd_list, self.cameras, allow_legacy_fallback=True)
         self.assertEqual(report["source"], "quality.yaml (legacy fallback)")
-        self.assertIsNotNone(report["actual_skew_ms"])
+        self.assertIsNotNone(report["recomputed_skew_ms"])
 
 
 if __name__ == "__main__":
