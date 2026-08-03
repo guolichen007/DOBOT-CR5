@@ -126,7 +126,8 @@ def crop_mesh_to_roi(mesh, roi_min, roi_max):
 
 
 def evaluate_reconstruction(recon_mesh_path, gt_points_rig, output_dir, target_roi=None,
-                            sample_n=50000, thresholds_mm=(5, 10, 20, 30)):
+                            sample_n=50000, thresholds_mm=(5, 10, 20, 30),
+                            visible_gt_pts_rig=None):
     """评价重建 mesh vs GT 点云.
 
     Args:
@@ -180,13 +181,17 @@ def evaluate_reconstruction(recon_mesh_path, gt_points_rig, output_dir, target_r
         acc_dists.append(np.sqrt(dist2[0]))
     acc_dists = np.array(acc_dists) * 1000.0  # 转 mm
 
-    # ── Completeness: GT (visible) → recon ──
+    # ── Completeness: GT → recon ──
+    # 如果提供了 visible GT, 只评价可见表面的 completeness
+    comp_gt_pts = visible_gt_pts_rig if visible_gt_pts_rig is not None else gt_pts
+    comp_mode = "VISIBLE_SURFACE_ONLY" if visible_gt_pts_rig is not None else "FULL_GEOMETRY_DIAGNOSTIC_ONLY"
+
     recon_pcd_o3d = o3d.geometry.PointCloud()
     recon_pcd_o3d.points = o3d.utility.Vector3dVector(recon_pts)
     recon_tree = o3d.geometry.KDTreeFlann(recon_pcd_o3d)
 
     comp_dists = []
-    for pt in gt_pts:
+    for pt in comp_gt_pts:
         _, idx, dist2 = recon_tree.search_knn_vector_3d(pt, 1)
         comp_dists.append(np.sqrt(dist2[0]))
     comp_dists = np.array(comp_dists) * 1000.0
@@ -211,6 +216,8 @@ def evaluate_reconstruction(recon_mesh_path, gt_points_rig, output_dir, target_r
         "coverage": {},
         "n_recon_points": int(len(recon_pts)),
         "n_gt_points": int(len(gt_pts)),
+        "n_comp_gt_points": int(len(comp_gt_pts)),
+        "completeness_mode": comp_mode,
     }
 
     for t_mm in thresholds_mm:
@@ -230,15 +237,16 @@ def evaluate_reconstruction(recon_mesh_path, gt_points_rig, output_dir, target_r
         os.path.join(output_dir, "reconstruction_to_gt_distances.ply"), acc_pcd)
 
     # completeness (GT → recon distances)
-    comp_colors = np.zeros((len(gt_pts), 3))
+    comp_colors = np.zeros((len(comp_gt_pts), 3))
     comp_clipped = np.clip(comp_dists / 50.0, 0, 1)
     comp_colors[:, 0] = comp_clipped
     comp_colors[:, 1] = 1 - comp_clipped
     comp_pcd = o3d.geometry.PointCloud()
-    comp_pcd.points = o3d.utility.Vector3dVector(gt_pts)
+    comp_pcd.points = o3d.utility.Vector3dVector(comp_gt_pts)
     comp_pcd.colors = o3d.utility.Vector3dVector(comp_colors)
+    comp_suffix = "_visible" if visible_gt_pts_rig is not None else "_full"
     o3d.io.write_point_cloud(
-        os.path.join(output_dir, "gt_to_reconstruction_distances.ply"), comp_pcd)
+        os.path.join(output_dir, f"gt_to_reconstruction_distances{comp_suffix}.ply"), comp_pcd)
 
     return metrics
 
@@ -255,6 +263,8 @@ def main():
                         help="评价采样点数")
     parser.add_argument("--label", default="stable_v1",
                         help="标签 (stable_v1 / oracle)")
+    parser.add_argument("--visible-gt", default=None,
+                        help="可见 GT PLY 路径 (visible_union.ply). 用于 completeness.")
     parser.add_argument("--target-roi-min", nargs=3, type=float,
                         default=[-0.262, -0.280, 0.661],
                         help="目标 ROI min x y z (rig frame)")
@@ -305,11 +315,27 @@ def main():
     o3d.io.write_point_cloud(
         os.path.join(args.output_dir, "gt_rig_frame.ply"), gt_rig_pcd)
 
-    # 5. 评价 (使用 target ROI 裁剪重建 mesh)
+    # 5. 加载 visible GT (如果提供)
+    visible_gt_pts_rig = None
+    if args.visible_gt and os.path.isfile(args.visible_gt):
+        vis_pcd = o3d.io.read_point_cloud(args.visible_gt)
+        vis_pts_obj = np.asarray(vis_pcd.points)
+        # 变换到 rig frame
+        vis_pts_rig = (T_rig_object[:3, :3] @ vis_pts_obj.T + T_rig_object[:3, 3:4]).T
+        visible_gt_pts_rig = vis_pts_rig
+        logger.info("Visible GT (rig frame): %d pts", len(vis_pts_rig))
+        # 保存 rig-frame visible GT
+        vis_rig_pcd = o3d.geometry.PointCloud()
+        vis_rig_pcd.points = o3d.utility.Vector3dVector(vis_pts_rig)
+        o3d.io.write_point_cloud(
+            os.path.join(args.output_dir, "visible_gt_rig_frame.ply"), vis_rig_pcd)
+
+    # 6. 评价
     target_roi = {"min": list(args.target_roi_min), "max": list(args.target_roi_max)}
     metrics = evaluate_reconstruction(
         args.recon_mesh, gt_pts_rig, args.output_dir,
-        target_roi=target_roi, sample_n=args.eval_samples)
+        target_roi=target_roi, sample_n=args.eval_samples,
+        visible_gt_pts_rig=visible_gt_pts_rig)
 
     # 6. 保存
     eval_result = {
