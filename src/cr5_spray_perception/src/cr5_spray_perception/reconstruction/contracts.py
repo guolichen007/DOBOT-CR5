@@ -143,8 +143,9 @@ def validate_calibrated_rig_yaml(data: dict) -> Tuple[bool, List[str]]:
     errors = []
 
     # 顶层字段
-    if data.get("schema_version") != SCHEMA_VERSION:
-        errors.append(f"schema_version: 期望 {SCHEMA_VERSION}, 实际 {data.get('schema_version')}")
+    valid_schemas = (SCHEMA_VERSION, "cr5_reconstruction_refined_rig_v1")
+    if data.get("schema_version") not in valid_schemas:
+        errors.append(f"schema_version: 期望 {'/'.join(valid_schemas)}, 实际 {data.get('schema_version')}")
 
     if data.get("status") != "PASS":
         errors.append(f"status: 期望 PASS, 实际 {data.get('status')}")
@@ -157,8 +158,8 @@ def validate_calibrated_rig_yaml(data: dict) -> Tuple[bool, List[str]]:
 
     # source_calibration
     sc = data.get("source_calibration", {})
-    valid_solvers = (REQUIRED_SOLVER, "gazebo_oracle_truth")
-    valid_versions = (REQUIRED_VERSION, "oracle-v1")
+    valid_solvers = (REQUIRED_SOLVER, "gazebo_oracle_truth", "bounded_rgbd_pairwise_refinement")
+    valid_versions = (REQUIRED_VERSION, "oracle-v1", "refined-v1")
     if sc.get("solver") not in valid_solvers:
         errors.append(f"source_calibration.solver: 期望 {'/'.join(valid_solvers)}, 实际 {sc.get('solver')}")
     if sc.get("version") not in valid_versions:
