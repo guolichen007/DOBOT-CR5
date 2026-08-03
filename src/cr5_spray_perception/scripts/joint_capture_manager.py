@@ -226,7 +226,7 @@ class JointCaptureManager(CaptureManager):
                     if inter_cam_skew <= self.max_inter_camera_skew_s:
                         snapshot = dict(matched_snapshot)
                         snapshot["_cross_skew_s"] = inter_cam_skew
-                        snapshot["_cross_match_method"] = "exact_stamp_ns"
+                        snapshot["_cross_match_method"] = "cross_camera_bounded_skew"
                         snapshot["_cross_color_stamps"] = {
                             c: {
                                 "secs": s.secs,
@@ -303,7 +303,7 @@ class JointCaptureManager(CaptureManager):
                         if inter_cam_skew <= self.max_inter_camera_skew_s:
                             snapshot = dict(matched)
                             snapshot["_cross_skew_s"] = inter_cam_skew
-                            snapshot["_cross_match_method"] = "exact_stamp_ns"
+                            snapshot["_cross_match_method"] = "cross_camera_bounded_skew"
                             snapshot["_cross_color_stamps"] = {
                                 c: {
                                     "secs": s.secs,
@@ -521,7 +521,7 @@ class JointCaptureManager(CaptureManager):
             "errors": errors if errors else [],
             "per_camera": per_camera_detail,
             "cross_camera_sync": {
-                "method": "exact_stamp_ns",
+                "method": "cross_camera_bounded_skew",
                 "max_inter_camera_skew_s": final_skew,
                 "max_allowed_skew_s": self.max_inter_camera_skew_s,
                 "ats_slop_s": self.cross_sync_slop_s,

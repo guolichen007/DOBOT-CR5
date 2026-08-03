@@ -265,7 +265,7 @@ def validate_sync_group(rgbd_list, expected_cameras, max_inter_camera_skew_ms=5.
     必须满足:
       - captured == expected == 3
       - len(camera_names) == 3
-      - method == exact_stamp_ns
+      - method == cross_camera_bounded_skew
       - actual skew ≤ manifest.max_allowed_skew_s
       - actual skew ≤ config max
       - recomputed skew 与 declared skew 一致
@@ -316,8 +316,9 @@ def validate_sync_group(rgbd_list, expected_cameras, max_inter_camera_skew_ms=5.
         ccs = manifest.get("cross_camera_sync", {})
         method = ccs.get("method", "unknown")
         sync_report["method"] = method
-        if method != "exact_stamp_ns":
-            errors.append(f"method='{method}', 期望 'exact_stamp_ns'")
+        valid_methods = ("cross_camera_bounded_skew", "exact_stamp_ns")
+        if method not in valid_methods:
+            errors.append(f"method='{method}', 期望 'cross_camera_bounded_skew'")
 
         declared_skew_s = ccs.get("max_inter_camera_skew_s", None)
         manifest_allowed_s = ccs.get("max_allowed_skew_s", None)

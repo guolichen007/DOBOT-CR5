@@ -38,11 +38,29 @@ overlap_thresholds_mm: [10, 20, 30]
 # 所有数据放在 ~/cr5_data/reconstruction, 不提交 Git
 output:
   base_dir: "~/cr5_data/reconstruction"
-  per_camera_subdir: "per_camera"
-  fused_subdir: "fused"
 
-# ── 重叠度量 Gate 阈值 (暂定, Phase 1 oracle baseline 后冻结) ──
-gates:
-  pairwise_overlap_median_mm: 12.0
-  pairwise_overlap_p95_mm: 30.0
-  inter_camera_skew_ms: 5.0
+# ── 局部对齐诊断 (Local Correspondence Diagnostic) ──
+# 使用互为最近邻 + 距离阈值筛选后计算误差
+# 用途: 验证局部重合方向正确, 不作为绝对精度评价
+# FL-RE (前左↔后) 因为视角相反, 共同可见区域自然较小
+# min_common_points 和 min_common_ratio 针对结构差异放宽
+# 对齐质量 (median/P95/coverage) 是所有相机对的统一要求
+#
+# ⚠️ 这些门限为 Gate 1 方向检查临时值, Oracle 完成后重新冻结
+local_correspondence_diagnostic:
+  provisional_for_gate1_direction_check: true
+  metric_scope:
+    type: mutual_nearest_neighbor_filtered
+    max_correspondence_distance_m: 0.05
+    selection_biased: true
+    valid_for_absolute_accuracy: false
+  max_correspondence_distance_m: 0.05
+  min_common_points: 200
+  min_common_ratio: 0.005
+  median_gate_mm: 12.0
+  p95_gate_mm: 30.0
+  min_coverage_20mm: 0.80
+
+# ── 同步 Gate ──
+sync:
+  max_inter_camera_skew_ms: 5.0

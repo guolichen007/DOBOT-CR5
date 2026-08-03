@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""CR5 Reconstruction — 三相机点云融合脚本 (v2)."""
-import os, sys, argparse, json, yaml, logging, hashlib
+"""CR5 Reconstruction — 三相机点云融合脚本 (v3)."""
+import os, sys, argparse, json, yaml, logging, hashlib, subprocess, shutil, datetime, platform
 import numpy as np
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
@@ -14,7 +14,8 @@ from cr5_spray_perception.reconstruction.rgbd_io import (
 )
 from cr5_spray_perception.reconstruction.extrinsics import load_calibrated_rig
 from cr5_spray_perception.reconstruction.pointcloud_fusion import (
-    fuse_three_camera_pointclouds, CAMERA_COLORS, OVERLAP_PAIRS, GATE_DEFAULTS,
+    fuse_three_camera_pointclouds, CAMERA_COLORS, OVERLAP_PAIRS,
+    LOCAL_ALIGNMENT_DEFAULTS, GATE_DEFAULTS,
 )
 from cr5_spray_perception.reconstruction.contracts import REQUIRED_CAMERAS
 from cr5_spray_perception.reconstruction.dataset_layout import (
@@ -26,6 +27,125 @@ EXIT_OK = 0
 EXIT_DATA_FAIL = 2
 EXIT_GATE_FAIL = 3
 EXIT_INTERNAL = 4
+
+
+def _sha256_file(path):
+    """计算文件 SHA256."""
+    if not path or not os.path.isfile(path):
+        return None
+    return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+
+def _sha256_str(s):
+    """计算字符串 SHA256."""
+    return hashlib.sha256(s.encode("utf-8")).hexdigest()
+
+
+def _get_git_sha():
+    """获取当前 Git SHA."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=WS, stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        return "unknown"
+
+
+def _get_git_branch():
+    """获取当前 Git 分支."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=WS, stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        return "unknown"
+
+
+def _get_environment_info():
+    """收集运行环境信息."""
+    info = {"git_sha": _get_git_sha(), "git_branch": _get_git_branch(),
+            "timestamp_utc": datetime.datetime.utcnow().isoformat() + "Z"}
+    try:
+        info["ros_distro"] = os.environ.get("ROS_DISTRO", "unknown")
+    except Exception:
+        info["ros_distro"] = "unknown"
+    try:
+        info["python_version"] = sys.version
+    except Exception:
+        info["python_version"] = "unknown"
+    for pkg in ["numpy", "scipy", "cv2", "open3d", "yaml"]:
+        try:
+            if pkg == "cv2":
+                import cv2; info["opencv_version"] = cv2.__version__
+            elif pkg == "yaml":
+                import yaml; info["pyyaml_version"] = yaml.__version__
+            else:
+                mod = __import__(pkg)
+                info[f"{pkg}_version"] = getattr(mod, "__version__", "unknown")
+        except Exception:
+            info[f"{pkg}_version"] = "unknown"
+    try:
+        import platform; info["ubuntu_version"] = platform.version()
+    except Exception:
+        info["ubuntu_version"] = "unknown"
+    return info
+
+
+def _save_provenance(output_dir, args, config, config_path, rig, rig_path,
+                     evidence, evidence_path, layout, manifest):
+    """保存 provenance 目录,包含所有输入副本."""
+    prov_dir = os.path.join(output_dir, "provenance")
+    os.makedirs(prov_dir, exist_ok=True)
+
+    # 1. 保存 effective config
+    effective_yaml_path = os.path.join(prov_dir, "three_camera_reconstruction_effective.yaml")
+    shutil.copy2(config_path, effective_yaml_path) if config_path and os.path.isfile(config_path) else None
+    effective_config_sha = _sha256_file(effective_yaml_path)
+
+    # 2. 保存 calibrated_rig
+    rig_copy = os.path.join(prov_dir, "calibrated_rig_stable_v1.yaml")
+    shutil.copy2(rig_path, rig_copy) if rig_path and os.path.isfile(rig_path) else None
+
+    # 3. 保存 depth_registration.json
+    if evidence_path and os.path.isfile(evidence_path):
+        shutil.copy2(evidence_path, os.path.join(prov_dir, "depth_registration.json"))
+
+    # 4. 保存 group_manifest.json
+    manifest_path_src = os.path.join(layout.group_dir, "group_manifest.json")
+    if os.path.isfile(manifest_path_src):
+        shutil.copy2(manifest_path_src, os.path.join(prov_dir, "group_manifest.json"))
+
+    # 5. 保存 environment.json
+    env_info = _get_environment_info()
+    env_info["command"] = " ".join(sys.argv)
+    env_info["config_path"] = os.path.abspath(config_path) if config_path else "N/A"
+    env_info["config_sha256"] = effective_config_sha
+    env_info["rig_path"] = os.path.abspath(rig_path)
+    env_info["rig_sha256"] = _sha256_file(rig_path)
+    env_info["stable_v1_json_sha256"] = rig.get("source_calibration", {}).get("sha256", "N/A") if rig else "N/A"
+    if evidence:
+        env_info["registration_evidence_path"] = os.path.abspath(evidence_path) if evidence_path else "N/A"
+        env_info["registration_evidence_sha256"] = evidence.get("sha256", _sha256_file(evidence_path))
+    with open(os.path.join(prov_dir, "environment.json"), "w") as f:
+        json.dump(env_info, f, indent=2, default=str)
+
+    # 6. 保存 command.txt
+    with open(os.path.join(prov_dir, "command.txt"), "w") as f:
+        f.write(" ".join(sys.argv) + "\n")
+
+    # 7. 保存 input manifest (所有输入文件 SHA256)
+    input_files = {}
+    for cam_name in REQUIRED_CAMERAS:
+        cam_dir = layout.camera_dirs.get(cam_name) or os.path.join(layout.group_dir, cam_name)
+        for fname in ["color.png", "depth.npy", "color_camera_info.yaml", "depth_camera_info.yaml"]:
+            fpath = os.path.join(cam_dir, fname)
+            input_files[f"{cam_name}/{fname}"] = {
+                "path": fpath, "sha256": _sha256_file(fpath),
+                "size_bytes": os.path.getsize(fpath) if os.path.isfile(fpath) else 0}
+    with open(os.path.join(prov_dir, "input_manifest.json"), "w") as f:
+        json.dump(input_files, f, indent=2, default=str)
+
+    return prov_dir, env_info, input_files
 
 
 def _merge_config_with_cli(config_file, args):
@@ -58,8 +178,8 @@ def _merge_config_with_cli(config_file, args):
     # 默认值
     config.setdefault("camera_names", REQUIRED_CAMERAS)
     config.setdefault("overlap_thresholds_mm", [10, 20, 30])
-    if "common_overlap" not in config:
-        config["common_overlap"] = dict(GATE_DEFAULTS)
+    if "local_correspondence_diagnostic" not in config and "common_overlap" not in config:
+        config["local_correspondence_diagnostic"] = dict(LOCAL_ALIGNMENT_DEFAULTS)
     if "roi_rig" not in config:
         config["roi_rig"] = {"min": [-0.5, -1.0, 0.0], "max": [2.0, 1.0, 2.5]}
 
@@ -146,16 +266,29 @@ def main():
     except RuntimeError as e:
         logger.error("融合失败: %s", e); sys.exit(EXIT_INTERNAL)
 
+    # ── Provenance ──
+    prov_dir, env_info, input_files = _save_provenance(
+        args.output, args, config, args.config, rig, args.rig,
+        evidence, ev_path, layout, manifest)
+
     print("\n=== 融合统计 ===")
     for cam_name, stats in result["per_camera_stats"].items():
         print(f"  {cam_name}: raw={stats['n_raw']}, crop={stats['n_after_crop']}, final={stats['n_final']}, pixel_safe={stats.get('pixel_correspondence_safe','?')}")
     print(f"  fused: raw={result['fused_stats']['n_points_raw']}, dedup={result['fused_stats']['n_points_deduplicated']}")
 
     gate = result["gate"]
-    print(f"\n=== Gate: {'PASS' if gate['passed'] else 'FAIL'} ===")
+    gate_name = gate.get("gate_name", "LOCAL_ALIGNMENT_GATE")
+    print(f"\n=== {gate_name}: {'PASS' if gate['passed'] else 'FAIL'} ===")
+    if gate.get("provisional"):
+        print("  ⚠️ 门限为 Gate 1 方向检查临时值, Oracle 完成后重新冻结")
+    if gate.get("metric_scope", {}).get("selection_biased"):
+        print("  ℹ️ 使用互为最近邻筛选, 存在 selection bias, 不可作为绝对精度评价")
     for r in gate.get("reasons", []): print(f"  {'❌' if 'FAIL' in str(r) else '⚠️'} {r}")
     for pk, pr in gate.get("pair_results", {}).items():
-        print(f"  {pk}: support={pr.get('support_passed')}, median={pr.get('median_passed')}, p95={pr.get('p95_passed')}, coverage={pr.get('coverage_passed')}")
+        flags = []
+        if pr.get("low_overlap_warning"): flags.append("LOW_OVERLAP_SUPPORT")
+        flag_str = f" [{', '.join(flags)}]" if flags else ""
+        print(f"  {pk}: support={pr.get('support_passed')}, median={pr.get('median_passed')}, p95={pr.get('p95_passed')}, coverage={pr.get('coverage_passed')}{flag_str}")
 
     print("\n=== 输出文件 ===")
     for key, path in result["paths"].items():
@@ -164,8 +297,10 @@ def main():
     for label, v in result.get("ply_verification", {}).items():
         print(f"  PLY verify [{label}]: exists={v['file_exists']}, size={v['file_size_bytes']}, readback={v['readback_points']}")
 
+    # ── 增强 fusion_result.json ──
     result_path = os.path.join(args.output, "fusion_result.json")
     result_serializable = {
+        "schema": "cr5_fusion_result_v2",
         "paths": result["paths"], "per_camera_stats": result["per_camera_stats"],
         "fused_stats": result["fused_stats"],
         "raw_pairwise_metrics": result["raw_pairwise_metrics"],
@@ -174,7 +309,21 @@ def main():
         "rgb_output_suppressed": result.get("rgb_output_suppressed", False),
         "config_effective": result["config_effective"],
         "config_sources": config_sources,
-        "input_rig_sha256": rig.get("source_calibration", {}).get("sha256", "N/A"),
+        "provenance": {
+            "git_sha": env_info["git_sha"],
+            "git_branch": env_info["git_branch"],
+            "config_path": os.path.abspath(args.config) if args.config else "N/A",
+            "config_sha256": _sha256_file(args.config),
+            "rig_path": os.path.abspath(args.rig),
+            "rig_sha256": _sha256_file(args.rig),
+            "stable_v1_json_sha256": rig.get("source_calibration", {}).get("sha256", "N/A"),
+            "registration_evidence_path": os.path.abspath(ev_path) if evidence else "N/A",
+            "registration_evidence_sha256": _sha256_file(ev_path) if evidence else "N/A",
+            "group_manifest_sha256": _sha256_file(os.path.join(layout.group_dir, "group_manifest.json")),
+            "input_files": input_files,
+            "provenance_dir": prov_dir,
+            "environment": env_info,
+        },
         "dataset": os.path.abspath(args.dataset), "group_id": args.group_id,
         "manifest_available": manifest is not None,
         "registration_evidence_available": evidence is not None,
@@ -182,9 +331,10 @@ def main():
     with open(result_path, "w") as f:
         json.dump(result_serializable, f, indent=2, default=str)
 
+    print(f"\n📁 Provenance: {prov_dir}")
     if not gate["passed"]:
-        print("\n❌ Gate FAILED"); sys.exit(EXIT_GATE_FAIL)
-    print("\n✅ 融合完成, Gate PASS"); sys.exit(EXIT_OK)
+        print(f"\n❌ {gate_name} FAILED"); sys.exit(EXIT_GATE_FAIL)
+    print(f"\n✅ 融合完成, {gate_name} PASS"); sys.exit(EXIT_OK)
 
 
 if __name__ == "__main__":

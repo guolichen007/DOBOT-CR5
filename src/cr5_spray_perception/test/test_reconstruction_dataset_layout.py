@@ -113,7 +113,7 @@ class TestDatasetLayout(unittest.TestCase):
             "success": True, "captured": 3, "expected": 3,
             "camera_names": ["cam_front_left", "cam_front_right", "cam_rear"],
             "cross_camera_sync": {
-                "method": "exact_stamp_ns",
+                "method": "cross_camera_bounded_skew",
                 "max_inter_camera_skew_s": 0.002,
                 "max_allowed_skew_s": 0.005,
             },

@@ -38,7 +38,7 @@ OVERLAP_PAIRS = [
     ("cam_front_right", "cam_rear"),
 ]
 
-GATE_DEFAULTS = {
+LOCAL_ALIGNMENT_DEFAULTS = {
     "max_correspondence_distance_m": 0.05,
     "min_common_points": 1000,
     "min_common_ratio": 0.02,
@@ -46,6 +46,9 @@ GATE_DEFAULTS = {
     "p95_gate_mm": 30.0,
     "min_coverage_20mm": 0.80,
 }
+
+# 向后兼容旧配置 key
+GATE_DEFAULTS = LOCAL_ALIGNMENT_DEFAULTS
 
 
 def _has_open3d():
@@ -174,17 +177,30 @@ def compute_common_overlap(points_a, points_b, max_distance_m=0.05, thresholds_m
 
 
 def evaluate_gate(common_overlap_metrics, config):
-    """评估 common-overlap Gate.
+    """评估 LOCAL_ALIGNMENT_GATE (局部对齐诊断 Gate).
+
+    注意: 此 Gate 使用互为最近邻筛选后计算误差, 存在 selection bias.
+    不能作为绝对精度评价。正式精度由 GT mesh evaluator 给出。
 
     Returns:
-        {"passed": bool, "reasons": [...], "pair_results": {...}}
+        {"passed": bool, "reasons": [...], "pair_results": {...},
+         "gate_name": "LOCAL_ALIGNMENT_GATE", "metric_scope": {...}}
     """
-    gate_cfg = config.get("common_overlap", GATE_DEFAULTS)
+    # 支持新 key (local_correspondence_diagnostic) 和旧 key (common_overlap)
+    gate_cfg = config.get("local_correspondence_diagnostic") or config.get("common_overlap", LOCAL_ALIGNMENT_DEFAULTS)
     min_points = gate_cfg.get("min_common_points", 1000)
     min_ratio = gate_cfg.get("min_common_ratio", 0.02)
     median_gate = gate_cfg.get("median_gate_mm", 12.0)
     p95_gate = gate_cfg.get("p95_gate_mm", 30.0)
     min_cov_20 = gate_cfg.get("min_coverage_20mm", 0.80)
+    max_dist = gate_cfg.get("max_correspondence_distance_m", 0.05)
+
+    metric_scope = gate_cfg.get("metric_scope", {
+        "type": "mutual_nearest_neighbor_filtered",
+        "max_correspondence_distance_m": max_dist,
+        "selection_biased": True,
+        "valid_for_absolute_accuracy": False,
+    })
 
     reasons = []
     pair_results = {}
@@ -229,11 +245,19 @@ def evaluate_gate(common_overlap_metrics, config):
                 reasons.append(f"{pair_key}/{direction}: coverage@20mm={cov20:.3f} < {min_cov_20}")
                 pr["coverage_passed"] = False; pair_pass = False
 
+        # FL-RE 低重叠警告
+        if "cam_front_left" in pair_key and "cam_rear" in pair_key:
+            if n_a < 1000 or n_b < 1000 or ratio_a < 0.05 or ratio_b < 0.05:
+                reasons.append(f"⚠️ {pair_key}: LOW_OVERLAP_SUPPORT (A={n_a}/{ratio_a:.3f}, B={n_b}/{ratio_b:.3f}) — 结构限制, 非标定错误")
+                pr["low_overlap_warning"] = True
+
         pr["passed"] = pair_pass
         pair_results[pair_key] = pr
         if not pair_pass: all_passed = False
 
-    return {"passed": all_passed, "reasons": reasons, "pair_results": pair_results}
+    return {"passed": all_passed, "reasons": reasons, "pair_results": pair_results,
+            "gate_name": "LOCAL_ALIGNMENT_GATE", "metric_scope": metric_scope,
+            "provisional": gate_cfg.get("provisional_for_gate1_direction_check", False)}
 
 
 def fuse_three_camera_pointclouds(rgbd_list, calibrated_rig, config, output_dir, allow_icp=False):
@@ -247,7 +271,8 @@ def fuse_three_camera_pointclouds(rgbd_list, calibrated_rig, config, output_dir,
     roi_max = np.array(config.get("roi_rig", {}).get("max", [2.0, 1.0, 2.5]))
     overlap_thresholds_mm = config.get("overlap_thresholds_mm", [10, 20, 30])
     camera_names = config.get("camera_names", ["cam_front_left", "cam_front_right", "cam_rear"])
-    common_overlap_max_dist_m = config.get("common_overlap", GATE_DEFAULTS).get("max_correspondence_distance_m", 0.05)
+    gate_cfg = config.get("local_correspondence_diagnostic") or config.get("common_overlap", LOCAL_ALIGNMENT_DEFAULTS)
+    common_overlap_max_dist_m = gate_cfg.get("max_correspondence_distance_m", 0.05)
 
     rgbd_map = {r.camera_name: r for r in rgbd_list}
     per_camera_pcd_rig = {}; per_camera_colors_rgb = {}; per_camera_stats = {}
@@ -368,7 +393,7 @@ def fuse_three_camera_pointclouds(rgbd_list, calibrated_rig, config, output_dir,
               "config_effective": {"depth_min_m": depth_min_m, "depth_max_m": depth_max_m,
                                    "voxel_downsample_m": voxel_size_m,
                                    "roi_min": roi_min.tolist(), "roi_max": roi_max.tolist(),
-                                   "common_overlap_max_distance_m": common_overlap_max_dist_m}}
+                                   "local_correspondence_diagnostic": gate_cfg}}
 
     metrics_path = os.path.join(fused_dir, "overlap_metrics.json")
     with open(metrics_path, "w") as f:

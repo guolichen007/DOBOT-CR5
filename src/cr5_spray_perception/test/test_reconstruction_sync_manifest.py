@@ -44,7 +44,7 @@ class TestSyncManifest(unittest.TestCase):
             "expected": 3,
             "camera_names": self.cameras,
             "cross_camera_sync": {
-                "method": "exact_stamp_ns",
+                "method": "cross_camera_bounded_skew",
                 "max_inter_camera_skew_s": 0.0,  # 所有 stamp 相同, 实际 skew=0
                 "max_allowed_skew_s": 0.005,
                 "per_camera_color_stamps": {
@@ -57,7 +57,7 @@ class TestSyncManifest(unittest.TestCase):
             rgbd_list, self.cameras, manifest=manifest)
         self.assertTrue(passed, msg="; ".join(errors))
         self.assertEqual(report["source"], "group_manifest.json")
-        self.assertEqual(report["method"], "exact_stamp_ns")
+        self.assertEqual(report["method"], "cross_camera_bounded_skew")
         self.assertEqual(report["recomputed_skew_ms"], 0.0)
 
     def test_manifest_skew_exceeded_fails(self):
@@ -69,7 +69,7 @@ class TestSyncManifest(unittest.TestCase):
             "expected": 3,
             "camera_names": self.cameras,
             "cross_camera_sync": {
-                "method": "exact_stamp_ns",
+                "method": "cross_camera_bounded_skew",
                 "max_inter_camera_skew_s": 0.010,  # 10ms > 5ms
                 "max_allowed_skew_s": 0.005,
                 "per_camera_color_stamps": {
@@ -94,7 +94,7 @@ class TestSyncManifest(unittest.TestCase):
             "expected": 3,
             "camera_names": self.cameras,
             "cross_camera_sync": {
-                "method": "exact_stamp_ns",
+                "method": "cross_camera_bounded_skew",
                 "max_inter_camera_skew_s": 0.002,
                 "max_allowed_skew_s": 0.005,
                 "per_camera_color_stamps": {},
@@ -113,7 +113,7 @@ class TestSyncManifest(unittest.TestCase):
             "expected": 3,
             "camera_names": self.cameras,
             "cross_camera_sync": {
-                "method": "exact_stamp_ns",
+                "method": "cross_camera_bounded_skew",
                 "max_inter_camera_skew_s": 0.002,
                 "max_allowed_skew_s": 0.005,
                 "per_camera_color_stamps": {
