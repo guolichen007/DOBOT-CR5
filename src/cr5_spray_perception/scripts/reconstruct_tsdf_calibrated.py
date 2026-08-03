@@ -129,7 +129,9 @@ def validate_mesh(mesh, output_dir, label):
 
     # 连通分量分析
     try:
-        tri_ids, counts, _ = mesh.cluster_connected_triangles()
+        tri_ids_raw, counts_raw, _ = mesh.cluster_connected_triangles()
+        tri_ids = np.asarray(tri_ids_raw)
+        counts = np.asarray(counts_raw)
         result["connected_components"] = int(len(counts))
         result["component_triangle_counts"] = sorted([int(c) for c in counts], reverse=True)
 
@@ -137,10 +139,12 @@ def validate_mesh(mesh, output_dir, label):
         mesh_all = o3d.geometry.TriangleMesh()
         np.random.seed(42)
         for i, count in enumerate(counts):
-            if count == 0:
+            if count < 2:  # 至少需要 1 个三角形
                 continue
             comp_mask = tri_ids == i
             comp_tris = triangles[comp_mask]
+            if len(comp_tris) < 1:
+                continue
             comp_verts_idx = np.unique(comp_tris.flatten())
             remap = {vi: idx for idx, vi in enumerate(comp_verts_idx)}
             comp_v = vertices[comp_verts_idx]
@@ -148,7 +152,6 @@ def validate_mesh(mesh, output_dir, label):
             comp_mesh = o3d.geometry.TriangleMesh()
             comp_mesh.vertices = o3d.utility.Vector3dVector(comp_v)
             comp_mesh.triangles = o3d.utility.Vector3iVector(comp_t)
-            # 每个分量随机颜色
             color = np.random.rand(3) * 0.5 + 0.3
             comp_mesh.vertex_colors = o3d.utility.Vector3dVector(
                 np.tile(color, (len(comp_v), 1)))
