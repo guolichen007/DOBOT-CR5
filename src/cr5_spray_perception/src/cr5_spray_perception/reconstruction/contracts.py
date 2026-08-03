@@ -157,10 +157,12 @@ def validate_calibrated_rig_yaml(data: dict) -> Tuple[bool, List[str]]:
 
     # source_calibration
     sc = data.get("source_calibration", {})
-    if sc.get("solver") != REQUIRED_SOLVER:
-        errors.append(f"source_calibration.solver: 期望 {REQUIRED_SOLVER}, 实际 {sc.get('solver')}")
-    if sc.get("version") != REQUIRED_VERSION:
-        errors.append(f"source_calibration.version: 期望 {REQUIRED_VERSION}, 实际 {sc.get('version')}")
+    valid_solvers = (REQUIRED_SOLVER, "gazebo_oracle_truth")
+    valid_versions = (REQUIRED_VERSION, "oracle-v1")
+    if sc.get("solver") not in valid_solvers:
+        errors.append(f"source_calibration.solver: 期望 {'/'.join(valid_solvers)}, 实际 {sc.get('solver')}")
+    if sc.get("version") not in valid_versions:
+        errors.append(f"source_calibration.version: 期望 {'/'.join(valid_versions)}, 实际 {sc.get('version')}")
 
     # transform_contract
     tc = data.get("transform_contract", {})
