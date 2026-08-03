@@ -12,7 +12,11 @@ from distutils.core import setup
 from catkin_pkg.python_setup import generate_distutils_setup
 
 setup_args = generate_distutils_setup(
-    packages=["cr5_spray_perception", "cr5_spray_perception.calibration"],
+    packages=[
+        "cr5_spray_perception",
+        "cr5_spray_perception.calibration",
+        "cr5_spray_perception.reconstruction",
+    ],
     package_dir={"": "src"},
 )
 

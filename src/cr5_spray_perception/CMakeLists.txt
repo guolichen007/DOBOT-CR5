@@ -56,3 +56,11 @@ install(PROGRAMS
   scripts/evaluate_reconstruction.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+# 三相机重建 — 外参桥接 / 数据集验证 / 点云融合
+install(PROGRAMS
+  scripts/export_calibrated_rig.py
+  scripts/validate_reconstruction_dataset.py
+  scripts/fuse_three_camera_pointclouds.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)

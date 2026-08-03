@@ -1,0 +1,48 @@
+# CR5 三相机重建 — 融合配置
+# Stable V1 calibrated_rig 外参 + 三相机 RGB-D 点云融合
+
+# ── 相机列表 ──
+camera_names:
+  - cam_front_left
+  - cam_front_right
+  - cam_rear
+
+# ── rig frame ──
+rig_frame: "cam_front_left_color_optical_frame"
+
+# ── 深度范围 ──
+depth_min_m: 0.15
+depth_max_m: 2.0
+
+# ── 深度单位策略 ──
+# 自动检测: uint16 → mm → 转换为米; float32 → 假定为米
+# 如果数据集使用毫米编码的 float32, 设置 expected_unit: "mm"
+depth:
+  expected_unit: "meter"          # "meter" | "mm"
+  registered_to_color: true       # 是否要求深度已对齐到彩色
+
+# ── rig-frame ROI (AABB 裁剪) ──
+# 在 rig frame (cam_front_left optical frame) 中定义
+# X: 右, Y: 下, Z: 前
+roi_rig:
+  min: [-0.5, -1.0, 0.0]    # x_min, y_min, z_min (米)
+  max: [2.0, 1.0, 2.5]      # x_max, y_max, z_max (米)
+
+# ── 体素下采样 ──
+voxel_downsample_m: 0.005        # 5mm 体素
+
+# ── 重叠度量阈值 ──
+overlap_thresholds_mm: [10, 20, 30]
+
+# ── 输出路径 ──
+# 所有数据放在 ~/cr5_data/reconstruction, 不提交 Git
+output:
+  base_dir: "~/cr5_data/reconstruction"
+  per_camera_subdir: "per_camera"
+  fused_subdir: "fused"
+
+# ── 重叠度量 Gate 阈值 (暂定, Phase 1 oracle baseline 后冻结) ──
+gates:
+  pairwise_overlap_median_mm: 12.0
+  pairwise_overlap_p95_mm: 30.0
+  inter_camera_skew_ms: 5.0

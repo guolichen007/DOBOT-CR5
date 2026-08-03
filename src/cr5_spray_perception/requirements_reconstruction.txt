@@ -1,0 +1,10 @@
+# CR5 Reconstruction Python 依赖
+# Ubuntu 20.04 / Python 3.8 验证
+
+numpy>=1.19.5
+opencv-python>=4.5.0
+pyyaml>=5.4.0
+scipy>=1.5.0
+
+# Open3D — TSDF 与点云处理 (0.17.0 为 Ubuntu 20.04 可用最高版)
+open3d>=0.15.0,<0.18.0
