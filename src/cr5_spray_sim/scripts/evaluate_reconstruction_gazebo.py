@@ -22,74 +22,12 @@ except ImportError:
 PKG_DIR = os.path.join(os.path.dirname(__file__), "..")
 sys.path.insert(0, os.path.join(PKG_DIR, "src"))
 
+from cr5_spray_sim.calibration_target_geometry import (
+    build_gt_pointcloud, get_gt_aabb_sdf_frame,
+)
+
 # Rig frame
 RIG_FRAME = "cam_front_left_color_optical_frame"
-
-
-def load_scene_config():
-    scene_path = os.path.join(PKG_DIR, "config", "simulation_scene.yaml")
-    with open(scene_path) as f:
-        return yaml.safe_load(f)
-
-
-def build_cylinder_gt_mesh(target_type_cfg, n_samples=50000):
-    """从 motor_housing_cylinder 配置构建 GT 点云 (在 object frame).
-
-    object frame: Y 轴为圆柱主轴, XZ 为径向.
-    """
-    body_len = target_type_cfg.get("body", {}).get("length_y", 0.36)
-    body_r = target_type_cfg.get("body", {}).get("radius", 0.105)
-    left_cap_len = target_type_cfg.get("left_end_cap", {}).get("length_y", 0.035)
-    left_cap_r = target_type_cfg.get("left_end_cap", {}).get("radius", 0.115)
-    right_cap_len = target_type_cfg.get("right_end_cap", {}).get("length_y", 0.045)
-    right_cap_r = target_type_cfg.get("right_end_cap", {}).get("radius", 0.115)
-    shaft_len = target_type_cfg.get("shaft", {}).get("length_y", 0.055)
-    shaft_r = target_type_cfg.get("shaft", {}).get("radius", 0.040)
-
-    all_points = []
-    np.random.seed(42)
-
-    def sample_cylinder(length, radius, y_center, n):
-        """在 Y 轴上采样圆柱表面点."""
-        # 侧面
-        n_side = int(n * 0.85)
-        theta = np.random.uniform(0, 2 * np.pi, n_side)
-        y = np.random.uniform(-length / 2, length / 2, n_side) + y_center
-        x = radius * np.cos(theta)
-        z = radius * np.sin(theta)
-        side_pts = np.column_stack([x, y, z])
-
-        # 两端
-        n_cap = int(n * 0.15)
-        r_cap = np.sqrt(np.random.uniform(0, radius**2, n_cap))
-        theta_cap = np.random.uniform(0, 2 * np.pi, n_cap)
-        x_cap = r_cap * np.cos(theta_cap)
-        z_cap = r_cap * np.sin(theta_cap)
-        cap1 = np.column_stack([x_cap, np.full(n_cap, -length / 2 + y_center), z_cap])
-        cap2 = np.column_stack([x_cap, np.full(n_cap, length / 2 + y_center), z_cap])
-        return np.vstack([side_pts, cap1, cap2])
-
-    # Body center at y=0
-    all_points.append(sample_cylinder(body_len, body_r, 0.0, int(n_samples * 0.5)))
-
-    # Left end cap
-    left_y = -body_len / 2 - left_cap_len / 2
-    all_points.append(sample_cylinder(left_cap_len, left_cap_r, left_y, int(n_samples * 0.15)))
-
-    # Right end cap
-    right_y = body_len / 2 + right_cap_len / 2
-    all_points.append(sample_cylinder(right_cap_len, right_cap_r, right_y, int(n_samples * 0.15)))
-
-    # Shaft (at right side)
-    shaft_y = body_len / 2 + right_cap_len + shaft_len / 2
-    all_points.append(sample_cylinder(shaft_len, shaft_r, shaft_y, int(n_samples * 0.1)))
-
-    # Left shaft (symmetry)
-    shaft_y2 = -body_len / 2 - left_cap_len - shaft_len / 2
-    all_points.append(sample_cylinder(shaft_len, shaft_r, shaft_y2, int(n_samples * 0.1)))
-
-    pts = np.vstack(all_points)
-    return pts
 
 
 def get_gazebo_model_pose(model_name="simple_hanging_workpiece"):
@@ -111,7 +49,9 @@ def compute_T_world_rig():
     """计算 T_world_rig (world → FL optical frame) 从 scene config."""
     from cr5_spray_sim.camera_geometry import compute_camera_look_at
 
-    scene = load_scene_config()
+    scene_path = os.path.join(PKG_DIR, "config", "simulation_scene.yaml")
+    with open(scene_path) as f:
+        scene = yaml.safe_load(f)
     profiles = scene.get("cameras", {})
     target = profiles.get("target", {"x": 0.72, "y": 0, "z": 0.62})
     tgt = [target["x"], target["y"], target["z"]]
@@ -142,25 +82,28 @@ def quat_to_matrix(q):
 
 
 def crop_mesh_to_roi(mesh, roi_min, roi_max):
-    """裁剪 mesh 到 ROI 范围."""
+    """裁剪 mesh 到 ROI 范围 (fail-closed).
+
+    Raises:
+        RuntimeError: ROI 裁剪后无顶点或无三角形.
+    """
     vertices = np.asarray(mesh.vertices)
     triangles = np.asarray(mesh.triangles)
 
     mask = np.all(vertices >= roi_min, axis=1) & np.all(vertices <= roi_max, axis=1)
     if not np.any(mask):
-        logger.warning("ROI 裁剪后无顶点!")
-        return mesh
+        raise RuntimeError(
+            f"ROI 裁剪后无顶点! ROI=[{roi_min.tolist()}, {roi_max.tolist()}], "
+            f"mesh AABB=[{vertices.min(axis=0).tolist()}, {vertices.max(axis=0).tolist()}]")
 
-    # 保留使用了 ROI 内顶点的所有三角形
     kept_vert_idx = np.where(mask)[0]
     kept_set = set(kept_vert_idx)
     tri_mask = np.array([all(v in kept_set for v in tri) for tri in triangles])
 
     if not np.any(tri_mask):
-        logger.warning("ROI 裁剪后无三角形!")
-        return mesh
+        raise RuntimeError(
+            f"ROI 裁剪后无三角形! {len(kept_vert_idx)} 顶点在 ROI 内")
 
-    # Remap
     new_verts = vertices[kept_vert_idx]
     old_to_new = {old: new for new, old in enumerate(kept_vert_idx)}
     new_tris = np.array([[old_to_new[t[0]], old_to_new[t[1]], old_to_new[t[2]]]
@@ -172,6 +115,13 @@ def crop_mesh_to_roi(mesh, roi_min, roi_max):
     if mesh.has_vertex_colors():
         cropped.vertex_colors = o3d.utility.Vector3dVector(
             np.asarray(mesh.vertex_colors)[kept_vert_idx])
+
+    # 验证: 所有顶点在 ROI 容差内
+    rev = np.asarray(cropped.vertices)
+    tol = 0.01
+    if np.any(rev < roi_min - tol) or np.any(rev > roi_max + tol):
+        raise RuntimeError("裁剪后顶点超出 ROI 容差!")
+
     return cropped
 
 
@@ -315,19 +265,22 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    # 1. 构建 GT 点云 (object frame)
-    scene = load_scene_config()
-    target_cfg = scene.get("simple_hanging_workpiece", {})
-    target_type = target_cfg.get("default_type", "motor_housing_cylinder")
-    type_cfg = target_cfg.get("types", {}).get(target_type, {})
-    gt_pts_obj = build_cylinder_gt_mesh(type_cfg, n_samples=args.gt_samples)
-    logger.info("GT 点云 (object frame): %d pts", len(gt_pts_obj))
+    # 1. 构建 GT 点云 (SDF object frame, 来自 model.sdf)
+    gt_pts_obj, gt_labels, gt_manifest = build_gt_pointcloud(
+        scope="CALIBRATION_TARGET_BODY", total_points=args.gt_samples)
+    gt_aabb_sdf = get_gt_aabb_sdf_frame()
+    logger.info("GT 点云 (SDF object frame): %d pts, scope=CALIBRATION_TARGET_BODY", len(gt_pts_obj))
+    logger.info("GT AABB (SDF frame): %s → %s", gt_aabb_sdf["min"], gt_aabb_sdf["max"])
 
-    # 保存 canonical GT
+    # 保存 canonical GT + manifest
     gt_obj_pcd = o3d.geometry.PointCloud()
     gt_obj_pcd.points = o3d.utility.Vector3dVector(gt_pts_obj)
-    gt_obj_path = os.path.join(args.output_dir, "canonical_calibration_target_gt.ply")
+    gt_obj_path = os.path.join(args.output_dir, "calibration_target_body_canonical.ply")
     o3d.io.write_point_cloud(gt_obj_path, gt_obj_pcd)
+
+    manifest_path = os.path.join(args.output_dir, "gt_geometry_manifest.json")
+    with open(manifest_path, "w") as f:
+        json.dump(gt_manifest, f, indent=2, default=str)
 
     # 2. 获取 Gazebo model pose
     model_pose = get_gazebo_model_pose("simple_hanging_workpiece")
@@ -360,16 +313,19 @@ def main():
 
     # 6. 保存
     eval_result = {
-        "schema": "cr5_gazebo_gt_evaluation_v1",
+        "schema": "cr5_gazebo_gt_evaluation_v2",
         "label": args.label,
         "recon_mesh": os.path.abspath(args.recon_mesh),
-        "target_type": target_type,
+        "gt_scope": "CALIBRATION_TARGET_BODY",
+        "gt_source": "model.sdf (V5 calibration_target)",
         "gt_samples": args.gt_samples,
         "eval_samples": args.eval_samples,
+        "gt_aabb_sdf": gt_aabb_sdf,
         "model_pose_gazebo": {
             "position": model_pose["position"],
             "orientation_xyzw": model_pose["orientation"],
         },
+        "gt_geometry_manifest": gt_manifest,
         "metrics": metrics,
     }
 

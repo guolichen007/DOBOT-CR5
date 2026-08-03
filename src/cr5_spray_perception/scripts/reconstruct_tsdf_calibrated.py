@@ -186,10 +186,47 @@ def validate_mesh(mesh, output_dir, label):
     except Exception as e:
         result["errors"].append(f"连通分量分析失败: {type(e).__name__}: {e}")
 
-    # 退化三角形
+    # 退化三角形 (面积 < 1e-12 m²)
     try:
-        result["degenerate_triangles"] = int(np.sum(
-            mesh.get_non_manifold_edges()))
+        v = np.asarray(mesh.vertices)
+        t = np.asarray(mesh.triangles)
+        if len(t) > 0:
+            a = v[t[:, 0]]
+            b = v[t[:, 1]]
+            c = v[t[:, 2]]
+            cross_area = np.linalg.norm(np.cross(b - a, c - a), axis=1)
+            result["degenerate_triangles"] = int(np.sum(cross_area < 1e-12))
+    except Exception:
+        pass
+
+    # non-manifold edges
+    try:
+        result["non_manifold_edges"] = int(len(mesh.get_non_manifold_edges()))
+    except Exception:
+        result["non_manifold_edges"] = 0
+
+    # 重复三角形
+    try:
+        t_sorted = np.sort(np.asarray(mesh.triangles), axis=1)
+        _, counts = np.unique(t_sorted, axis=0, return_counts=True)
+        result["duplicated_triangles"] = int(np.sum(counts - 1))
+    except Exception:
+        result["duplicated_triangles"] = 0
+
+    # 重复顶点
+    try:
+        v_unique = np.unique(np.asarray(mesh.vertices), axis=0)
+        result["duplicated_vertices"] = int(len(np.asarray(mesh.vertices)) - len(v_unique))
+    except Exception:
+        result["duplicated_vertices"] = 0
+
+    try:
+        result["edge_manifold"] = bool(mesh.is_edge_manifold())
+    except Exception:
+        pass
+
+    try:
+        result["vertex_manifold"] = bool(mesh.is_vertex_manifold())
     except Exception:
         pass
 
@@ -241,40 +278,93 @@ def run_tsdf_reconstruction(rgbd_list, calibrated_rig, config, output_dir, voxel
         T_rc = get_T_rig_camera(calibrated_rig, cam_name)
         T_cr = get_T_camera_rig(calibrated_rig, cam_name)
 
-        # 转换深度为米
+        # 1. 转换深度为米
         depth_m, detected_unit = convert_depth_to_meters(rgbd.depth_raw, rgbd.depth_unit)
         h, w = depth_m.shape
 
-        # 构建相机内参
+        # 2. 反投影有效深度 → camera frame → rig frame
+        points_cam, valid_mask = depth_image_to_pointcloud(
+            depth_m, rgbd.depth_K, depth_min_m, depth_max_m)
+        n_valid_before = int(np.sum(valid_mask))
+
+        # 3. 变换到 rig frame 并应用 target ROI
+        if n_valid_before > 0:
+            points_rig = transform_pointcloud(points_cam, T_rc)
+            inside_roi = (
+                (points_rig[:, 0] >= roi_min[0]) &
+                (points_rig[:, 0] <= roi_max[0]) &
+                (points_rig[:, 1] >= roi_min[1]) &
+                (points_rig[:, 1] <= roi_max[1]) &
+                (points_rig[:, 2] >= roi_min[2]) &
+                (points_rig[:, 2] <= roi_max[2])
+            )
+            # 映射回 2D 像素 mask
+            roi_flat = np.zeros(h * w, dtype=bool)
+            v_idx = np.where(valid_mask.flatten())[0]
+            for k, orig_idx in enumerate(v_idx):
+                if inside_roi[k]:
+                    roi_flat[orig_idx] = True
+            image_mask = roi_flat.reshape(h, w)
+        else:
+            image_mask = np.zeros((h, w), dtype=bool)
+
+        # 4. ROI 外深度置零
+        masked_depth_m = np.where(
+            (valid_mask & image_mask) if n_valid_before > 0 else valid_mask,
+            depth_m, 0.0)
+        n_masked = int(np.sum(masked_depth_m > 0))
+        mask_ratio = n_masked / n_valid_before if n_valid_before > 0 else 0.0
+
+        if n_masked == 0:
+            logger.error("[%s] ROI mask 后无有效深度像素! (valid_before=%d, roi_min=%s, roi_max=%s)",
+                         cam_name, n_valid_before, roi_min.tolist(), roi_max.tolist())
+            raise RuntimeError(f"{cam_name}: target ROI mask 后无有效深度")
+
+        # 5. 保存 mask 和 masked depth
+        import cv2
+        cv2.imwrite(os.path.join(output_dir, f"{cam_name}_target_mask.png"),
+                    (image_mask.astype(np.uint8) * 255))
+        np.save(os.path.join(output_dir, f"{cam_name}_masked_depth.npy"), masked_depth_m)
+        # 预览
+        depth_preview = np.clip(masked_depth_m / 2.0 * 255, 0, 255).astype(np.uint8)
+        cv2.imwrite(os.path.join(output_dir, f"{cam_name}_masked_depth_preview.png"), depth_preview)
+
+        # 6. 保存 target points in rig frame
+        if n_valid_before > 0 and np.any(inside_roi):
+            import open3d as o3d
+            target_pts = points_rig[inside_roi]
+            target_colors_rig = np.zeros((len(target_pts), 3))
+            if rgbd.color is not None:
+                color_rgb = cv2.cvtColor(rgbd.color, cv2.COLOR_BGR2RGB)
+                h_c, w_c = color_rgb.shape[:2]
+                if h_c == h and w_c == w:
+                    target_colors_rig = color_rgb[valid_mask][inside_roi].astype(np.float64) / 255.0
+            pcd_target = o3d.geometry.PointCloud()
+            pcd_target.points = o3d.utility.Vector3dVector(target_pts.astype(np.float64))
+            pcd_target.colors = o3d.utility.Vector3dVector(target_colors_rig)
+            o3d.io.write_point_cloud(
+                os.path.join(output_dir, f"{cam_name}_target_points_rig.ply"), pcd_target)
+
+        # 7. 构建 masked RGBDImage
         intrinsic = o3d.camera.PinholeCameraIntrinsic(w, h,
             rgbd.depth_K[0, 0], rgbd.depth_K[1, 1],
             rgbd.depth_K[0, 2], rgbd.depth_K[1, 2])
-
-        # 构建 RGBDImage (深度以米为单位, 彩色为 uint8)
+        depth_o3d = o3d.geometry.Image(masked_depth_m.astype(np.float32))
         color_uint8 = cv2.cvtColor(rgbd.color, cv2.COLOR_BGR2RGB)
-        depth_o3d = o3d.geometry.Image(depth_m.astype(np.float32))
         color_o3d = o3d.geometry.Image(color_uint8.astype(np.uint8))
         rgbd_image = o3d.geometry.RGBDImage.create_from_color_and_depth(
             color_o3d, depth_o3d, depth_scale=1.0, depth_trunc=depth_max_m,
             convert_rgb_to_intensity=False)
 
-        # 统计有效深度像素
-        valid_depth = (depth_m > depth_min_m) & (depth_m < depth_max_m) & np.isfinite(depth_m)
-        n_raw = int(np.sum(valid_depth))
-
-        # 计算 ROI 内的点数 (用于报告)
-        points_cam, _, _ = backproject_rgbd(rgbd, depth_min_m, depth_max_m)
-        points_rig = transform_pointcloud(points_cam, T_rc)
-        _, crop_mask = crop_pointcloud_aabb(points_rig, roi_min, roi_max)
-        n_roi = int(np.sum(crop_mask))
-
+        # 8. TSDF 积分 (使用 masked depth)
         success = integrate_tsdf(tsdf_volume, rgbd_image, intrinsic, T_cr)
 
         frame_info = {
             "camera_name": cam_name,
             "optical_frame": f"{cam_name}_color_optical_frame",
-            "n_raw_depth_pixels": n_raw,
-            "n_roi_points": n_roi,
+            "n_valid_depth_pixels": n_valid_before,
+            "n_roi_masked_pixels": n_masked,
+            "mask_ratio": round(mask_ratio, 4),
             "integrated": success,
             "T_rig_camera": T_rc.tolist(),
             "T_camera_rig": T_cr.tolist(),
@@ -283,7 +373,8 @@ def run_tsdf_reconstruction(rgbd_list, calibrated_rig, config, output_dir, voxel
 
         if success:
             integrated_count += 1
-            logger.info("[%s] 集成: depth_pixels=%d → roi_points=%d", cam_name, n_raw, n_roi)
+            logger.info("[%s] 集成: valid=%d → masked=%d (ratio=%.3f)",
+                        cam_name, n_valid_before, n_masked, mask_ratio)
         else:
             logger.warning("[%s] 集成失败", cam_name)
 

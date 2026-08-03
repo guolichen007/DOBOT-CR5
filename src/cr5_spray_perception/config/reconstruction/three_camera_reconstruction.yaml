@@ -29,16 +29,18 @@ roi_rig:
   max: [2.0, 1.0, 2.5]      # x_max, y_max, z_max (米)
 
 # ── 目标 ROI (TSDF 重建范围) ──
-# 从 analyze_target_roi.py 分析 Stable V1 融合点云确定
-# 包含 calibration_target 主体 + 3cm margin
-# 来源: roi_analysis/roi_report.json (2026-08-03)
+# 从 calibration_target model.sdf GT 几何 + 15mm margin 计算
+# 包含: main_body + top_offset_block + 5 panels (CALIBRATION_TARGET_BODY)
+# 排除: spreader_bar, left_cable, right_cable, 门架, 地面
+# 来源: calibration_target_geometry.py + Oracle 外参 (2026-08-03)
 target_roi_rig:
-  source: manually_frozen_from_stable_pointcloud
+  source: calibration_target_body_gt_with_15mm_margin
   frame: cam_front_left_color_optical_frame
   units: meter
-  margin_m: 0.03
-  min: [-0.262, -0.280, 0.661]
-  max: [0.251, 0.180, 1.205]
+  margin_m: 0.015
+  scope: CALIBRATION_TARGET_BODY
+  min: [-0.281, -0.216, 0.668]
+  max: [0.277, 0.179, 1.195]
 
 # ── 体素下采样 ──
 voxel_downsample_m: 0.005        # 5mm 体素
