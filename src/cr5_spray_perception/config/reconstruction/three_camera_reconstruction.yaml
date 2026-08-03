@@ -21,12 +21,24 @@ depth:
   expected_unit: "meter"          # "meter" | "mm"
   registered_to_color: true       # 是否要求深度已对齐到彩色
 
-# ── rig-frame ROI (AABB 裁剪) ──
+# ── rig-frame ROI (AABB 裁剪, 全场景) ──
 # 在 rig frame (cam_front_left optical frame) 中定义
 # X: 右, Y: 下, Z: 前
 roi_rig:
   min: [-0.5, -1.0, 0.0]    # x_min, y_min, z_min (米)
   max: [2.0, 1.0, 2.5]      # x_max, y_max, z_max (米)
+
+# ── 目标 ROI (TSDF 重建范围) ──
+# 从 analyze_target_roi.py 分析 Stable V1 融合点云确定
+# 包含 calibration_target 主体 + 3cm margin
+# 来源: roi_analysis/roi_report.json (2026-08-03)
+target_roi_rig:
+  source: manually_frozen_from_stable_pointcloud
+  frame: cam_front_left_color_optical_frame
+  units: meter
+  margin_m: 0.03
+  min: [-0.262, -0.280, 0.661]
+  max: [0.251, 0.180, 1.205]
 
 # ── 体素下采样 ──
 voxel_downsample_m: 0.005        # 5mm 体素
