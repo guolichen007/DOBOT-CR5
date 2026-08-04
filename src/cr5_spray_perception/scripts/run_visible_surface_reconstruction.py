@@ -158,6 +158,10 @@ def main():
     parser.add_argument("--config", "-c", default=None)
     parser.add_argument("--output", "-o", required=True)
     parser.add_argument("--registration-evidence", default=None)
+    parser.add_argument("--evaluate", action="store_true",
+                        help="运行可见表面 GT 评价 (需要 Gazebo + visible GT)")
+    parser.add_argument("--visible-gt", default=None,
+                        help="visible_union.ply 路径")
     args = parser.parse_args()
 
     # 加载生产配置
@@ -214,25 +218,104 @@ def main():
     final_path = os.path.join(args.output, "visible_surface_mesh_final.ply")
     o3d.io.write_triangle_mesh(final_path, cleaned)
 
-    # ── 4. 重建质量报告 ──
+    # ── 4. GT 评价 (可选, 仅在有 visible GT 时运行) ──
+    eval_metrics = None
+    if args.evaluate and args.visible_gt and os.path.isfile(args.visible_gt):
+        eval_dir = os.path.join(args.output, "visible_evaluation")
+        os.makedirs(eval_dir, exist_ok=True)
+        # 调用 evaluate_reconstruction_gazebo.py (offline path)
+        eval_script = os.path.join(WS, "..", "cr5_spray_sim", "scripts", "evaluate_reconstruction_gazebo.py")
+        if os.path.isfile(eval_script):
+            import subprocess as sp
+            target_roi = config.get("target_roi_rig", {})
+            cmd = [
+                sys.executable, eval_script,
+                "--recon-mesh", final_path,
+                "--output-dir", eval_dir,
+                "--label", "production_v1.0.1",
+                "--visible-gto", args.visible_gt,
+                "--target-roi-min", str(target_roi.get("min", [-0.281])[0]),
+                str(target_roi.get("min", [0, -0.216])[1]),
+                str(target_roi.get("min", [0, 0, 0.668])[2]),
+                "--target-roi-max", str(target_roi.get("max", [0.277])[0]),
+                str(target_roi.get("max", [0, 0.179])[1]),
+                str(target_roi.get("max", [0, 0, 1.195])[2]),
+            ]
+            try:
+                result = sp.run(cmd, capture_output=True, text=True, timeout=180,
+                               env={**os.environ, "ROS_MASTER_URI": os.environ.get("ROS_MASTER_URI", "http://localhost:11311")})
+                # 解析输出
+                for line in result.stdout.split("\n"):
+                    if "Accuracy:" in line:
+                        parts = line.split()
+                        eval_metrics = eval_metrics or {}
+                        for p in parts:
+                            if "median=" in p:
+                                eval_metrics["accuracy_median_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
+                            elif "P95=" in p:
+                                eval_metrics["accuracy_p95_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
+                            elif "RMSE=" in p:
+                                eval_metrics["accuracy_rmse_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
+                    elif "Completeness:" in line:
+                        parts = line.split()
+                        for p in parts:
+                            if "median=" in p:
+                                eval_metrics["completeness_median_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
+                            elif "P95=" in p:
+                                eval_metrics["completeness_p95_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
+                    elif "Chamfer:" in line:
+                        eval_metrics["chamfer_mm"] = float(line.split(":")[1].strip().replace("mm", ""))
+            except Exception as e:
+                logger.warning("评价未完成: %s", e)
+
+    # ── 5. 重建质量报告 ──
     ts = datetime.datetime.utcnow().isoformat() + "Z"
+    identity = {
+        "git_sha": _git_sha(),
+        "git_tag": "reconstruction-gazebo-visible-surface-v1.0.1",
+        "timestamp": ts,
+        "dataset": os.path.abspath(args.dataset),
+        "group_id": args.group_id,
+        "rig_path": os.path.abspath(args.rig),
+        "rig_sha256": _sha256_file(args.rig) or "N/A",
+        "config_path": os.path.abspath(args.config) if args.config else "N/A",
+        "config_sha256": _sha256_file(args.config) if args.config else "N/A",
+        "registration_evidence_sha256": _sha256_file(ev_path) if evidence else "N/A",
+    }
+
+    acc_p95 = eval_metrics.get("accuracy_p95_mm", float("nan")) if eval_metrics else float("nan")
+    acc_med = eval_metrics.get("accuracy_median_mm", float("nan")) if eval_metrics else float("nan")
+    prod_pass = (not np.isnan(acc_med) and acc_med <= 5.0 and not np.isnan(acc_p95) and acc_p95 <= 16.0)
+
     quality = {
-        "schema": "cr5_reconstruction_quality_report_v1",
-        "identity": {
-            "git_sha": _git_sha(),
-            "timestamp": ts,
-            "dataset": os.path.abspath(args.dataset),
-            "group_id": args.group_id,
-            "rig_path": os.path.abspath(args.rig),
-            "rig_sha256": _sha256_file(args.rig),
-            "config_sha256": _sha256_file(args.config) if args.config else "N/A",
-        },
+        "schema": "cr5_reconstruction_quality_report_v2",
+        "identity": identity,
         "reconstruction": {
             "type": "partial_visible_surface",
             "frame": "cam_front_left_color_optical_frame",
             "integrated_frames": 3,
             "voxel_length_m": config.get("tsdf", {}).get("voxel_length_m", 0.005),
             "sdf_trunc_m": config.get("tsdf", {}).get("sdf_trunc_m", 0.020),
+        },
+        "accuracy": {
+            "median_mm": acc_med if eval_metrics else "NOT_AVAILABLE",
+            "p95_mm": acc_p95 if eval_metrics else "NOT_AVAILABLE",
+            "rmse_mm": eval_metrics.get("accuracy_rmse_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_5mm": eval_metrics.get("accuracy_coverage_5mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_10mm": eval_metrics.get("accuracy_coverage_10mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_20mm": eval_metrics.get("accuracy_coverage_20mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "status": "EVALUATED" if eval_metrics else "NOT_AVAILABLE",
+        },
+        "completeness": {
+            "scope": "visible_gt_only",
+            "median_mm": eval_metrics.get("completeness_median_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "p95_mm": eval_metrics.get("completeness_p95_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_5mm": eval_metrics.get("completeness_coverage_5mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_10mm": eval_metrics.get("completeness_coverage_10mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_20mm": eval_metrics.get("completeness_coverage_20mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+        },
+        "quality": {
+            "chamfer_mm": eval_metrics.get("chamfer_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
         },
         "mesh": {
             "raw_vertices": comp_report["total_vertices_raw"],
@@ -243,11 +326,20 @@ def main():
             "cleaned_components": comp_report["cleaned_components"],
             "removed_components": comp_report["removed_components"],
             "removed_fragment_area_ratio": comp_report["removed_fragment_area_ratio"],
-            "largest_component_tri_ratio": comp_report["largest_component_tri_ratio"],
+            "largest_component_area_ratio": comp_report["largest_component_tri_ratio"],
         },
         "unobserved": {
             "bottom_surface": "UNKNOWN",
             "filled": False,
+        },
+        "acceptance": {
+            "accuracy_median_gate_mm": 5.0,
+            "accuracy_p95_gate_mm": 16.0,
+            "production_pass": bool(prod_pass) if eval_metrics else "NOT_EVALUATED",
+            "reasons": ["PASS: P95≤16mm, median≤5mm"] if prod_pass else (
+                ["NOT_EVALUATED: no GT available"] if not eval_metrics else
+                [f"FAIL: median={acc_med:.2f}mm" if acc_med > 5.0 else "",
+                 f"FAIL: P95={acc_p95:.2f}mm" if acc_p95 > 16.0 else ""]),
         },
         "filters": {
             "refinement": "REJECTED",
