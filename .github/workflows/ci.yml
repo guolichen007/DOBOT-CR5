@@ -16,52 +16,31 @@ defaults:
     shell: bash
 
 jobs:
-  # ── Job 1: Markdown Link Check ──
+  # ── Job 1: Repository Contract ──
+  repository-contract:
+    name: Repository Contract
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run repository contract check
+        run: |
+          set -euo pipefail
+          bash scripts/check_repository_contract.sh
+
+  # ── Job 2: Markdown Link Check ──
   markdown-link-check:
     name: Markdown Link Check
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
+
       - name: Check Markdown links
         uses: gaurav-nelson/github-action-markdown-link-check@v1
         with:
           use-quiet-mode: "yes"
           use-verbose-mode: "yes"
           config-file: ".github/workflows/mlc_config.json"
-
-  # ── Job 2: Catkin Build ──
-  catkin-build:
-    name: Catkin Build (ROS Noetic)
-    runs-on: ubuntu-20.04
-    container:
-      image: ros:noetic-ros-core-focal
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: "src/DOBOT-CR5"
-
-      - name: Install system dependencies
-        run: |
-          set -euo pipefail
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            python3-catkin-tools python3-rosdep python3-numpy \
-            python3-yaml python3-opencv libgazebo11-dev \
-            ros-noetic-gazebo-ros-pkgs ros-noetic-gazebo-ros-control \
-            ros-noetic-moveit ros-noetic-tf2-ros ros-noetic-cv-bridge \
-            ros-noetic-image-transport ros-noetic-camera-info-manager
-
-      - name: Initialize rosdep
-        run: |
-          set -euo pipefail
-          rosdep update
-          rosdep install --from-paths src --ignore-src -r -y
-
-      - name: Catkin build
-        run: |
-          set -euo pipefail
-          . /opt/ros/noetic/setup.sh
-          catkin_make
 
   # ── Job 3: Calibration Asset Tests ──
   calibration-asset-tests:
@@ -100,9 +79,31 @@ jobs:
           fi
           [ "$fail" -eq 0 ] || exit 1
 
-  # ── Job 4: Reconstruction Unit Tests ──
-  reconstruction-tests:
-    name: Reconstruction Tests
+  # ── Job 4: Reconstruction Quality Gate (NO Open3D) ──
+  reconstruction-quality-gate:
+    name: Reconstruction Quality Gate (pure Python, no Open3D)
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pure Python test dependencies
+        run: |
+          set -euo pipefail
+          pip3 install pyyaml
+
+      - name: Run quality gate tests (no Open3D required)
+        run: |
+          set -euo pipefail
+          cd src/cr5_spray_perception
+          PYTHONPATH="src:${PYTHONPATH:-}" \
+          python3 -m unittest \
+            test.test_reconstruction_production_evaluation \
+            test.test_reconstruction_runner_integration \
+            -v
+
+  # ── Job 5: Reconstruction Full Tests ──
+  reconstruction-full-tests:
+    name: Reconstruction Full Tests
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v4
@@ -111,19 +112,48 @@ jobs:
         run: |
           set -euo pipefail
           pip3 install numpy pyyaml opencv-python scipy
-          pip3 install open3d 2>/dev/null || echo "WARNING: Open3D pip not available (Open3D-dependent tests may skip)"
+          pip3 install open3d
 
-      - name: Run reconstruction unit tests (non-Open3D)
+      - name: Run all reconstruction tests
         run: |
           set -euo pipefail
           cd src/cr5_spray_perception
-          PYTHONPATH="src:$PYTHONPATH" python3 -m unittest discover \
-            -s test -p 'test_reconstruction_production*.py' -v
+          PYTHONPATH="src:${PYTHONPATH:-}" \
+          python3 -m unittest discover \
+            -s test \
+            -p 'test_reconstruction*.py' \
+            -v
 
-      - name: Run reconstruction unit tests (all)
+  # ── Job 6: Catkin Build ──
+  catkin-build:
+    name: Catkin Build (ROS Noetic)
+    runs-on: ubuntu-20.04
+    container:
+      image: ros:noetic-ros-core-focal
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: "src/DOBOT-CR5"
+
+      - name: Install system dependencies
         run: |
           set -euo pipefail
-          cd src/cr5_spray_perception
-          PYTHONPATH="src:$PYTHONPATH" python3 -m unittest discover \
-            -s test -p 'test_reconstruction*.py' -v 2>&1 | tail -5
-          echo "Reconstruction tests completed"
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            python3-catkin-tools python3-rosdep python3-numpy \
+            python3-yaml python3-opencv libgazebo11-dev \
+            ros-noetic-gazebo-ros-pkgs ros-noetic-gazebo-ros-control \
+            ros-noetic-moveit ros-noetic-tf2-ros ros-noetic-cv-bridge \
+            ros-noetic-image-transport ros-noetic-camera-info-manager
+
+      - name: Initialize rosdep
+        run: |
+          set -euo pipefail
+          rosdep update
+          rosdep install --from-paths src --ignore-src -r -y
+
+      - name: Catkin build
+        run: |
+          set -euo pipefail
+          . /opt/ros/noetic/setup.sh
+          catkin_make
