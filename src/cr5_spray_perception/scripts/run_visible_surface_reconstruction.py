@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CR5 Reconstruction — 可见表面三维重建正式入口 V1.
+CR5 Reconstruction — 可见表面三维重建正式入口.
 
 一条命令完成:
   dataset → target mask → TSDF → mesh cleanup → normal → evaluation → provenance
@@ -28,14 +28,22 @@ from cr5_spray_perception.reconstruction.transforms import (
     convert_depth_to_meters, depth_image_to_pointcloud,
     transform_pointcloud, crop_pointcloud_aabb)
 from cr5_spray_perception.reconstruction.mesh_cleanup import cleanup_mesh
+from cr5_spray_perception.reconstruction.quality_contract import (
+    resolve_release_id, build_acceptance_result, build_quality_metric_sections,
+    sanitize_evaluation_label, load_and_validate_evaluation_metrics)
+from cr5_spray_perception.reconstruction.evaluation_runner import run_evaluator
 import numpy as np
 import cv2
 import math
 
-try:
-    import open3d as o3d
-except ImportError:
-    logger.error("需要 open3d"); sys.exit(1)
+
+def require_open3d():
+    """延迟加载 Open3D, 仅在实际执行 TSDF 重建时需要."""
+    try:
+        import open3d as o3d
+        return o3d
+    except ImportError as exc:
+        raise RuntimeError("open3d is required for reconstruction") from exc
 
 
 def _sha256_file(p):
@@ -69,95 +77,10 @@ def _git_branch():
         return "unknown"
 
 
-def resolve_release_id(explicit=None):
-    """解析 release identity. 优先级: --release-id > git exact tag > env > UNTAGGED."""
-    if explicit:
-        return explicit
-    tag = _git_tag()
-    if tag:
-        return tag
-    env_id = os.environ.get("CR5_RELEASE_ID", "")
-    if env_id:
-        return env_id
-    return "UNTAGGED"
-
-
-REQUIRED_METRIC_KEYS = [
-    "accuracy.median_mm", "accuracy.p95_mm", "accuracy.rmse_mm",
-    "completeness.median_mm", "completeness.p95_mm",
-    "chamfer_mm",
-    "accuracy_5mm", "accuracy_10mm", "accuracy_20mm",
-    "completeness_5mm", "completeness_10mm", "completeness_20mm",
-]
-
-
-def load_and_validate_evaluation_metrics(metrics_path):
-    """加载并验证评价 metrics JSON.
-
-    Returns: dict of validated metrics
-    Raises: ValueError / RuntimeError on any validation failure
-    """
-    if not os.path.isfile(metrics_path):
-        raise FileNotFoundError(f"metrics 文件不存在: {metrics_path}")
-
-    with open(metrics_path) as f:
-        try:
-            data = json.load(f)
-        except json.JSONDecodeError as e:
-            raise ValueError(f"metrics JSON 解析失败: {e}")
-
-    m = data.get("metrics", {})
-    if not isinstance(m, dict) or not m:
-        raise ValueError("metrics JSON 缺少 'metrics' 字段或为空")
-
-    acc = m.get("accuracy", {})
-    comp = m.get("completeness", {})
-    cov = m.get("coverage", {})
-
-    validated = {}
-    errors = []
-
-    # accuracy fields
-    for key, src in [("accuracy_median_mm", acc.get("median_mm")),
-                     ("accuracy_p95_mm", acc.get("p95_mm")),
-                     ("accuracy_rmse_mm", acc.get("rmse_mm")),
-                     ("completeness_median_mm", comp.get("median_mm")),
-                     ("completeness_p95_mm", comp.get("p95_mm")),
-                     ("chamfer_mm", m.get("chamfer_mm"))]:
-        if src is None:
-            errors.append(f"缺少 {key}")
-        elif not isinstance(src, (int, float)) or isinstance(src, bool):
-            errors.append(f"{key}={src} 类型错误 (期望 int/float)")
-        elif not math.isfinite(src):
-            errors.append(f"{key}={src} 不是有限数值")
-        elif src < 0:
-            errors.append(f"{key}={src} < 0")
-        else:
-            validated[key] = float(src)
-
-    # coverage fields
-    for key in ["accuracy_5mm", "accuracy_10mm", "accuracy_20mm",
-                "completeness_5mm", "completeness_10mm", "completeness_20mm"]:
-        v = cov.get(key)
-        if v is None:
-            errors.append(f"缺少 coverage.{key}")
-        elif not isinstance(v, (int, float)) or isinstance(v, bool):
-            errors.append(f"coverage.{key}={v} 类型错误")
-        elif not math.isfinite(v):
-            errors.append(f"coverage.{key}={v} 不是有限数值")
-        elif v < 0.0 or v > 1.0:
-            errors.append(f"coverage.{key}={v} 超出 [0, 1]")
-        else:
-            validated[key] = float(v)
-
-    if errors:
-        raise ValueError(f"metrics 验证失败 ({len(errors)} errors):\n  " + "\n  ".join(errors))
-
-    return validated
-
-
 def generate_target_masks(rgbd_list, calib_rig, config, output_dir):
     """对每台相机生成 target ROI 深度 mask."""
+    o3d = require_open3d()
+
     os.makedirs(output_dir, exist_ok=True)
     roi_cfg = config.get("target_roi_rig", {})
     roi_min = np.array(roi_cfg.get("min", [-0.281, -0.216, 0.668]))
@@ -212,6 +135,8 @@ def generate_target_masks(rgbd_list, calib_rig, config, output_dir):
 
 def run_tsdf(rgbd_list, calib_rig, config, output_dir, depth_masks):
     """运行 TSDF 重建."""
+    o3d = require_open3d()
+
     os.makedirs(output_dir, exist_ok=True)
     tsdf_cfg = config.get("tsdf", {})
     vl = tsdf_cfg.get("voxel_length_m", 0.005)
@@ -258,7 +183,7 @@ def run_tsdf(rgbd_list, calib_rig, config, output_dir, depth_masks):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="可见表面三维重建正式入口 V1")
+    parser = argparse.ArgumentParser(description="可见表面三维重建正式入口")
     parser.add_argument("--dataset", "-d", required=True)
     parser.add_argument("--group-id", "-g", type=int, default=0)
     parser.add_argument("--rig", "-r", required=True)
@@ -287,6 +212,9 @@ def main():
     rig_cfg = config.get("rig", {})
     if rig_cfg.get("allow_runtime_refinement") or rig_cfg.get("allow_oracle"):
         logger.error("生产配置不允许 refinement/Oracle!"); sys.exit(1)
+
+    # 解析 release identity (使用 quality_contract)
+    release_id = resolve_release_id(args.release_id, git_tag_provider=_git_tag)
 
     # 数据集
     layout = resolve_capture_group(args.dataset, args.group_id)
@@ -319,6 +247,7 @@ def main():
     mesh_path = run_tsdf(rgbd_list, rig, config, tsdf_dir, masks)
 
     # ── 3. Mesh cleanup ──
+    o3d = require_open3d()
     cleanup_dir = os.path.join(args.output, "mesh_cleanup")
     cleanup_cfg = config.get("mesh_cleanup", {})
     cleaned, removed, comp_report = cleanup_mesh(mesh_path, per_cam_pts_rig, cleanup_dir, cleanup_cfg)
@@ -327,44 +256,34 @@ def main():
     final_path = os.path.join(args.output, "visible_surface_mesh_final.ply")
     o3d.io.write_triangle_mesh(final_path, cleaned)
 
-    release_id = resolve_release_id(args.release_id)
-
     # ── 4. GT 评价 (显式传入 --evaluate 时 fail-closed) ──
     eval_metrics = None
+    eval_label = None
     if args.evaluate:
-        # fail-closed: 所有条件必须满足
         if not args.visible_gt:
             logger.error("--evaluate 需要 --visible-gt"); sys.exit(1)
-        if not os.path.isfile(args.visible_gt):
-            logger.error("visible GT 文件不存在: %s", args.visible_gt); sys.exit(1)
 
         eval_dir = os.path.join(args.output, "visible_evaluation")
-        os.makedirs(eval_dir, exist_ok=True)
         eval_script = os.path.join(WS, "..", "cr5_spray_sim", "scripts", "evaluate_reconstruction_gazebo.py")
-        if not os.path.isfile(eval_script):
-            logger.error("evaluator 脚本不存在: %s", eval_script); sys.exit(1)
 
-        import subprocess as sp
         target_roi = config.get("target_roi_rig", {})
         rmin = target_roi.get("min", [-0.281, -0.216, 0.668])
         rmax = target_roi.get("max", [0.277, 0.179, 1.195])
-        eval_label = release_id.replace(".", "_").replace("-", "_")
-        cmd = [
-            sys.executable, eval_script,
-            "--recon-mesh", final_path,
-            "--output-dir", eval_dir,
-            "--label", eval_label,
-            "--visible-gt", args.visible_gt,
-            "--target-roi-min", str(rmin[0]), str(rmin[1]), str(rmin[2]),
-            "--target-roi-max", str(rmax[0]), str(rmax[1]), str(rmax[2]),
-        ]
-        result = sp.run(cmd, capture_output=True, text=True, timeout=180, check=True,
-                       env={**os.environ, "ROS_MASTER_URI": os.environ.get("ROS_MASTER_URI", "http://localhost:11311")})
-        if result.returncode != 0:
-            logger.error("评价器失败 (exit=%d): %s", result.returncode, result.stderr[:500] if result.stderr else ""); sys.exit(1)
 
-        metrics_path = os.path.join(eval_dir, f"{eval_label}_metrics.json")
-        eval_metrics = load_and_validate_evaluation_metrics(metrics_path)
+        # 使用 evaluation_runner.run_evaluator (fail-closed)
+        eval_result = run_evaluator(
+            evaluator_script=eval_script,
+            recon_mesh=final_path,
+            output_dir=eval_dir,
+            release_id=release_id,
+            visible_gt=args.visible_gt,
+            roi_min=rmin,
+            roi_max=rmax,
+            timeout_s=180,
+            env={**os.environ, "ROS_MASTER_URI": os.environ.get("ROS_MASTER_URI", "http://localhost:11311")},
+        )
+        eval_label = eval_result["eval_label"]
+        eval_metrics = eval_result["metrics"]
         logger.info("评价完成: acc med=%.2fmm P95=%.2fmm",
                     eval_metrics["accuracy_median_mm"], eval_metrics["accuracy_p95_mm"])
 
@@ -386,40 +305,17 @@ def main():
     }
 
     if eval_metrics:
-        acc_med = eval_metrics["accuracy_median_mm"]
-        acc_p95 = eval_metrics["accuracy_p95_mm"]
-        prod_pass = bool(acc_med <= 5.0 and acc_p95 <= 16.0)
-        reasons = []
-        if prod_pass:
-            reasons = ["PASS: median≤5mm and P95≤16mm"]
-        else:
-            if acc_med > 5.0:
-                reasons.append(f"FAIL: accuracy median={acc_med:.2f}mm > 5.0mm")
-            if acc_p95 > 16.0:
-                reasons.append(f"FAIL: accuracy P95={acc_p95:.2f}mm > 16.0mm")
-        accuracy_section = {
-            "median_mm": acc_med, "p95_mm": acc_p95,
-            "rmse_mm": eval_metrics["accuracy_rmse_mm"],
-            "coverage_5mm": eval_metrics["accuracy_5mm"],
-            "coverage_10mm": eval_metrics["accuracy_10mm"],
-            "coverage_20mm": eval_metrics["accuracy_20mm"],
-            "status": "EVALUATED",
-        }
-        completeness_section = {
-            "scope": "visible_gt_only",
-            "median_mm": eval_metrics["completeness_median_mm"],
-            "p95_mm": eval_metrics["completeness_p95_mm"],
-            "coverage_5mm": eval_metrics["completeness_5mm"],
-            "coverage_10mm": eval_metrics["completeness_10mm"],
-            "coverage_20mm": eval_metrics["completeness_20mm"],
-        }
-        quality_section = {"chamfer_mm": eval_metrics["chamfer_mm"]}
-        acceptance_section = {
-            "accuracy_median_gate_mm": 5.0,
-            "accuracy_p95_gate_mm": 16.0,
-            "production_pass": prod_pass,
-            "reasons": reasons,
-        }
+        # 使用 quality_contract 构建报告段落
+        accuracy_section, completeness_section, quality_section = \
+            build_quality_metric_sections(eval_metrics)
+
+        # 使用 quality_contract 构建 acceptance
+        acceptance_section = build_acceptance_result(
+            accuracy_median_mm=eval_metrics["accuracy_median_mm"],
+            accuracy_p95_mm=eval_metrics["accuracy_p95_mm"],
+            median_gate_mm=5.0,
+            p95_gate_mm=16.0,
+        )
     else:
         accuracy_section = {"status": "NOT_AVAILABLE"}
         completeness_section = {"scope": "visible_gt_only", "status": "NOT_AVAILABLE"}
