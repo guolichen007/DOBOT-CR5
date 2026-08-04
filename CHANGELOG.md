@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased] — Repository Maintenance
+
+### Changed
+- README 改为长期有效的当前工程说明，不再出现版本流水账
+- 新增 `quality_contract.py`：纯 Python 质量合约模块（release ID 解析、metrics schema 验证、Gate 判断）
+- 新增 `evaluation_runner.py`：纯 Python 评估运行器（subprocess 调用链，fail-closed）
+- Runner 延迟 Open3D 导入（`require_open3d()`），不再模块级 `sys.exit(1)`
+- 文档：项目状态与验收不再硬编码提交 SHA，工程维护与发布更新三分支治理
+- 集成测试改为真正执行 fake evaluator subprocess
+
+### Fixed
+- CI 拆分为 6 个独立 job（新增 repository-contract、reconstruction-quality-gate）
+- reconstruction-quality-gate 完全不安装 Open3D，强制执行纯 Python 质量 Gate
+- 删除 `| tail -5` 和 `|| echo` 等错误吞没模式
+- Open3D 安装失败现在使 CI job 失败
+
+### Added
+- 测试从 120 增加到 173+，覆盖 subprocess evaluator 集成路径
+- 仓库契约新增多项检查（README 版本号、CI 规范、模块存在性等）
+
+---
+
 ## [V1.0.4] — 2026-08-04
 
 ### Fixed
