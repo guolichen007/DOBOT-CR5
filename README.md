@@ -171,7 +171,7 @@ rosrun cr5_spray_perception run_three_camera_calibration.py
 - **禁止**在三条长期分支上直接开发
 - **禁止** force push main 和 stable/*
 - **禁止**删除三条长期分支
-- `feature/*`、`fix/*`、`chore/*` 为临时分支，必须从 main 创建，通过 PR 合并后立即删除
+- `feature/*`、`fix/*`、`chore/*` 为临时分支，必须从 main 创建，通过自动化 Gate 后合并，合并后立即删除
 - 下一阶段只能从 main 创建新的临时 `feature/*` 分支
 
 ---
