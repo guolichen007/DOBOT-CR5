@@ -223,48 +223,51 @@ def main():
     if args.evaluate and args.visible_gt and os.path.isfile(args.visible_gt):
         eval_dir = os.path.join(args.output, "visible_evaluation")
         os.makedirs(eval_dir, exist_ok=True)
-        # 调用 evaluate_reconstruction_gazebo.py (offline path)
         eval_script = os.path.join(WS, "..", "cr5_spray_sim", "scripts", "evaluate_reconstruction_gazebo.py")
         if os.path.isfile(eval_script):
             import subprocess as sp
             target_roi = config.get("target_roi_rig", {})
+            rmin = target_roi.get("min", [-0.281, -0.216, 0.668])
+            rmax = target_roi.get("max", [0.277, 0.179, 1.195])
             cmd = [
                 sys.executable, eval_script,
                 "--recon-mesh", final_path,
                 "--output-dir", eval_dir,
-                "--label", "production_v1.0.1",
-                "--visible-gto", args.visible_gt,
-                "--target-roi-min", str(target_roi.get("min", [-0.281])[0]),
-                str(target_roi.get("min", [0, -0.216])[1]),
-                str(target_roi.get("min", [0, 0, 0.668])[2]),
-                "--target-roi-max", str(target_roi.get("max", [0.277])[0]),
-                str(target_roi.get("max", [0, 0.179])[1]),
-                str(target_roi.get("max", [0, 0, 1.195])[2]),
+                "--label", "production_v1.0.2",
+                "--visible-gt", args.visible_gt,
+                "--target-roi-min", str(rmin[0]), str(rmin[1]), str(rmin[2]),
+                "--target-roi-max", str(rmax[0]), str(rmax[1]), str(rmax[2]),
             ]
             try:
-                result = sp.run(cmd, capture_output=True, text=True, timeout=180,
+                result = sp.run(cmd, capture_output=True, text=True, timeout=180, check=True,
                                env={**os.environ, "ROS_MASTER_URI": os.environ.get("ROS_MASTER_URI", "http://localhost:11311")})
-                # 解析输出
-                for line in result.stdout.split("\n"):
-                    if "Accuracy:" in line:
-                        parts = line.split()
-                        eval_metrics = eval_metrics or {}
-                        for p in parts:
-                            if "median=" in p:
-                                eval_metrics["accuracy_median_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
-                            elif "P95=" in p:
-                                eval_metrics["accuracy_p95_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
-                            elif "RMSE=" in p:
-                                eval_metrics["accuracy_rmse_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
-                    elif "Completeness:" in line:
-                        parts = line.split()
-                        for p in parts:
-                            if "median=" in p:
-                                eval_metrics["completeness_median_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
-                            elif "P95=" in p:
-                                eval_metrics["completeness_p95_mm"] = float(p.split("=")[1].replace("mm", "").replace(",", ""))
-                    elif "Chamfer:" in line:
-                        eval_metrics["chamfer_mm"] = float(line.split(":")[1].strip().replace("mm", ""))
+                # 读取评价器输出的 JSON metrics
+                metrics_path = os.path.join(eval_dir, "production_v1.0.2_metrics.json")
+                if os.path.isfile(metrics_path):
+                    with open(metrics_path) as f:
+                        eval_data = json.load(f)
+                    m = eval_data.get("metrics", {})
+                    eval_metrics = {
+                        "accuracy_median_mm": m.get("accuracy", {}).get("median_mm"),
+                        "accuracy_p95_mm": m.get("accuracy", {}).get("p95_mm"),
+                        "accuracy_rmse_mm": m.get("accuracy", {}).get("rmse_mm"),
+                        "completeness_median_mm": m.get("completeness", {}).get("median_mm"),
+                        "completeness_p95_mm": m.get("completeness", {}).get("p95_mm"),
+                        "chamfer_mm": m.get("chamfer_mm"),
+                    }
+                    cov = m.get("coverage", {})
+                    for k in ["accuracy_5mm", "accuracy_10mm", "accuracy_20mm",
+                              "completeness_5mm", "completeness_10mm", "completeness_20mm"]:
+                        if k in cov:
+                            eval_metrics[k] = cov[k]
+                    logger.info("评价完成: acc med=%.2fmm P95=%.2fmm",
+                                eval_metrics.get("accuracy_median_mm", float("nan")),
+                                eval_metrics.get("accuracy_p95_mm", float("nan")))
+                else:
+                    logger.warning("评价 metrics 文件缺失: %s", metrics_path)
+            except sp.CalledProcessError as e:
+                logger.error("评价失败 (exit=%d): %s", e.returncode, e.stderr[:500] if e.stderr else "")
+                sys.exit(1)
             except Exception as e:
                 logger.warning("评价未完成: %s", e)
 
@@ -301,18 +304,18 @@ def main():
             "median_mm": acc_med if eval_metrics else "NOT_AVAILABLE",
             "p95_mm": acc_p95 if eval_metrics else "NOT_AVAILABLE",
             "rmse_mm": eval_metrics.get("accuracy_rmse_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_5mm": eval_metrics.get("accuracy_coverage_5mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_10mm": eval_metrics.get("accuracy_coverage_10mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_20mm": eval_metrics.get("accuracy_coverage_20mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_5mm": eval_metrics.get("accuracy_5mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_10mm": eval_metrics.get("accuracy_10mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_20mm": eval_metrics.get("accuracy_20mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
             "status": "EVALUATED" if eval_metrics else "NOT_AVAILABLE",
         },
         "completeness": {
             "scope": "visible_gt_only",
             "median_mm": eval_metrics.get("completeness_median_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
             "p95_mm": eval_metrics.get("completeness_p95_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_5mm": eval_metrics.get("completeness_coverage_5mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_10mm": eval_metrics.get("completeness_coverage_10mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_20mm": eval_metrics.get("completeness_coverage_20mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_5mm": eval_metrics.get("completeness_5mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_10mm": eval_metrics.get("completeness_10mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
+            "coverage_20mm": eval_metrics.get("completeness_20mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
         },
         "quality": {
             "chamfer_mm": eval_metrics.get("chamfer_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
