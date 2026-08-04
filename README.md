@@ -24,7 +24,11 @@
 
 ### 其它模块
 
-- TSDF 三维重建 (Open3D) — 已实现
+- TSDF 三维重建 (Open3D) — **Production V1.0.3 封版**
+  - 可见表面重建 (partial visible surface)
+  - Accuracy median≈3.68mm, P95≈15.58mm, Gate PASS
+  - 不可见底面 UNKNOWN, 不补全
+  - 一键运行: `rosrun cr5_spray_perception run_visible_surface_reconstruction.py`
 - Ceres Bundle Adjustment — 历史/研究组件, 不用于稳定版外参求解
 - 喷涂路径生成 / CR5 实机运动 — 待开发
 
@@ -163,8 +167,9 @@ bash scripts/check_repository_contract.sh # 仓库契约检查
 
 | 分支 | 说明 |
 |------|------|
-| `main` | 稳定工程基线（仅 fast-forward 合并） |
-| `feature/*` | 功能开发分支 |
-| `fix/*` | 修复分支 |
+| `main` | 下一阶段唯一开发基线 |
+| `stable/three-camera-calibration-v1` | 标定冻结基线 (只读) |
+| `stable/visible-surface-reconstruction-v1` | 重建冻结基线 (只读) |
+| `feature/*` / `fix/*` / `chore/*` | 临时分支，合并后删除 |
 
-禁止 force push main。
+禁止 force push main 和 stable/*。

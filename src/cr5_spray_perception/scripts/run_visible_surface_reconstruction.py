@@ -30,6 +30,7 @@ from cr5_spray_perception.reconstruction.transforms import (
 from cr5_spray_perception.reconstruction.mesh_cleanup import cleanup_mesh
 import numpy as np
 import cv2
+import math
 
 try:
     import open3d as o3d
@@ -47,6 +48,112 @@ def _git_sha():
         return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=WS, stderr=subprocess.DEVNULL).decode().strip()
     except:
         return "unknown"
+
+
+def _git_tag():
+    """获取当前 HEAD 的 exact tag, 无则返回空字符串."""
+    try:
+        return subprocess.check_output(
+            ["git", "describe", "--tags", "--exact-match", "HEAD"],
+            cwd=WS, stderr=subprocess.DEVNULL).decode().strip()
+    except:
+        return ""
+
+
+def _git_branch():
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=WS, stderr=subprocess.DEVNULL).decode().strip()
+    except:
+        return "unknown"
+
+
+def resolve_release_id(explicit=None):
+    """解析 release identity. 优先级: --release-id > git exact tag > env > UNTAGGED."""
+    if explicit:
+        return explicit
+    tag = _git_tag()
+    if tag:
+        return tag
+    env_id = os.environ.get("CR5_RELEASE_ID", "")
+    if env_id:
+        return env_id
+    return "UNTAGGED"
+
+
+REQUIRED_METRIC_KEYS = [
+    "accuracy.median_mm", "accuracy.p95_mm", "accuracy.rmse_mm",
+    "completeness.median_mm", "completeness.p95_mm",
+    "chamfer_mm",
+    "accuracy_5mm", "accuracy_10mm", "accuracy_20mm",
+    "completeness_5mm", "completeness_10mm", "completeness_20mm",
+]
+
+
+def load_and_validate_evaluation_metrics(metrics_path):
+    """加载并验证评价 metrics JSON.
+
+    Returns: dict of validated metrics
+    Raises: ValueError / RuntimeError on any validation failure
+    """
+    if not os.path.isfile(metrics_path):
+        raise FileNotFoundError(f"metrics 文件不存在: {metrics_path}")
+
+    with open(metrics_path) as f:
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"metrics JSON 解析失败: {e}")
+
+    m = data.get("metrics", {})
+    if not isinstance(m, dict) or not m:
+        raise ValueError("metrics JSON 缺少 'metrics' 字段或为空")
+
+    acc = m.get("accuracy", {})
+    comp = m.get("completeness", {})
+    cov = m.get("coverage", {})
+
+    validated = {}
+    errors = []
+
+    # accuracy fields
+    for key, src in [("accuracy_median_mm", acc.get("median_mm")),
+                     ("accuracy_p95_mm", acc.get("p95_mm")),
+                     ("accuracy_rmse_mm", acc.get("rmse_mm")),
+                     ("completeness_median_mm", comp.get("median_mm")),
+                     ("completeness_p95_mm", comp.get("p95_mm")),
+                     ("chamfer_mm", m.get("chamfer_mm"))]:
+        if src is None:
+            errors.append(f"缺少 {key}")
+        elif not isinstance(src, (int, float)) or isinstance(src, bool):
+            errors.append(f"{key}={src} 类型错误 (期望 int/float)")
+        elif not math.isfinite(src):
+            errors.append(f"{key}={src} 不是有限数值")
+        elif src < 0:
+            errors.append(f"{key}={src} < 0")
+        else:
+            validated[key] = float(src)
+
+    # coverage fields
+    for key in ["accuracy_5mm", "accuracy_10mm", "accuracy_20mm",
+                "completeness_5mm", "completeness_10mm", "completeness_20mm"]:
+        v = cov.get(key)
+        if v is None:
+            errors.append(f"缺少 coverage.{key}")
+        elif not isinstance(v, (int, float)) or isinstance(v, bool):
+            errors.append(f"coverage.{key}={v} 类型错误")
+        elif not math.isfinite(v):
+            errors.append(f"coverage.{key}={v} 不是有限数值")
+        elif v < 0.0 or v > 1.0:
+            errors.append(f"coverage.{key}={v} 超出 [0, 1]")
+        else:
+            validated[key] = float(v)
+
+    if errors:
+        raise ValueError(f"metrics 验证失败 ({len(errors)} errors):\n  " + "\n  ".join(errors))
+
+    return validated
 
 
 def generate_target_masks(rgbd_list, calib_rig, config, output_dir):
@@ -162,6 +269,8 @@ def main():
                         help="运行可见表面 GT 评价 (需要 Gazebo + visible GT)")
     parser.add_argument("--visible-gt", default=None,
                         help="visible_union.ply 路径")
+    parser.add_argument("--release-id", default=None,
+                        help="发布标识 (默认: git exact tag > CR5_RELEASE_ID env > UNTAGGED)")
     args = parser.parse_args()
 
     # 加载生产配置
@@ -218,64 +327,53 @@ def main():
     final_path = os.path.join(args.output, "visible_surface_mesh_final.ply")
     o3d.io.write_triangle_mesh(final_path, cleaned)
 
-    # ── 4. GT 评价 (可选, 仅在有 visible GT 时运行) ──
+    release_id = resolve_release_id(args.release_id)
+
+    # ── 4. GT 评价 (显式传入 --evaluate 时 fail-closed) ──
     eval_metrics = None
-    if args.evaluate and args.visible_gt and os.path.isfile(args.visible_gt):
+    if args.evaluate:
+        # fail-closed: 所有条件必须满足
+        if not args.visible_gt:
+            logger.error("--evaluate 需要 --visible-gt"); sys.exit(1)
+        if not os.path.isfile(args.visible_gt):
+            logger.error("visible GT 文件不存在: %s", args.visible_gt); sys.exit(1)
+
         eval_dir = os.path.join(args.output, "visible_evaluation")
         os.makedirs(eval_dir, exist_ok=True)
         eval_script = os.path.join(WS, "..", "cr5_spray_sim", "scripts", "evaluate_reconstruction_gazebo.py")
-        if os.path.isfile(eval_script):
-            import subprocess as sp
-            target_roi = config.get("target_roi_rig", {})
-            rmin = target_roi.get("min", [-0.281, -0.216, 0.668])
-            rmax = target_roi.get("max", [0.277, 0.179, 1.195])
-            cmd = [
-                sys.executable, eval_script,
-                "--recon-mesh", final_path,
-                "--output-dir", eval_dir,
-                "--label", "production_v1.0.2",
-                "--visible-gt", args.visible_gt,
-                "--target-roi-min", str(rmin[0]), str(rmin[1]), str(rmin[2]),
-                "--target-roi-max", str(rmax[0]), str(rmax[1]), str(rmax[2]),
-            ]
-            try:
-                result = sp.run(cmd, capture_output=True, text=True, timeout=180, check=True,
-                               env={**os.environ, "ROS_MASTER_URI": os.environ.get("ROS_MASTER_URI", "http://localhost:11311")})
-                # 读取评价器输出的 JSON metrics
-                metrics_path = os.path.join(eval_dir, "production_v1.0.2_metrics.json")
-                if os.path.isfile(metrics_path):
-                    with open(metrics_path) as f:
-                        eval_data = json.load(f)
-                    m = eval_data.get("metrics", {})
-                    eval_metrics = {
-                        "accuracy_median_mm": m.get("accuracy", {}).get("median_mm"),
-                        "accuracy_p95_mm": m.get("accuracy", {}).get("p95_mm"),
-                        "accuracy_rmse_mm": m.get("accuracy", {}).get("rmse_mm"),
-                        "completeness_median_mm": m.get("completeness", {}).get("median_mm"),
-                        "completeness_p95_mm": m.get("completeness", {}).get("p95_mm"),
-                        "chamfer_mm": m.get("chamfer_mm"),
-                    }
-                    cov = m.get("coverage", {})
-                    for k in ["accuracy_5mm", "accuracy_10mm", "accuracy_20mm",
-                              "completeness_5mm", "completeness_10mm", "completeness_20mm"]:
-                        if k in cov:
-                            eval_metrics[k] = cov[k]
-                    logger.info("评价完成: acc med=%.2fmm P95=%.2fmm",
-                                eval_metrics.get("accuracy_median_mm", float("nan")),
-                                eval_metrics.get("accuracy_p95_mm", float("nan")))
-                else:
-                    logger.warning("评价 metrics 文件缺失: %s", metrics_path)
-            except sp.CalledProcessError as e:
-                logger.error("评价失败 (exit=%d): %s", e.returncode, e.stderr[:500] if e.stderr else "")
-                sys.exit(1)
-            except Exception as e:
-                logger.warning("评价未完成: %s", e)
+        if not os.path.isfile(eval_script):
+            logger.error("evaluator 脚本不存在: %s", eval_script); sys.exit(1)
+
+        import subprocess as sp
+        target_roi = config.get("target_roi_rig", {})
+        rmin = target_roi.get("min", [-0.281, -0.216, 0.668])
+        rmax = target_roi.get("max", [0.277, 0.179, 1.195])
+        cmd = [
+            sys.executable, eval_script,
+            "--recon-mesh", final_path,
+            "--output-dir", eval_dir,
+            "--label", "production_v1.0.3",
+            "--visible-gt", args.visible_gt,
+            "--target-roi-min", str(rmin[0]), str(rmin[1]), str(rmin[2]),
+            "--target-roi-max", str(rmax[0]), str(rmax[1]), str(rmax[2]),
+        ]
+        result = sp.run(cmd, capture_output=True, text=True, timeout=180, check=True,
+                       env={**os.environ, "ROS_MASTER_URI": os.environ.get("ROS_MASTER_URI", "http://localhost:11311")})
+        if result.returncode != 0:
+            logger.error("评价器失败 (exit=%d): %s", result.returncode, result.stderr[:500] if result.stderr else ""); sys.exit(1)
+
+        metrics_path = os.path.join(eval_dir, "production_v1.0.3_metrics.json")
+        eval_metrics = load_and_validate_evaluation_metrics(metrics_path)
+        logger.info("评价完成: acc med=%.2fmm P95=%.2fmm",
+                    eval_metrics["accuracy_median_mm"], eval_metrics["accuracy_p95_mm"])
 
     # ── 5. 重建质量报告 ──
     ts = datetime.datetime.utcnow().isoformat() + "Z"
     identity = {
         "git_sha": _git_sha(),
-        "git_tag": "reconstruction-gazebo-visible-surface-v1.0.1",
+        "git_tag": _git_tag() or "",
+        "git_branch": _git_branch(),
+        "release_id": release_id,
         "timestamp": ts,
         "dataset": os.path.abspath(args.dataset),
         "group_id": args.group_id,
@@ -286,9 +384,47 @@ def main():
         "registration_evidence_sha256": _sha256_file(ev_path) if evidence else "N/A",
     }
 
-    acc_p95 = eval_metrics.get("accuracy_p95_mm", float("nan")) if eval_metrics else float("nan")
-    acc_med = eval_metrics.get("accuracy_median_mm", float("nan")) if eval_metrics else float("nan")
-    prod_pass = (not np.isnan(acc_med) and acc_med <= 5.0 and not np.isnan(acc_p95) and acc_p95 <= 16.0)
+    if eval_metrics:
+        acc_med = eval_metrics["accuracy_median_mm"]
+        acc_p95 = eval_metrics["accuracy_p95_mm"]
+        prod_pass = bool(acc_med <= 5.0 and acc_p95 <= 16.0)
+        reasons = []
+        if prod_pass:
+            reasons = ["PASS: median≤5mm and P95≤16mm"]
+        else:
+            if acc_med > 5.0:
+                reasons.append(f"FAIL: accuracy median={acc_med:.2f}mm > 5.0mm")
+            if acc_p95 > 16.0:
+                reasons.append(f"FAIL: accuracy P95={acc_p95:.2f}mm > 16.0mm")
+        accuracy_section = {
+            "median_mm": acc_med, "p95_mm": acc_p95,
+            "rmse_mm": eval_metrics["accuracy_rmse_mm"],
+            "coverage_5mm": eval_metrics["accuracy_5mm"],
+            "coverage_10mm": eval_metrics["accuracy_10mm"],
+            "coverage_20mm": eval_metrics["accuracy_20mm"],
+            "status": "EVALUATED",
+        }
+        completeness_section = {
+            "scope": "visible_gt_only",
+            "median_mm": eval_metrics["completeness_median_mm"],
+            "p95_mm": eval_metrics["completeness_p95_mm"],
+            "coverage_5mm": eval_metrics["completeness_5mm"],
+            "coverage_10mm": eval_metrics["completeness_10mm"],
+            "coverage_20mm": eval_metrics["completeness_20mm"],
+        }
+        quality_section = {"chamfer_mm": eval_metrics["chamfer_mm"]}
+        acceptance_section = {
+            "accuracy_median_gate_mm": 5.0,
+            "accuracy_p95_gate_mm": 16.0,
+            "production_pass": prod_pass,
+            "reasons": reasons,
+        }
+    else:
+        accuracy_section = {"status": "NOT_AVAILABLE"}
+        completeness_section = {"scope": "visible_gt_only", "status": "NOT_AVAILABLE"}
+        quality_section = {"chamfer_mm": "NOT_AVAILABLE"}
+        acceptance_section = {"production_pass": "NOT_EVALUATED",
+                              "reasons": ["NOT_EVALUATED: --evaluate not requested"]}
 
     quality = {
         "schema": "cr5_reconstruction_quality_report_v2",
@@ -300,26 +436,9 @@ def main():
             "voxel_length_m": config.get("tsdf", {}).get("voxel_length_m", 0.005),
             "sdf_trunc_m": config.get("tsdf", {}).get("sdf_trunc_m", 0.020),
         },
-        "accuracy": {
-            "median_mm": acc_med if eval_metrics else "NOT_AVAILABLE",
-            "p95_mm": acc_p95 if eval_metrics else "NOT_AVAILABLE",
-            "rmse_mm": eval_metrics.get("accuracy_rmse_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_5mm": eval_metrics.get("accuracy_5mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_10mm": eval_metrics.get("accuracy_10mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_20mm": eval_metrics.get("accuracy_20mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "status": "EVALUATED" if eval_metrics else "NOT_AVAILABLE",
-        },
-        "completeness": {
-            "scope": "visible_gt_only",
-            "median_mm": eval_metrics.get("completeness_median_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "p95_mm": eval_metrics.get("completeness_p95_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_5mm": eval_metrics.get("completeness_5mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_10mm": eval_metrics.get("completeness_10mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-            "coverage_20mm": eval_metrics.get("completeness_20mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-        },
-        "quality": {
-            "chamfer_mm": eval_metrics.get("chamfer_mm", "NOT_AVAILABLE") if eval_metrics else "NOT_AVAILABLE",
-        },
+        "accuracy": accuracy_section,
+        "completeness": completeness_section,
+        "quality": quality_section,
         "mesh": {
             "raw_vertices": comp_report["total_vertices_raw"],
             "raw_triangles": comp_report["total_triangles_raw"],
@@ -331,24 +450,9 @@ def main():
             "removed_fragment_area_ratio": comp_report["removed_fragment_area_ratio"],
             "largest_component_area_ratio": comp_report["largest_component_tri_ratio"],
         },
-        "unobserved": {
-            "bottom_surface": "UNKNOWN",
-            "filled": False,
-        },
-        "acceptance": {
-            "accuracy_median_gate_mm": 5.0,
-            "accuracy_p95_gate_mm": 16.0,
-            "production_pass": bool(prod_pass) if eval_metrics else "NOT_EVALUATED",
-            "reasons": ["PASS: P95≤16mm, median≤5mm"] if prod_pass else (
-                ["NOT_EVALUATED: no GT available"] if not eval_metrics else
-                [f"FAIL: median={acc_med:.2f}mm" if acc_med > 5.0 else "",
-                 f"FAIL: P95={acc_p95:.2f}mm" if acc_p95 > 16.0 else ""]),
-        },
-        "filters": {
-            "refinement": "REJECTED",
-            "depth_edge": "disabled",
-            "multiview_consistency": "disabled",
-        },
+        "unobserved": {"bottom_surface": "UNKNOWN", "filled": False},
+        "acceptance": acceptance_section,
+        "filters": {"refinement": "REJECTED", "depth_edge": "disabled", "multiview_consistency": "disabled"},
         "provenance_dir": args.output,
     }
 
