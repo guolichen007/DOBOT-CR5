@@ -109,11 +109,21 @@ jobs:
 
       - name: Install Python dependencies
         run: |
+          set -euo pipefail
           pip3 install numpy pyyaml opencv-python scipy
-          pip3 install open3d || echo "Open3D pip not available, skipping"
+          pip3 install open3d 2>/dev/null || echo "WARNING: Open3D pip not available (Open3D-dependent tests may skip)"
 
-      - name: Run reconstruction unit tests
+      - name: Run reconstruction unit tests (non-Open3D)
         run: |
+          set -euo pipefail
           cd src/cr5_spray_perception
           PYTHONPATH="src:$PYTHONPATH" python3 -m unittest discover \
-            -s test -p 'test_reconstruction*.py' -v || echo "Some tests skipped (Open3D may not be available)"
+            -s test -p 'test_reconstruction_production*.py' -v
+
+      - name: Run reconstruction unit tests (all)
+        run: |
+          set -euo pipefail
+          cd src/cr5_spray_perception
+          PYTHONPATH="src:$PYTHONPATH" python3 -m unittest discover \
+            -s test -p 'test_reconstruction*.py' -v 2>&1 | tail -5
+          echo "Reconstruction tests completed"

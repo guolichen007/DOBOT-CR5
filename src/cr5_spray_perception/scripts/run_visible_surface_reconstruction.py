@@ -348,11 +348,12 @@ def main():
         target_roi = config.get("target_roi_rig", {})
         rmin = target_roi.get("min", [-0.281, -0.216, 0.668])
         rmax = target_roi.get("max", [0.277, 0.179, 1.195])
+        eval_label = release_id.replace(".", "_").replace("-", "_")
         cmd = [
             sys.executable, eval_script,
             "--recon-mesh", final_path,
             "--output-dir", eval_dir,
-            "--label", "production_v1.0.3",
+            "--label", eval_label,
             "--visible-gt", args.visible_gt,
             "--target-roi-min", str(rmin[0]), str(rmin[1]), str(rmin[2]),
             "--target-roi-max", str(rmax[0]), str(rmax[1]), str(rmax[2]),
@@ -362,7 +363,7 @@ def main():
         if result.returncode != 0:
             logger.error("评价器失败 (exit=%d): %s", result.returncode, result.stderr[:500] if result.stderr else ""); sys.exit(1)
 
-        metrics_path = os.path.join(eval_dir, "production_v1.0.3_metrics.json")
+        metrics_path = os.path.join(eval_dir, f"{eval_label}_metrics.json")
         eval_metrics = load_and_validate_evaluation_metrics(metrics_path)
         logger.info("评价完成: acc med=%.2fmm P95=%.2fmm",
                     eval_metrics["accuracy_median_mm"], eval_metrics["accuracy_p95_mm"])
