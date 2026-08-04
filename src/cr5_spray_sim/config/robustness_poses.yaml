@@ -1,0 +1,81 @@
+# 多姿态重建鲁棒性验证 — Pose manifest
+# V1.0 — 固定相机工作空间内多姿态验证
+#
+# Base target position: from simulation_scene.yaml simple_hanging_workpiece.position
+# 所有姿态通过 set_calibration_target_pose.py 的预设名称引用
+
+schema: cr5_robustness_poses_v1
+frozen_conditions:
+  camera_positions: frozen
+  camera_intrinsics: frozen
+  stable_rig: stable_v1
+  tsdf_voxel_length_m: 0.005
+  tsdf_sdf_trunc_m: 0.020
+  production_config: visible_surface_production_v1.yaml
+
+poses:
+  # ── 正式工作包络 (P0–P5, 必须全部通过) ──
+  - id: P0
+    preset: center
+    category: production
+    description: "基准姿态 — 当前封板姿态"
+    repeat: 3
+
+  - id: P1
+    preset: x_p30
+    category: production
+    description: "X方向 +30mm 平移"
+    repeat: 1
+
+  - id: P2
+    preset: x_m30
+    category: production
+    description: "X方向 -30mm 平移"
+    repeat: 1
+
+  - id: P3
+    preset: y_p30
+    category: production
+    description: "Y方向 +30mm 平移"
+    repeat: 3
+
+  - id: P4
+    preset: yaw_p15
+    category: production
+    description: "绕Z轴 +15° 旋转"
+    repeat: 1
+
+  - id: P5
+    preset: yaw_m15
+    category: production
+    description: "绕Z轴 -15° 旋转"
+    repeat: 3
+
+  # ── 边界探索 (E1–E2, 确定边界, 非强制 Gate) ──
+  - id: E1
+    preset: combo_xm50_ym40
+    category: boundary
+    description: "X-50mm Y-40mm 组合平移 (边界探索)"
+    repeat: 1
+
+  - id: E2
+    preset: yaw_p15_xy
+    category: boundary
+    description: "Z+15° + 轻微XY平移 (边界探索)"
+    repeat: 1
+
+# 验收标准
+acceptance:
+  production:
+    accuracy_median_mm: 5.0
+    accuracy_p95_mm: 16.0
+  structural:
+    no_mirror: true
+    no_double_surface: true
+    top_offset_block_preserved: true
+    bottom_surface: UNKNOWN
+    no_false_bottom: true
+  engineering:
+    repeatability_sha256_match: true
+    same_rig_all_poses: true
+    same_config_all_poses: true
