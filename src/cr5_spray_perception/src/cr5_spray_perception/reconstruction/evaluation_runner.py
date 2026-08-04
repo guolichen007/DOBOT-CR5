@@ -28,7 +28,8 @@ from cr5_spray_perception.reconstruction.quality_contract import (
 
 
 def run_evaluator(evaluator_script, recon_mesh, output_dir, release_id,
-                  visible_gt, roi_min, roi_max, timeout_s=180, env=None):
+                  visible_gt, roi_min, roi_max, timeout_s=180, env=None,
+                  model_pose_json=None):
     """运行外部 evaluator subprocess 并返回结构化结果.
 
     调用链:
@@ -94,6 +95,8 @@ def run_evaluator(evaluator_script, recon_mesh, output_dir, release_id,
         "--target-roi-min", str(roi_min[0]), str(roi_min[1]), str(roi_min[2]),
         "--target-roi-max", str(roi_max[0]), str(roi_max[1]), str(roi_max[2]),
     ]
+    if model_pose_json and os.path.isfile(model_pose_json):
+        cmd += ["--model-pose-json", model_pose_json]
 
     # 6. subprocess.run (fail-closed)
     run_env = env if env is not None else os.environ

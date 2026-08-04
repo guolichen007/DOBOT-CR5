@@ -194,6 +194,8 @@ def main():
                         help="运行可见表面 GT 评价 (需要 Gazebo + visible GT)")
     parser.add_argument("--visible-gt", default=None,
                         help="visible_union.ply 路径")
+    parser.add_argument("--model-pose-json", default=None,
+                        help="pose_evidence.json 路径 (离线评价, 禁止读取实时 Gazebo)")
     parser.add_argument("--release-id", default=None,
                         help="发布标识 (默认: git exact tag > CR5_RELEASE_ID env > UNTAGGED)")
     args = parser.parse_args()
@@ -281,6 +283,7 @@ def main():
             roi_max=rmax,
             timeout_s=180,
             env={**os.environ, "ROS_MASTER_URI": os.environ.get("ROS_MASTER_URI", "http://localhost:11311")},
+            model_pose_json=args.model_pose_json,
         )
         eval_label = eval_result["eval_label"]
         eval_metrics = eval_result["metrics"]

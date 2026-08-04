@@ -60,6 +60,7 @@ catkin_install_python(PROGRAMS
   scripts/publish_fixed_camera_frames.py
   scripts/diagnose_calibration_visibility.py
   scripts/validate_calibration_target_geometry.py
+  scripts/capture_multi_pose_dataset.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

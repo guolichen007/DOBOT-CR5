@@ -63,5 +63,6 @@ install(PROGRAMS
   scripts/validate_reconstruction_dataset.py
   scripts/fuse_three_camera_pointclouds.py
   scripts/run_visible_surface_reconstruction.py
+  scripts/run_reconstruction_robustness_suite.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

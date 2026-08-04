@@ -271,6 +271,8 @@ def main():
     parser.add_argument("--target-roi-max", nargs=3, type=float,
                         default=[0.251, 0.180, 1.205],
                         help="目标 ROI max x y z (rig frame)")
+    parser.add_argument("--model-pose-json", default=None,
+                        help="离线模式: 使用 pose_evidence.json 替代实时 Gazebo model_states")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -292,8 +294,22 @@ def main():
     with open(manifest_path, "w") as f:
         json.dump(gt_manifest, f, indent=2, default=str)
 
-    # 2. 获取 Gazebo model pose
-    model_pose = get_gazebo_model_pose("simple_hanging_workpiece")
+    # 2. 获取 model pose (离线 JSON 或实时 Gazebo)
+    if args.model_pose_json and os.path.isfile(args.model_pose_json):
+        with open(args.model_pose_json) as f:
+            evidence = json.load(f)
+        actual = evidence["actual_pose"]
+        model_pose = {
+            "position": actual["position_xyz"],
+            "orientation": actual["orientation_xyzw"],
+        }
+        logger.info("Model pose (offline): pos=%s", actual["position_xyz"])
+        pose_source = "pose_evidence_json"
+    else:
+        model_pose = get_gazebo_model_pose("simple_hanging_workpiece")
+        pose_source = "gazebo_model_states"
+        logger.info("Model pose (live Gazebo): pos=%s", model_pose["position"])
+
     T_world_object = np.eye(4)
     T_world_object[:3, :3] = quat_to_matrix(model_pose["orientation"])
     T_world_object[:3, 3] = model_pose["position"]
@@ -347,7 +363,8 @@ def main():
         "gt_samples": args.gt_samples,
         "eval_samples": args.eval_samples,
         "gt_aabb_sdf": gt_aabb_sdf,
-        "model_pose_gazebo": {
+        "model_pose_source": pose_source,
+        "model_pose": {
             "position": model_pose["position"],
             "orientation_xyzw": model_pose["orientation"],
         },
