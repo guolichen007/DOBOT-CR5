@@ -95,7 +95,9 @@ def run_evaluator(evaluator_script, recon_mesh, output_dir, release_id,
         "--target-roi-min", str(roi_min[0]), str(roi_min[1]), str(roi_min[2]),
         "--target-roi-max", str(roi_max[0]), str(roi_max[1]), str(roi_max[2]),
     ]
-    if model_pose_json and os.path.isfile(model_pose_json):
+    if model_pose_json:
+        if not os.path.isfile(model_pose_json):
+            raise FileNotFoundError(f"model_pose_json 不存在: {model_pose_json}")
         cmd += ["--model-pose-json", model_pose_json]
 
     # 6. subprocess.run (fail-closed)

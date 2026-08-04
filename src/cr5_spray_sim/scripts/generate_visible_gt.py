@@ -147,6 +147,8 @@ def main():
     parser.add_argument("--dataset", default=None, help="数据集路径")
     parser.add_argument("--gt-samples", type=int, default=200000,
                         help="GT 采样点数")
+    parser.add_argument("--model-pose-json", default=None,
+                        help="离线模式: 使用 pose_evidence.json 替代实时 Gazebo model_states")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -171,8 +173,22 @@ def main():
     o3d.io.write_point_cloud(
         os.path.join(args.output_dir, "full_gt_object_frame.ply"), pcd_full)
 
-    # 2. 获取 model pose
-    T_world_object = get_gazebo_model_pose()
+    # 2. 获取 model pose (离线 JSON 或实时 Gazebo)
+    if args.model_pose_json:
+        if not os.path.isfile(args.model_pose_json):
+            logger.error("model_pose_json not found: %s", args.model_pose_json)
+            sys.exit(1)
+        with open(args.model_pose_json) as f:
+            evidence = json.load(f)
+        actual = evidence["actual_pose_before_capture"]
+        pos = actual["position_xyz"]
+        quat = actual["orientation_xyzw"]
+        T_world_object = np.eye(4)
+        T_world_object[:3, :3] = Rotation.from_quat(quat).as_matrix()
+        T_world_object[:3, 3] = pos
+        logger.info("Model pose (offline): %s", pos)
+    else:
+        T_world_object = get_gazebo_model_pose()
     T_object_world = np.eye(4)
     T_object_world[:3, :3] = T_world_object[:3, :3].T
     T_object_world[:3, 3] = -T_world_object[:3, :3].T @ T_world_object[:3, 3]

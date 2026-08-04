@@ -264,6 +264,8 @@ def main():
     if args.evaluate:
         if not args.visible_gt:
             logger.error("--evaluate 需要 --visible-gt"); sys.exit(1)
+        if args.model_pose_json and not os.path.isfile(args.model_pose_json):
+            logger.error("--model-pose-json 文件不存在: %s", args.model_pose_json); sys.exit(1)
 
         eval_dir = os.path.join(args.output, "visible_evaluation")
         eval_script = os.path.join(WS, "..", "cr5_spray_sim", "scripts", "evaluate_reconstruction_gazebo.py")
