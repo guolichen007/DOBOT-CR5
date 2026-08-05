@@ -133,7 +133,7 @@ check_negative "runner no module-level sys.exit(1) on Open3D" \
     grep -qE 'except ImportError:.*sys\.exit' "$_RUNNER"
 
 # ── Production config checks ──
-_PROD_CFG="src/cr5_spray_perception/config/reconstruction/visible_surface_production_v1.yaml"
+_PROD_CFG="src/cr5_spray_perception/config/reconstruction/visible_surface_production.yaml"
 check "production config: allow_oracle=false" \
     grep -q 'allow_oracle.*false' "$_PROD_CFG"
 check "production config: allow_runtime_refinement=false" \
@@ -157,6 +157,25 @@ check_negative "no tracked docs/会话上下文.md" \
 
 # ── docs/releases/ exists ──
 check "docs/releases/ exists" test -d docs/releases
+
+# ── Permanent naming convention (mainline evergreen) ──
+_PERM_CFG="src/cr5_spray_perception/config/reconstruction/visible_surface_production.yaml"
+check "permanent production config exists" test -f "$_PERM_CFG"
+check_negative "old V1 config deleted" \
+    test -f "src/cr5_spray_perception/config/reconstruction/visible_surface_production_v1.yaml"
+check_negative "old V2 isolation config deleted" \
+    test -f "src/cr5_spray_perception/config/reconstruction/visible_surface_target_isolation_v2.yaml"
+check_negative "release doc migrated to validation" \
+    test -f "docs/releases/target-isolation-v2.md"
+check "validation doc exists" test -f "docs/validation/fixed-camera-reconstruction.md"
+check_negative "README no V1 config reference" \
+    grep -q 'visible_surface_production_v1' README.md
+check "README references permanent config" \
+    grep -q 'visible_surface_production.yaml' README.md
+check_negative "no target isolation V2 in active code" \
+    grep -rq 'target.isolation.V2\|目标隔离.V2\|target_isolation_v2' \
+    src/cr5_spray_perception/config/reconstruction/ src/cr5_spray_perception/scripts/ \
+    src/cr5_spray_perception/src/ docs/validation/ 2>/dev/null
 
 echo ""
 echo "========================================="

@@ -1,13 +1,13 @@
-# CR5 三相机可见表面三维重建 — 目标隔离配置 V2
-# 继承: visible_surface_production_v1.yaml (全部冻结参数不变)
-# 新增: target_isolation — 在 TSDF 前排除静态场景和吊具残留
-# 状态: EXPERIMENTAL (目标隔离验证中)
+# CR5 三相机可见表面三维重建 — 当前正式配置
+# 状态: CURRENT_PRODUCTION
+# 本文件为 main 当前唯一正式重建配置
 
-schema_version: cr5_visible_surface_production_v1
+schema_name: cr5_visible_surface_production
+schema_revision: 1
 
 # ── 外参 (冻结) ──
 rig:
-  source: stable_v1
+  source: frozen_three_camera_calibration
   allow_runtime_refinement: false
   allow_oracle: false
   refinement_status: REJECTED
@@ -105,7 +105,7 @@ acceptance:
     status: deferred_to_future_calibration_upgrade
 
 # ═══════════════════════════════════════════════════════════════
-# 目标隔离 V2 — TSDF 前排除已知非目标结构
+# 目标隔离 — TSDF 前排除已知非目标结构
 # ═══════════════════════════════════════════════════════════════
 target_isolation:
   enabled: true

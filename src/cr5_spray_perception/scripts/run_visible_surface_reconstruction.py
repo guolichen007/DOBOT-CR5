@@ -5,8 +5,8 @@ CR5 Reconstruction — 可见表面三维重建正式入口.
 一条命令完成:
   dataset → target mask → TSDF → mesh cleanup → normal → evaluation → provenance
 
-正式配置: visible_surface_production_v1.yaml
-正式外参: Stable V1 (refinement REJECTED, Oracle DIAGNOSTIC ONLY)
+正式配置: visible_surface_production.yaml
+正式外参: 冻结三相机标定 (refinement REJECTED, Oracle DIAGNOSTIC ONLY)
 """
 import os, sys, json, yaml, logging, argparse, datetime, hashlib, shutil, subprocess
 
@@ -205,7 +205,7 @@ def main():
         with open(args.config) as f:
             config = yaml.safe_load(f) or {}
     else:
-        config_path = os.path.join(WS, "config", "reconstruction", "visible_surface_production_v1.yaml")
+        config_path = os.path.join(WS, "config", "reconstruction", "visible_surface_production.yaml")
         with open(config_path) as f:
             config = yaml.safe_load(f)
     logger.info("配置: %s", config.get("schema_version", "?"))
@@ -383,7 +383,7 @@ def main():
 
     # ── 保存 effective config ──
     eff_cfg_path = os.path.join(args.output, "effective_config.yaml")
-    shutil.copy2(args.config or os.path.join(WS, "config", "reconstruction", "visible_surface_production_v1.yaml"), eff_cfg_path)
+    shutil.copy2(args.config or os.path.join(WS, "config", "reconstruction", "visible_surface_production.yaml"), eff_cfg_path)
 
     # ── 控制台 ──
     print(f"\n{'='*60}")

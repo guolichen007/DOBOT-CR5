@@ -1,18 +1,26 @@
 # Changelog
 
-## [Unreleased] — Repository Maintenance
+## [Unreleased]
+
+### Added
+- Multi-pose reconstruction robustness validation infrastructure
+- Per-pose offline evidence and visible GT generation
+- Target isolation for known non-target geometry (static camera supports, suspension fixtures)
+- Fixed-camera workspace envelope validation (8 poses, P0-P5 + E1-E2)
+- Fail-closed automatic quality gate with manual structural review
+- Mesh component classification (target body, suspension rod, rear pedestal, etc.)
 
 ### Changed
-- README 改为长期有效的当前工程说明，不再出现版本流水账
-- 新增 `quality_contract.py`：纯 Python 质量合约模块（release ID 解析、metrics schema 验证、Gate 判断）
-- 新增 `evaluation_runner.py`：纯 Python 评估运行器（subprocess 调用链，fail-closed）
-- Runner 延迟 Open3D 导入（`require_open3d()`），不再模块级 `sys.exit(1)`
-- 文档：项目状态与验收不再硬编码提交 SHA，工程维护与发布更新三分支治理
-- 集成测试改为真正执行 fake evaluator subprocess
+- Production config consolidated to single `visible_surface_production.yaml`
+- README restructured as current-capability document without version suffixes
+- Repository naming convention: mainline uses evergreen names, stable branches preserve historical refs
+- `quality_contract.py` and `evaluation_runner.py` for pure-Python quality gating
+- Runner uses lazy Open3D import (`require_open3d()`)
+- Integration tests run real fake-evaluator subprocess
 
 ### Fixed
-- CI 拆分为 6 个独立 job（新增 repository-contract、reconstruction-quality-gate）
-- reconstruction-quality-gate 完全不安装 Open3D，强制执行纯 Python 质量 Gate
+- CI split into 6 independent jobs
+- reconstruction-quality-gate enforces pure Python gate without Open3D
 - 删除 `| tail -5` 和 `|| echo` 等错误吞没模式
 - Open3D 安装失败现在使 CI job 失败
 

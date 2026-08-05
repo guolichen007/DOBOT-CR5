@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Production V1 封版回归测试."""
+"""生产配置回归测试."""
 import os, sys, json, yaml, unittest, tempfile, shutil
 
 WS = os.path.join(os.path.dirname(__file__), "..")
@@ -10,15 +10,16 @@ class TestProductionConfig(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        cfg_path = os.path.join(WS, "config", "reconstruction", "visible_surface_production_v1.yaml")
+        cfg_path = os.path.join(WS, "config", "reconstruction", "visible_surface_production.yaml")
         with open(cfg_path) as f:
             cls.config = yaml.safe_load(f)
 
     def test_schema_correct(self):
-        self.assertEqual(self.config["schema_version"], "cr5_visible_surface_production_v1")
+        self.assertEqual(self.config["schema_name"], "cr5_visible_surface_production")
+        self.assertEqual(self.config["schema_revision"], 1)
 
-    def test_rig_source_stable_v1(self):
-        self.assertEqual(self.config["rig"]["source"], "stable_v1")
+    def test_rig_source_frozen(self):
+        self.assertEqual(self.config["rig"]["source"], "frozen_three_camera_calibration")
 
     def test_allow_oracle_false(self):
         self.assertFalse(self.config["rig"]["allow_oracle"])
@@ -103,7 +104,7 @@ class TestProductionIsolation(unittest.TestCase):
         self.assertNotIn("poisson", code_only.lower())
 
     def _load_prod_config(self):
-        cfg_path = os.path.join(WS, "config", "reconstruction", "visible_surface_production_v1.yaml")
+        cfg_path = os.path.join(WS, "config", "reconstruction", "visible_surface_production.yaml")
         with open(cfg_path) as f:
             return yaml.safe_load(f)
 
@@ -111,7 +112,7 @@ class TestProductionIsolation(unittest.TestCase):
 class TestProductionConfigContract(unittest.TestCase):
 
     def test_config_file_exists(self):
-        path = os.path.join(WS, "config", "reconstruction", "visible_surface_production_v1.yaml")
+        path = os.path.join(WS, "config", "reconstruction", "visible_surface_production.yaml")
         self.assertTrue(os.path.isfile(path), f"缺失: {path}")
 
     def test_production_runner_exists(self):

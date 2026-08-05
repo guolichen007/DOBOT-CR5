@@ -53,7 +53,7 @@ def cleanup_mesh(mesh_path, per_cam_points_rig, output_dir, config=None,
         per_cam_points_rig: 每相机 ROI 点云 (用于深度支持判断)
         output_dir: 输出目录
         config: mesh_cleanup 配置段
-        iso_cfg: target_isolation 配置段 (V2, 可选)
+        iso_cfg: target_isolation 配置段 (可选)
         gt_points_rig: 可见 GT 点云 (用于分量分类, 可选)
 
     Returns:

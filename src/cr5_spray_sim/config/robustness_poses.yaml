@@ -11,7 +11,7 @@ frozen_conditions:
   stable_rig: stable_v1
   tsdf_voxel_length_m: 0.005
   tsdf_sdf_trunc_m: 0.020
-  production_config: visible_surface_production_v1.yaml
+  production_config: visible_surface_production.yaml
 
 poses:
   # ── 正式工作包络 (P0–P5, 必须全部通过) ──

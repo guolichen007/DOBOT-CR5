@@ -13,7 +13,7 @@
 - 五面标定目标（前/后 ChArUco、左 AprilTag、右 ArUco、顶 AprilTag）
 - 单相机 PnP → 成对相机相对求解 → RANSAC 共识 → SE(3) 平均
 - 前左相机固定为 rig 基准，输出 FL→FR 和 FL→RE
-- Stable V1 外参，Gazebo 工程基线验证
+- 冻结并经 Gazebo 验证的三相机外参
 
 **Gazebo 稳定基线:**
 - FR: 14.78 mm / 0.680° — PASS（≤15mm / ≤1°）
@@ -27,12 +27,13 @@
 当前正式重建能力：
 
 - 三台 RGB-D 相机目标区域融合
-- Stable V1 外参
-- target-only depth mask
-- TSDF 可见表面重建
-- 保守网格碎片清理
-- 质量评价（需显式传入 `--evaluate --visible-gt`）
-- 一键运行，可重复输出
+- 冻结三相机外参（FL 为 rig 基准）
+- 目标区域隔离（静态支架排除 + 吊具过滤 + 细长非目标分量清理）
+- 多姿态数据采集和离线评价（per-pose evidence + visible GT）
+- target-only depth mask → TSDF 可见表面重建
+- 保守网格碎片清理（不补底面、不 watertight）
+- fail-closed 自动质量 Gate + 人工结构审查
+- 一键运行，可重复输出（P0/P3/P5 mesh SHA 一致）
 
 **正式参数：**
 - voxel_length = 0.005 m
@@ -48,6 +49,15 @@
 - Accuracy P95 ≈ 15.58 mm
 - Production Gate: median ≤ 5mm, P95 ≤ 16mm
 - 相同输入重复运行结果一致
+
+**已验证工作包络：**
+- X +30mm / X -30mm
+- Y +30mm
+- yaw -15°
+- 未验证：Y -30mm
+- 当前包络外：yaw +15°（边际失败）、大组合平移、yaw 与平移组合
+
+> 完整多姿态验证数据见 `docs/validation/fixed-camera-reconstruction.md`
 
 **明确边界：**
 - 当前指标来自 Gazebo 固定三相机场景
@@ -118,7 +128,7 @@ rosrun cr5_spray_perception run_visible_surface_reconstruction.py \
   --dataset <dataset_path> \
   --group-id 0 \
   --rig <stable_rig.yaml> \
-  --config $(rospack find cr5_spray_perception)/config/reconstruction/visible_surface_production_v1.yaml \
+  --config $(rospack find cr5_spray_perception)/config/reconstruction/visible_surface_production.yaml \
   --output <output_path>
 ```
 
