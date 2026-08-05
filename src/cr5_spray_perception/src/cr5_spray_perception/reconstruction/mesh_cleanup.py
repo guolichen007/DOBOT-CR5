@@ -44,8 +44,17 @@ def compute_component_support(component_vertices, per_cam_points_rig, max_dist_m
     return int(np.sum(all_support)), float(min_dist_all)
 
 
-def cleanup_mesh(mesh_path, per_cam_points_rig, output_dir, config=None):
+def cleanup_mesh(mesh_path, per_cam_points_rig, output_dir, config=None,
+                 iso_cfg=None, gt_points_rig=None):
     """保守网格清理.
+
+    Args:
+        mesh_path: TSDF raw mesh 路径
+        per_cam_points_rig: 每相机 ROI 点云 (用于深度支持判断)
+        output_dir: 输出目录
+        config: mesh_cleanup 配置段
+        iso_cfg: target_isolation 配置段 (V2, 可选)
+        gt_points_rig: 可见 GT 点云 (用于分量分类, 可选)
 
     Returns:
         (cleaned_mesh, removed_mesh, component_report)
@@ -119,6 +128,29 @@ def cleanup_mesh(mesh_path, per_cam_points_rig, output_dir, config=None):
             "is_main": (i == main_idx),
         }
 
+        # ── V2 分量分类 ──
+        classification = None
+        if iso_cfg and iso_cfg.get("enabled", False):
+            from cr5_spray_perception.reconstruction.target_isolation import classify_mesh_component
+            classification = classify_mesh_component(
+                comp_v, iso_cfg, main_centroid.tolist(), gt_points_rig)
+            comp_info.update({
+                "classification": classification.get("classification", "UNCLASSIFIED"),
+                "inside_static_exclusion_ratio": classification.get("inside_static_exclusion_ratio", 0.0),
+                "inside_target_envelope_ratio": classification.get("inside_target_envelope_ratio", 0.0),
+                "elongation_ratio": classification.get("elongation_ratio", 0.0),
+                "distance_to_visible_gt_mm": classification.get("distance_to_visible_gt_mm"),
+            })
+        else:
+            comp_info.update({
+                "classification": "UNCLASSIFIED",
+                "inside_static_exclusion_ratio": 0.0,
+                "inside_target_envelope_ratio": 0.0,
+                "elongation_ratio": 0.0,
+                "distance_to_visible_gt_mm": None,
+            })
+            classification = {"classification": "UNCLASSIFIED"}
+
         # 删除判定 (保守)
         should_remove = False
         reasons = []
@@ -139,6 +171,17 @@ def cleanup_mesh(mesh_path, per_cam_points_rig, output_dir, config=None):
             reasons.append("no_depth_support_far_from_main")
         else:
             reasons.append("supported_or_structural")
+
+        # ── V2 目标隔离排除 ──
+        # 即使有深度支持, 位于已知非目标区的分量也删除
+        if not should_remove and classification:
+            cls = classification.get("classification", "")
+            if cls == "REAR_CAMERA_PEDESTAL":
+                should_remove = True
+                reasons.append("removed_by_target_isolation:rear_camera_pedestal")
+            elif cls == "SUSPENSION_ROD":
+                should_remove = True
+                reasons.append("removed_by_target_isolation:suspension_rod")
 
         comp_info["keep"] = not should_remove
         comp_info["reasons"] = reasons

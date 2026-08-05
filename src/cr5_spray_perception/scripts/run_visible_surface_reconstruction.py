@@ -244,6 +244,15 @@ def main():
     mask_dir = os.path.join(args.output, "masked_depth")
     masks, per_cam_pts_rig = generate_target_masks(rgbd_list, rig, config, mask_dir)
 
+    # ── 1.5. Target isolation (V2 only) ──
+    iso_cfg = config.get("target_isolation", {})
+    iso_report = {"enabled": False}
+    if iso_cfg.get("enabled", False):
+        from cr5_spray_perception.reconstruction.target_isolation import apply_target_isolation
+        iso_dir = os.path.join(args.output, "target_isolation")
+        masks, iso_report = apply_target_isolation(
+            rgbd_list, per_cam_pts_rig, masks, rig, config, iso_dir)
+
     # ── 2. TSDF ──
     tsdf_dir = os.path.join(args.output, "tsdf")
     mesh_path = run_tsdf(rgbd_list, rig, config, tsdf_dir, masks)
@@ -252,7 +261,11 @@ def main():
     o3d = require_open3d()
     cleanup_dir = os.path.join(args.output, "mesh_cleanup")
     cleanup_cfg = config.get("mesh_cleanup", {})
-    cleaned, removed, comp_report = cleanup_mesh(mesh_path, per_cam_pts_rig, cleanup_dir, cleanup_cfg)
+    cleaned, removed, comp_report = cleanup_mesh(
+        mesh_path, per_cam_pts_rig, cleanup_dir, cleanup_cfg,
+        iso_cfg=iso_cfg,
+        gt_points_rig=per_cam_pts_rig.get("visible_gt_pts_rig"),
+    )
 
     # 保存最终 mesh
     final_path = os.path.join(args.output, "visible_surface_mesh_final.ply")
@@ -352,6 +365,7 @@ def main():
             "removed_fragment_area_ratio": comp_report["removed_fragment_area_ratio"],
             "largest_component_area_ratio": comp_report["largest_component_tri_ratio"],
         },
+        "target_isolation": iso_report,
         "unobserved": {"bottom_surface": "UNKNOWN", "filled": False},
         "acceptance": acceptance_section,
         "filters": {"refinement": "REJECTED", "depth_edge": "disabled", "multiview_consistency": "disabled"},

@@ -1,0 +1,175 @@
+# CR5 三相机可见表面三维重建 — 目标隔离配置 V2
+# 继承: visible_surface_production_v1.yaml (全部冻结参数不变)
+# 新增: target_isolation — 在 TSDF 前排除静态场景和吊具残留
+# 状态: EXPERIMENTAL (目标隔离验证中)
+
+schema_version: cr5_visible_surface_production_v1
+
+# ── 外参 (冻结) ──
+rig:
+  source: stable_v1
+  allow_runtime_refinement: false
+  allow_oracle: false
+  refinement_status: REJECTED
+  refinement_rejection_reason: triangle_closure_inconsistency_and_completeness_degradation
+
+# ── 相机 (冻结) ──
+camera_names:
+  - cam_front_left
+  - cam_front_right
+  - cam_rear
+
+rig_frame: "cam_front_left_color_optical_frame"
+
+# ── TSDF (冻结) ──
+tsdf:
+  voxel_length_m: 0.005
+  sdf_trunc_m: 0.020
+  depth_min_m: 0.15
+  depth_max_m: 2.0
+
+# ── 目标 ROI (冻结) ──
+target_roi_rig:
+  source: calibration_target_body_gt_with_15mm_margin
+  frame: cam_front_left_color_optical_frame
+  units: meter
+  margin_m: 0.015
+  scope: CALIBRATION_TARGET_BODY
+  min: [-0.281, -0.216, 0.668]
+  max: [0.277, 0.179, 1.195]
+
+# ── 过滤器 (全部被消融实验拒绝) ──
+filters:
+  depth_edge_filter:
+    enabled: false
+    reason: rejected_by_ablation
+    ablation_result: completeness_severely_degraded
+
+  multiview_consistency:
+    enabled: false
+    status: diagnostic_optional
+    reason: p95_improvement_only_0_1mm
+    ablation_result: marginal_benefit_not_justified
+
+  pose_refinement:
+    enabled: false
+    status: REJECTED
+    reason: triangle_closure_18mm_and_completeness_collapse
+
+# ── 重建范围 (冻结) ──
+reconstruction:
+  type: partial_visible_surface
+  require_watertight: false
+  hallucinate_unseen_surface: false
+  integrated_frames: 3
+
+unobserved_surface:
+  bottom:
+    observed: false
+    status: UNKNOWN
+    counted_in_completeness: false
+    filled: false
+
+# ── 评价 (冻结) ──
+evaluation:
+  completeness_scope: visible_gt_only
+  full_geometry_metrics: diagnostic_only
+
+# ── 网格清理 (冻结) ──
+mesh_cleanup:
+  enabled: true
+  min_triangles: 20
+  min_surface_area_m2: 0.00001
+  maximum_support_distance_m: 0.010
+  minimum_supported_depth_points: 5
+  maximum_main_component_distance_m: 0.015
+  keep_largest_only: false
+
+# ── 法向 (冻结) ──
+normal_processing:
+  orient_to_cameras: true
+  smoothing_iterations: 0
+
+# ── 验收 Gate (冻结) ──
+acceptance:
+  production:
+    accuracy_median_mm: 5.0
+    accuracy_p95_mm: 16.0
+    visible_completeness_coverage_10mm: 0.80
+    removed_fragment_area_ratio: 0.03
+    top_offset_block_preserved: true
+    bottom_surface_unfilled: true
+    no_gantry_floor_residual: true
+  stretch_goal:
+    accuracy_p95_mm: 12.0
+    status: deferred_to_future_calibration_upgrade
+
+# ═══════════════════════════════════════════════════════════════
+# 目标隔离 V2 — TSDF 前排除已知非目标结构
+# ═══════════════════════════════════════════════════════════════
+target_isolation:
+  enabled: true
+
+  # ── 静态场景排除 ──
+  # 后置相机支架: 固定场景结构, 非目标工件
+  # 世界坐标来源: simulation_scene.yaml pedestal_rear
+  #   base=(1.14, 0.0, 0.0), height=0.79m, arm_length=0.10m
+  # 转换为 rig frame (cam_front_left_color_optical_frame) 的保守 AABB
+  # 安全距离: 距离标定目标体 ≥199mm, 不切到工件
+  static_scene_exclusion:
+    enabled: true
+    method: configured_rig_aabb
+    volumes:
+      - id: rear_camera_pedestal
+        source: simulation_scene_pedestal_rear
+        frame: cam_front_left_color_optical_frame
+        units: meter
+        # 世界 AABB: x∈[1.09,1.29], y∈[-0.08,0.08], z∈[0.64,0.94]
+        # 经 T_rig_world 逆变换到 rig frame
+        min: [0.214900, -0.413065, 1.047259]
+        max: [0.470217, -0.063541, 1.362028]
+        safety_margin_m: 0.0
+        reason: fixed_non_target_camera_support
+
+  # ── 吊具/非目标结构排除 ──
+  fixture_exclusion:
+    enabled: true
+
+    # A. 世界竖直高度限制
+    # 标定目标体最高点: top_offset_block 顶面 ≈ 0.78m 世界 Z
+    # 吊具横杆: spreader_bar 在 ≈ 1.225m 世界 Z
+    # 设置 0.85m 天花板 (顶部块以上 70mm 余量)
+    # 高于此平面的点来自吊索/横杆, 非目标工件
+    world_vertical_ceiling:
+      enabled: true
+      source: rectangular_housing_full_geometry
+      plane_frame: world
+      maximum_target_world_z_m: 0.85
+      safety_margin_m: 0.07
+      preserve_top_offset_block: true
+      # rig frame 中的平面方程: dot(normal_rig, p_rig) <= offset_rig
+      # normal_rig = T_rig_world[2,:] = world Z 在 rig 中方向
+      # offset_rig = ceiling - T_rig_world[2,3]
+      normal_rig: [0.11777014, -0.96728389, -0.09409074]
+      offset_rig: 0.237027
+      reason: exclude_suspension_cables_and_spreader_bar_above_target
+
+    # B. 细长非目标结构过滤 (mesh cleanup 阶段)
+    # 对网格分量计算 OBB, 满足以下全部条件的分量被标记为 SUSPENSION_ROD:
+    #   - elongation (最大轴/次大轴) ≥ 5.0
+    #   - 两个短轴均 ≤ 15mm
+    #   - 位于目标合法 envelope 外 (>20mm)
+    #   - 与 visible GT 距离 > 10mm
+    slender_component_filter:
+      enabled: true
+      elongation_ratio_min: 5.0
+      cross_section_max_m: 0.015
+      target_envelope_distance_min_m: 0.020
+      visible_gt_distance_min_mm: 10.0
+      reason: identify_thin_rod_like_structures_attached_to_target
+
+  # ── 诊断输出 ──
+  diagnostics:
+    save_excluded_points: true
+    save_per_camera_masks: true
+    save_before_after_mesh: true
