@@ -295,15 +295,13 @@ def main():
         json.dump(gt_manifest, f, indent=2, default=str)
 
     # 2. 获取 model pose (离线 JSON 或实时 Gazebo)
-    if args.model_pose_json and os.path.isfile(args.model_pose_json):
-        with open(args.model_pose_json) as f:
-            evidence = json.load(f)
-        actual = evidence["actual_pose"]
-        model_pose = {
-            "position": actual["position_xyz"],
-            "orientation": actual["orientation_xyzw"],
-        }
-        logger.info("Model pose (offline): pos=%s", actual["position_xyz"])
+    if args.model_pose_json:
+        from cr5_spray_sim.scene_config import load_pose_evidence_model_pose
+        T_wo, evidence = load_pose_evidence_model_pose(args.model_pose_json)
+        pos = T_wo[:3, 3].tolist()
+        quat = Rotation.from_matrix(T_wo[:3, :3]).as_quat().tolist()
+        model_pose = {"position": pos, "orientation": quat}
+        logger.info("Model pose (offline): pos=%s", pos)
         pose_source = "pose_evidence_json"
     else:
         model_pose = get_gazebo_model_pose("simple_hanging_workpiece")

@@ -175,18 +175,9 @@ def main():
 
     # 2. 获取 model pose (离线 JSON 或实时 Gazebo)
     if args.model_pose_json:
-        if not os.path.isfile(args.model_pose_json):
-            logger.error("model_pose_json not found: %s", args.model_pose_json)
-            sys.exit(1)
-        with open(args.model_pose_json) as f:
-            evidence = json.load(f)
-        actual = evidence["actual_pose_before_capture"]
-        pos = actual["position_xyz"]
-        quat = actual["orientation_xyzw"]
-        T_world_object = np.eye(4)
-        T_world_object[:3, :3] = Rotation.from_quat(quat).as_matrix()
-        T_world_object[:3, 3] = pos
-        logger.info("Model pose (offline): %s", pos)
+        from cr5_spray_sim.scene_config import load_pose_evidence_model_pose
+        T_world_object, evidence = load_pose_evidence_model_pose(args.model_pose_json)
+        logger.info("Model pose (offline): %s", T_world_object[:3, 3].tolist())
     else:
         T_world_object = get_gazebo_model_pose()
     T_object_world = np.eye(4)

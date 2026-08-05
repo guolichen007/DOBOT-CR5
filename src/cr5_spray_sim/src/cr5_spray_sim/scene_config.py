@@ -109,3 +109,56 @@ def get_cr5_base():
     scene = load_scene_config()
     base = scene.get("cr5_base", {}).get("position", {"x": 0.0, "y": 0.0, "z": 0.0})
     return (float(base["x"]), float(base["y"]), float(base["z"]))
+
+
+def load_pose_evidence_model_pose(evidence_path):
+    """从 pose_evidence.json 提取模型位姿 (T_world_object).
+
+    供 generate_visible_gt.py 和 evaluate_reconstruction_gazebo.py 共用.
+
+    读取 actual_pose_before_capture (新 schema), 兼容 actual_pose (旧).
+
+    Returns: (T_world_object_4x4, evidence_dict)
+    Raises: FileNotFoundError, ValueError, KeyError
+    """
+    import os, json, math, numpy as np
+    from scipy.spatial.transform import Rotation
+
+    if not os.path.isfile(evidence_path):
+        raise FileNotFoundError(f"pose_evidence.json not found: {evidence_path}")
+
+    with open(evidence_path) as f:
+        evidence = json.load(f)
+
+    # 新 schema 优先: actual_pose_before_capture
+    actual = evidence.get("actual_pose_before_capture") or evidence.get("actual_pose")
+    if not actual:
+        raise KeyError("pose_evidence missing actual_pose_before_capture (and actual_pose fallback)")
+
+    pos = actual.get("position_xyz") or actual.get("position")
+    quat = actual.get("orientation_xyzw") or actual.get("orientation")
+    if not pos or len(pos) != 3:
+        raise ValueError(f"invalid position in pose_evidence: {pos}")
+    if not quat or len(quat) != 4:
+        raise ValueError(f"invalid orientation in pose_evidence: {quat}")
+
+    # 验证数值
+    for v in pos + quat:
+        if not math.isfinite(v):
+            raise ValueError(f"non-finite value in pose_evidence: {v}")
+
+    # quaternion 范数检查
+    norm = math.sqrt(sum(q*q for q in quat))
+    if abs(norm - 1.0) > 0.01:
+        raise ValueError(f"quaternion norm={norm:.4f} != 1.0")
+
+    # settle 状态检查
+    settle = evidence.get("settle", {})
+    if settle.get("status") != "STABLE":
+        # 不阻止, 但记录 (兼容无 settle 的旧数据)
+        pass
+
+    T = np.eye(4)
+    T[:3, :3] = Rotation.from_quat(quat).as_matrix()
+    T[:3, 3] = pos
+    return T, evidence

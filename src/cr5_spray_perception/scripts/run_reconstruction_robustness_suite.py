@@ -427,40 +427,68 @@ def run_robustness_suite(dataset_root, poses_yaml, rig_path, config_path,
     # ── 最终 Gate ──
     ts_end = datetime.datetime.utcnow()
     production = [r for r in per_pose if r["category"] == "production"]
-    all_auto_pass = all(r.get("auto_gate_pass") is True for r in production if r["status"] != "SKIP")
 
-    # 检查人工审查
+    # 生产姿态必须全部存在且 auto_pass
+    expected_prod = len([p for p in poses if p.get("category", "production") == "production"])
+    actual_prod = len(production)
+    any_skip_or_fail = any(
+        r["status"] in ("SKIP", "FAIL") or r.get("auto_gate_pass") is not True
+        for r in production
+    )
+
+    if actual_prod < expected_prod:
+        fatal_errors.append(
+            f"production poses: {actual_prod}/{expected_prod} (missing or skipped)")
+    if any_skip_or_fail:
+        fatal_errors.append("production poses contain SKIP/FAIL or auto_gate_pass!=True")
+
+    all_auto_pass = (not fatal_errors)
+
+    # 检查人工审查 — 五项 bool 必须全部 true
+    MANUAL_FIELDS = [
+        "no_mirror", "no_double_surface", "top_offset_block_preserved",
+        "no_global_layer_shift", "no_gantry_floor_residual",
+    ]
     manual_approved = {}
     for r in production:
         pid = r["pose_id"]
-        if pid in manual_review:
-            manual_approved[pid] = manual_review[pid].get("status") == "APPROVED"
+        review = manual_review.get(pid, {})
+        if review.get("status") == "APPROVED":
+            all_checks_ok = all(review.get(f) is True for f in MANUAL_FIELDS)
+            if all_checks_ok:
+                manual_approved[pid] = True
+            else:
+                missing = [f for f in MANUAL_FIELDS if review.get(f) is not True]
+                logger.warning("  manual review for %s: APPROVED but missing/False: %s",
+                             pid, missing)
 
     all_manual_approved = (
-        len(manual_approved) == len(production)
+        len(manual_approved) == len(production) > 0
         and all(manual_approved.values())
-    ) if production else False
+    )
 
     # ── 写报告 ──
     report = _build_report(per_pose, poses_yaml, rig_path, config_path,
-                            ts_start, ts_end, all_auto_pass, all_manual_approved)
+                            ts_start, ts_end, all_auto_pass, all_manual_approved,
+                            expected_prod, manual_approved)
     _write_json_report(output_root, report)
     _write_summary_md(output_root, per_pose, all_auto_pass, all_manual_approved)
     _write_per_pose_csv(output_root, per_pose)
 
-    # ── 退出码 ──
+    # ── 退出码 (fatal first) ──
     if fatal_errors:
         logger.error("FATAL: %d errors", len(fatal_errors))
         for e in fatal_errors:
             logger.error("  %s", e)
+        return EXIT_AUTO_FAIL
 
     if not all_auto_pass:
         logger.error("GATE: AUTO_FAIL")
         return EXIT_AUTO_FAIL
 
     if not all_manual_approved:
-        logger.info("GATE: AUTO_PASS, MANUAL_REVIEW_PENDING (%d poses)",
-                    len(production) - len(manual_approved))
+        logger.info("GATE: AUTO_PASS, MANUAL_REVIEW_PENDING (%d/%d poses)",
+                    len(manual_approved), len(production))
         return EXIT_MANUAL_PENDING
 
     logger.info("GATE: FINAL_PASS")
@@ -468,7 +496,8 @@ def run_robustness_suite(dataset_root, poses_yaml, rig_path, config_path,
 
 
 def _build_report(per_pose, poses_yaml, rig_path, config_path,
-                   ts_start, ts_end, all_auto_pass, all_manual_approved):
+                   ts_start, ts_end, all_auto_pass, all_manual_approved,
+                   expected_prod=0, manual_approved=None):
     production = [r for r in per_pose if r["category"] == "production"]
     evaluated = [r for r in production if r.get("worst_metrics")]
 
@@ -489,7 +518,10 @@ def _build_report(per_pose, poses_yaml, rig_path, config_path,
             worst_cov10, worst_cov10_pose = c, r["pose_id"]
 
     manual_pending = [r["pose_id"] for r in production
-                      if r.get("auto_gate_pass") is True]
+                      if r.get("auto_gate_pass") is True
+                      and r["pose_id"] not in manual_approved]
+    manual_approved_list = [r["pose_id"] for r in production
+                            if r["pose_id"] in manual_approved]
 
     return {
         "schema": "cr5_robustness_report_v3",
@@ -509,9 +541,16 @@ def _build_report(per_pose, poses_yaml, rig_path, config_path,
         "summary": {
             "total_poses": len(per_pose),
             "production_poses": len(production),
+            "production_expected": expected_prod,
             "auto_gate": "PASS" if all_auto_pass else "FAIL",
             "manual_gate": "APPROVED" if all_manual_approved else "PENDING",
-            "final_gate": "PASS" if (all_auto_pass and all_manual_approved) else "PENDING",
+            "manual_approved": manual_approved_list,
+            "manual_pending": manual_pending,
+            "final_gate": (
+                "PASS" if (all_auto_pass and all_manual_approved)
+                else "FAIL" if not all_auto_pass
+                else "PENDING"
+            ),
             "worst_accuracy_median_mm": worst_med,
             "worst_accuracy_median_pose": worst_med_pose,
             "worst_accuracy_p95_mm": worst_p95,
@@ -520,7 +559,6 @@ def _build_report(per_pose, poses_yaml, rig_path, config_path,
             "worst_completeness_pose": worst_cov10_pose,
             "repeatability_failures": len([r for r in per_pose
                                             if r.get("mesh_sha_unique", 1) != 1]),
-            "manual_review_pending": manual_pending,
         },
         "per_pose": per_pose,
     }

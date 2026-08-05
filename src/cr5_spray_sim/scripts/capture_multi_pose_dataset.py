@@ -253,8 +253,8 @@ def main():
     parser.add_argument("--poses", "-p", required=True)
     parser.add_argument("--output", "-o", required=True)
     parser.add_argument("--model", default="simple_hanging_workpiece")
-    parser.add_argument("--skip-visible-gt", action="store_true",
-                        help="跳过 per-pose visible GT 生成")
+    parser.add_argument("--diagnostic-skip-visible-gt", action="store_true",
+                        help="诊断模式: 跳过 per-pose visible GT (数据集不完整, 最终 exit≠0)")
     args = parser.parse_args()
 
     if not os.path.isfile(_POSE_SETTER):
@@ -354,20 +354,47 @@ def main():
                 fatal_errors.append(f"{pose_id}: capture: {e}")
             continue
 
-        # 采集后位姿
+        # 采集后位姿 — 不等待稳定, 直接读取一次
         try:
-            actual_after, actual_quat_after, _ = verify_and_wait_stable(
-                model_name=args.model)
-            adx = actual_after[0] - actual_before[0]
-            ady = actual_after[1] - actual_before[1]
-            adz = actual_after[2] - actual_before[2]
-            capture_motion_mm = math.sqrt(adx*adx + ady*ady + adz*adz) * 1000.0
-            dot_a = abs(sum(a*b for a, b in zip(actual_quat_before, actual_quat_after)))
-            dot_a = min(dot_a, 1.0)
-            capture_rot_deg = math.degrees(2.0 * math.acos(dot_a))
-        except Exception:
-            actual_after, actual_quat_after = actual_before, actual_quat_before
-            capture_motion_mm, capture_rot_deg = 0, 0
+            rospy.wait_for_service("/gazebo/get_model_state", timeout=5.0)
+            gms = rospy.ServiceProxy("/gazebo/get_model_state", GetModelState)
+            req2 = GetModelStateRequest()
+            req2.model_name = args.model
+            req2.relative_entity_name = "world"
+            resp2 = gms(req2)
+            if not resp2.success:
+                raise RuntimeError(f"post-capture get_model_state failed: {resp2.status_message}")
+            actual_after = [
+                resp2.pose.position.x, resp2.pose.position.y, resp2.pose.position.z]
+            actual_quat_after = [
+                resp2.pose.orientation.x, resp2.pose.orientation.y,
+                resp2.pose.orientation.z, resp2.pose.orientation.w]
+        except Exception as e:
+            logger.error("    post-capture pose unavailable: %s", e)
+            if category == "production":
+                fatal_errors.append(f"{pose_id}: post-capture pose unavailable: {e}")
+            continue
+
+        adx = actual_after[0] - actual_before[0]
+        ady = actual_after[1] - actual_before[1]
+        adz = actual_after[2] - actual_before[2]
+        capture_motion_mm = math.sqrt(adx*adx + ady*ady + adz*adz) * 1000.0
+        dot_a = abs(sum(a*b for a, b in zip(actual_quat_before, actual_quat_after)))
+        dot_a = min(dot_a, 1.0)
+        capture_rot_deg = math.degrees(2.0 * math.acos(dot_a))
+
+        if capture_motion_mm > 0.5:
+            logger.error("    capture motion exceeded: %.3fmm", capture_motion_mm)
+            if category == "production":
+                fatal_errors.append(
+                    f"{pose_id}: capture motion {capture_motion_mm:.3f}mm > 0.5mm")
+            continue
+        if capture_rot_deg > 0.05:
+            logger.error("    capture rotation exceeded: %.4fdeg", capture_rot_deg)
+            if category == "production":
+                fatal_errors.append(
+                    f"{pose_id}: capture rotation {capture_rot_deg:.4f}deg > 0.05deg")
+            continue
 
         logger.info("    captured: %s", os.path.basename(group_dir))
 
@@ -379,6 +406,19 @@ def main():
         if os.path.exists(dst_group):
             shutil.rmtree(dst_group)
         shutil.move(group_dir, dst_group)
+
+        # 5b. 验证三台相机 depth 文件均存在
+        missing_cams = []
+        for cam in ["cam_front_left", "cam_front_right", "cam_rear"]:
+            depth_path = os.path.join(dst_group, cam, "depth.npy")
+            if not os.path.isfile(depth_path):
+                missing_cams.append(cam)
+        if missing_cams:
+            logger.error("    missing camera depth: %s", missing_cams)
+            if category == "production":
+                fatal_errors.append(
+                    f"{pose_id}: missing camera depth: {missing_cams}")
+            continue
 
         # 6. 写入完整的 pose_evidence.json
         evidence = {
@@ -416,13 +456,39 @@ def main():
             json.dump(evidence, f, indent=2, default=str)
 
         # 7. 生成 per-pose visible GT
-        if not args.skip_visible_gt:
+        if not args.diagnostic_skip_visible_gt:
             gt_ok, gt_path = generate_visible_gt(pose_dir, evidence_path)
             if not gt_ok and category == "production":
                 fatal_errors.append(f"{pose_id}: visible GT generation failed")
             if gt_ok:
+                # 验证点数 > 0 和 manifest
+                try:
+                    vis_pcd = None
+                    import open3d as o3d
+                    vis_pcd = o3d.io.read_point_cloud(gt_path)
+                    n_pts = len(vis_pcd.points) if vis_pcd else 0
+                except Exception:
+                    n_pts = 0
+                if n_pts == 0:
+                    fatal_errors.append(f"{pose_id}: visible_union.ply has 0 points")
+                    if category == "production":
+                        continue
+
+                vis_manifest = os.path.join(
+                    os.path.dirname(gt_path), "visibility_manifest.json")
+                if not os.path.isfile(vis_manifest):
+                    fatal_errors.append(f"{pose_id}: visibility_manifest.json missing")
+
                 gt_rel = os.path.relpath(gt_path, args.output)
                 checksums[gt_rel] = sha256_file(gt_path)
+                # manifest checksum
+                m_rel = os.path.relpath(vis_manifest, args.output)
+                checksums[m_rel] = sha256_file(vis_manifest)
+        else:
+            # 诊断模式: 后续 fatal
+            logger.warning("    diagnostic mode: visible GT skipped")
+            fatal_errors.append(
+                f"{pose_id}: diagnostic-skip-visible-gt (dataset incomplete)")
 
         # 8. Checksums
         group_files = sha256_dir_files(dst_group)
