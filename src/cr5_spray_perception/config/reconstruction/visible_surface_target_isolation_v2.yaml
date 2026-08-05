@@ -112,23 +112,23 @@ target_isolation:
 
   # ── 静态场景排除 ──
   # 后置相机支架: 固定场景结构, 非目标工件
-  # 世界坐标来源: simulation_scene.yaml pedestal_rear
-  #   base=(1.14, 0.0, 0.0), height=0.79m, arm_length=0.10m
-  # 转换为 rig frame (cam_front_left_color_optical_frame) 的保守 AABB
-  # 安全距离: 距离标定目标体 ≥199mm, 不切到工件
+  # AABB 来源: 八姿态实际排除点 5%/95% 分位数 +5mm margin
+  #   排除点来自 cam_front_right 对后置相机/支架的观测
+  #   全部 1193 排除点距 visible GT >118mm, 确认为非目标
+  # 旧 AABB (过度保守): 255×350×315mm
+  # 新 AABB (数据驱动): 24×82×29mm, 收窄 ~90%
   static_scene_exclusion:
     enabled: true
     method: configured_rig_aabb
     volumes:
       - id: rear_camera_pedestal
-        source: simulation_scene_pedestal_rear
+        source: data_driven_from_eight_pose_excluded_points
         frame: cam_front_left_color_optical_frame
         units: meter
-        # 世界 AABB: x∈[1.09,1.29], y∈[-0.08,0.08], z∈[0.64,0.94]
-        # 经 T_rig_world 逆变换到 rig frame
-        min: [0.214900, -0.413065, 1.047259]
-        max: [0.470217, -0.063541, 1.362028]
-        safety_margin_m: 0.0
+        # 基于 P0-P5 全部 1193 个被排除点的 5%-95% 分位数 +5mm
+        min: [0.258139, -0.218773, 1.170169]
+        max: [0.281676, -0.136302, 1.199245]
+        safety_margin_m: 0.005
         reason: fixed_non_target_camera_support
 
   # ── 吊具/非目标结构排除 ──
