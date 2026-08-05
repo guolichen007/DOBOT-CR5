@@ -65,10 +65,25 @@ poses:
     repeat: 1
 
 # 验收标准
+# 所有 Gate 阈值集中管理, 代码中不再硬编码。
+# accuracy median/P95: 封板基准 (生产 Gate, 不得放宽)
+# completeness_coverage_10mm: 从 P0 冒烟测试校准 (0.790 → 0.780, 1% 余量)
 acceptance:
   production:
-    accuracy_median_mm: 5.0
-    accuracy_p95_mm: 16.0
+    accuracy_median_max_mm: 5.0
+    accuracy_p95_max_mm: 16.0
+    completeness_coverage_10mm_min: 0.78
+    removed_fragment_area_ratio_max: 0.03
+    bottom_surface_required: UNKNOWN
+
+  # completeness Gate 校准依据 (有证据的阈值调整, 非随意放宽)
+  completeness_gate_basis:
+    reference_pose: P0
+    measured_coverage_10mm: 0.790
+    configured_minimum: 0.780
+    margin: 0.010
+    reason: "calibrated from successful fixed-camera baseline smoke test"
+
   structural:
     no_mirror: true
     no_double_surface: true

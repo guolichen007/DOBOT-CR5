@@ -9,6 +9,7 @@ CR5 Simulation — Gazebo GT 三维重建评价.
 """
 import os, sys, json, yaml, math, argparse, logging
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 logger = logging.getLogger("evaluate_gazebo")

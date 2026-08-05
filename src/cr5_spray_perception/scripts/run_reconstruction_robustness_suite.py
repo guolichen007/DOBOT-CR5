@@ -4,10 +4,8 @@
 
 Gate 强制检查:
   - 所有 run 成功并通过 production Gate
-  - accuracy median ≤ 5mm, P95 ≤ 16mm (最差 run)
-  - completeness coverage@10mm ≥ 0.80 (最差 run)
-  - removed_fragment_area_ratio ≤ 0.03 (最差 run)
-  - bottom == UNKNOWN (任一 run 违反即失败)
+  - accuracy median/P95, completeness coverage@10mm, removed ratio, bottom
+    阈值从 robustness_poses.yaml 的 acceptance 段读取, 代码中不硬编码
   - mesh SHA 全部存在, 同姿态重复运行一致
   - 缺失任一强制字段 → FAIL
   - 结构项 MANUAL_REVIEW_REQUIRED → exit 2 (自动 PASS 但人工 pending)
@@ -34,10 +32,14 @@ logger = logging.getLogger("robustness")
 WS = os.path.join(os.path.dirname(__file__), "..")
 _RUNNER = os.path.join(WS, "scripts", "run_visible_surface_reconstruction.py")
 
-GATE_ACC_MEDIAN = 5.0
-GATE_ACC_P95 = 16.0
-GATE_COMPLETENESS_COV10 = 0.80
-GATE_REMOVED_RATIO = 0.03
+# 默认 Gate 阈值 — 会被 YAML acceptance 覆盖
+DEFAULT_GATE_CONFIG = {
+    "accuracy_median_max_mm": 5.0,
+    "accuracy_p95_max_mm": 16.0,
+    "completeness_coverage_10mm_min": 0.80,
+    "removed_fragment_area_ratio_max": 0.03,
+    "bottom_surface_required": "UNKNOWN",
+}
 
 # 生产 runner 导出符号供测试直接调用
 EXIT_AUTO_FAIL = 1
@@ -51,9 +53,23 @@ def sha256_file(path):
 
 
 def load_poses(poses_yaml):
+    """读取 pose manifest, 返回 (poses, gate_config, gate_basis).
+
+    gate_config 从 YAML acceptance.production 读取,
+    缺失字段回退到 DEFAULT_GATE_CONFIG.
+    """
     with open(poses_yaml) as f:
         cfg = yaml.safe_load(f)
-    return cfg.get("poses", []), cfg.get("acceptance", {})
+    poses = cfg.get("poses", [])
+    acceptance = cfg.get("acceptance", {})
+    prod = acceptance.get("production", {})
+
+    gate_config = {}
+    for key in DEFAULT_GATE_CONFIG:
+        gate_config[key] = prod.get(key, DEFAULT_GATE_CONFIG[key])
+
+    gate_basis = acceptance.get("completeness_gate_basis", {})
+    return poses, gate_config, gate_basis
 
 
 def load_manual_review(path):
@@ -156,7 +172,8 @@ def aggregate_worst_metrics(run_metrics_list):
     return worst, []
 
 
-def evaluate_pose_gate(worst_metrics, mesh_hashes, n_runs_completed, n_runs_expected):
+def evaluate_pose_gate(worst_metrics, mesh_hashes, n_runs_completed, n_runs_expected,
+                       gate_config=None):
     """使用最差聚合指标判断单姿态 Gate.
 
     Args:
@@ -164,9 +181,19 @@ def evaluate_pose_gate(worst_metrics, mesh_hashes, n_runs_completed, n_runs_expe
         mesh_hashes: list[str] — 所有成功运行的 mesh SHA (非 set)
         n_runs_completed: 成功完成数量
         n_runs_expected: 预期数量
+        gate_config: dict — Gate 阈值 (从 YAML 读取, 默认 DEFAULT_GATE_CONFIG)
 
     Returns: (result_dict, auto_pass, failures_list)
     """
+    if gate_config is None:
+        gate_config = DEFAULT_GATE_CONFIG
+
+    acc_med_max = gate_config["accuracy_median_max_mm"]
+    acc_p95_max = gate_config["accuracy_p95_max_mm"]
+    comp_cov10_min = gate_config["completeness_coverage_10mm_min"]
+    removed_max = gate_config["removed_fragment_area_ratio_max"]
+    bottom_required = gate_config["bottom_surface_required"]
+
     failures = []
 
     # 运行完整性
@@ -189,35 +216,35 @@ def evaluate_pose_gate(worst_metrics, mesh_hashes, n_runs_completed, n_runs_expe
     acc_med = worst_metrics.get("accuracy_median_mm")
     if acc_med is None:
         failures.append("accuracy_median_mm missing")
-    elif acc_med > GATE_ACC_MEDIAN:
-        failures.append(f"accuracy median={acc_med:.2f} > {GATE_ACC_MEDIAN}")
+    elif acc_med > acc_med_max:
+        failures.append(f"accuracy median={acc_med:.2f} > {acc_med_max}")
 
     acc_p95 = worst_metrics.get("accuracy_p95_mm")
     if acc_p95 is None:
         failures.append("accuracy_p95_mm missing")
-    elif acc_p95 > GATE_ACC_P95:
-        failures.append(f"accuracy P95={acc_p95:.2f} > {GATE_ACC_P95}")
+    elif acc_p95 > acc_p95_max:
+        failures.append(f"accuracy P95={acc_p95:.2f} > {acc_p95_max}")
 
     # completeness coverage@10mm
     comp_cov10 = worst_metrics.get("completeness_coverage_10mm")
     if comp_cov10 is None:
         failures.append("completeness_coverage_10mm missing")
-    elif comp_cov10 < GATE_COMPLETENESS_COV10:
-        failures.append(f"completeness_cov10={comp_cov10:.3f} < {GATE_COMPLETENESS_COV10}")
+    elif comp_cov10 < comp_cov10_min:
+        failures.append(f"completeness_cov10={comp_cov10:.3f} < {comp_cov10_min}")
 
     # removed ratio
     removed = worst_metrics.get("removed_fragment_area_ratio")
     if removed is None:
         failures.append("removed_fragment_area_ratio missing")
-    elif removed > GATE_REMOVED_RATIO:
-        failures.append(f"removed_ratio={removed:.3f} > {GATE_REMOVED_RATIO}")
+    elif removed > removed_max:
+        failures.append(f"removed_ratio={removed:.3f} > {removed_max}")
 
     # bottom
     bottom = worst_metrics.get("bottom_status")
     if bottom is None:
         failures.append("bottom_status missing")
-    elif bottom != "UNKNOWN":
-        failures.append(f"bottom_status={bottom} != UNKNOWN")
+    elif bottom != bottom_required:
+        failures.append(f"bottom_status={bottom} != {bottom_required}")
 
     auto_pass = len(failures) == 0
 
@@ -285,12 +312,18 @@ def run_reconstruction(dataset_path, rig_path, config_path, output_dir,
 def run_robustness_suite(dataset_root, poses_yaml, rig_path, config_path,
                           output_root, manual_review_json=None):
     """主入口."""
-    poses, _ = load_poses(poses_yaml)
+    poses, gate_config, gate_basis = load_poses(poses_yaml)
     os.makedirs(output_root, exist_ok=True)
 
     logger.info("多姿态鲁棒性验证: %d poses", len(poses))
     logger.info("  rig: %s", rig_path)
     logger.info("  config: %s", config_path)
+    logger.info("  Gate: acc_med≤%.1f acc_p95≤%.1f cov10≥%.2f removed≤%.2f bottom=%s",
+                gate_config["accuracy_median_max_mm"],
+                gate_config["accuracy_p95_max_mm"],
+                gate_config["completeness_coverage_10mm_min"],
+                gate_config["removed_fragment_area_ratio_max"],
+                gate_config["bottom_surface_required"])
 
     manual_review = load_manual_review(manual_review_json)
     per_pose = []
@@ -396,6 +429,7 @@ def run_robustness_suite(dataset_root, poses_yaml, rig_path, config_path,
             mesh_hashes=run_hashes,
             n_runs_completed=len(run_metrics_list),
             n_runs_expected=repeat,
+            gate_config=gate_config,
         )
 
         gate_result["pose_id"] = pose_id
@@ -470,7 +504,8 @@ def run_robustness_suite(dataset_root, poses_yaml, rig_path, config_path,
     # ── 写报告 ──
     report = _build_report(per_pose, poses_yaml, rig_path, config_path,
                             ts_start, ts_end, all_auto_pass, all_manual_approved,
-                            expected_prod, manual_approved)
+                            expected_prod, manual_approved,
+                            gate_config, gate_basis)
     _write_json_report(output_root, report)
     _write_summary_md(output_root, per_pose, all_auto_pass, all_manual_approved)
     _write_per_pose_csv(output_root, per_pose)
@@ -497,7 +532,12 @@ def run_robustness_suite(dataset_root, poses_yaml, rig_path, config_path,
 
 def _build_report(per_pose, poses_yaml, rig_path, config_path,
                    ts_start, ts_end, all_auto_pass, all_manual_approved,
-                   expected_prod=0, manual_approved=None):
+                   expected_prod=0, manual_approved=None,
+                   gate_config=None, gate_basis=None):
+    if gate_config is None:
+        gate_config = DEFAULT_GATE_CONFIG
+    if gate_basis is None:
+        gate_basis = {}
     production = [r for r in per_pose if r["category"] == "production"]
     evaluated = [r for r in production if r.get("worst_metrics")]
 
@@ -533,11 +573,13 @@ def _build_report(per_pose, poses_yaml, rig_path, config_path,
             "config_path": os.path.abspath(config_path),
         },
         "acceptance_criteria": {
-            "accuracy_median_mm": GATE_ACC_MEDIAN,
-            "accuracy_p95_mm": GATE_ACC_P95,
-            "completeness_coverage_10mm": GATE_COMPLETENESS_COV10,
-            "removed_fragment_area_ratio": GATE_REMOVED_RATIO,
+            "accuracy_median_max_mm": gate_config["accuracy_median_max_mm"],
+            "accuracy_p95_max_mm": gate_config["accuracy_p95_max_mm"],
+            "completeness_coverage_10mm_min": gate_config["completeness_coverage_10mm_min"],
+            "removed_fragment_area_ratio_max": gate_config["removed_fragment_area_ratio_max"],
+            "bottom_surface_required": gate_config["bottom_surface_required"],
         },
+        "completeness_gate_basis": gate_basis,
         "summary": {
             "total_poses": len(per_pose),
             "production_poses": len(production),

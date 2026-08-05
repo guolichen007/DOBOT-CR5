@@ -175,8 +175,8 @@ def parse_group_dir_from_trigger_message(message):
 
 def trigger_capture():
     """触发 joint_capture_manager 采集. 返回 (group_dir, response_message)."""
-    rospy.wait_for_service("/joint_capture_manager/capture_sync_group", timeout=10.0)
-    svc = rospy.ServiceProxy("/joint_capture_manager/capture_sync_group", Trigger)
+    rospy.wait_for_service("/capture_manager/capture_sync_group", timeout=10.0)
+    svc = rospy.ServiceProxy("/capture_manager/capture_sync_group", Trigger)
 
     req = TriggerRequest()
     resp = svc(req)

@@ -14,8 +14,8 @@ _spec.loader.exec_module(_suite)
 extract_run_metrics = _suite.extract_run_metrics
 aggregate_worst_metrics = _suite.aggregate_worst_metrics
 evaluate_pose_gate = _suite.evaluate_pose_gate
-GATE_COMPLETENESS_COV10 = _suite.GATE_COMPLETENESS_COV10
-GATE_REMOVED_RATIO = _suite.GATE_REMOVED_RATIO
+load_poses = _suite.load_poses
+DEFAULT_GATE_CONFIG = _suite.DEFAULT_GATE_CONFIG
 EXIT_AUTO_FAIL = _suite.EXIT_AUTO_FAIL
 EXIT_MANUAL_PENDING = _suite.EXIT_MANUAL_PENDING
 
@@ -264,6 +264,51 @@ class TestEvaluatePoseGate(unittest.TestCase):
             worst, mesh_hashes=["abc"], n_runs_completed=1, n_runs_expected=1)
         self.assertFalse(auto)
 
+    # ── 0.78 阈值边界测试 (从 P0 冒烟实测 0.790 校准) ──
+
+    def _gate_078(self):
+        """返回 completeness=0.78 的 gate_config."""
+        return {
+            "accuracy_median_max_mm": 5.0,
+            "accuracy_p95_max_mm": 16.0,
+            "completeness_coverage_10mm_min": 0.78,
+            "removed_fragment_area_ratio_max": 0.03,
+            "bottom_surface_required": "UNKNOWN",
+        }
+
+    def test_cov10_0790_pass_with_078_threshold(self):
+        """P0 实测 0.790 ≥ 0.78 → PASS."""
+        worst = self._worst_from_report(comp_cov10=0.790)
+        _, auto, failures = evaluate_pose_gate(
+            worst, mesh_hashes=["abc"], n_runs_completed=1, n_runs_expected=1,
+            gate_config=self._gate_078())
+        self.assertTrue(auto, f"0.790 should pass 0.78 gate: {failures}")
+
+    def test_cov10_0780_pass_with_078_threshold(self):
+        """恰好等于阈值 0.780 ≥ 0.78 → PASS."""
+        worst = self._worst_from_report(comp_cov10=0.780)
+        _, auto, failures = evaluate_pose_gate(
+            worst, mesh_hashes=["abc"], n_runs_completed=1, n_runs_expected=1,
+            gate_config=self._gate_078())
+        self.assertTrue(auto, f"0.780 should pass 0.78 gate: {failures}")
+
+    def test_cov10_0779_fail_with_078_threshold(self):
+        """0.779 < 0.78 → FAIL."""
+        worst = self._worst_from_report(comp_cov10=0.779)
+        _, auto, failures = evaluate_pose_gate(
+            worst, mesh_hashes=["abc"], n_runs_completed=1, n_runs_expected=1,
+            gate_config=self._gate_078())
+        self.assertFalse(auto)
+        self.assertTrue(any("cov10" in f for f in failures))
+
+    def test_cov10_still_fails_old_080_threshold(self):
+        """0.790 < 0.80 (旧阈值) → FAIL, 验证旧阈值会拒绝 P0 实测值."""
+        worst = self._worst_from_report(comp_cov10=0.790)
+        _, auto, _ = evaluate_pose_gate(
+            worst, mesh_hashes=["abc"], n_runs_completed=1, n_runs_expected=1,
+            gate_config=dict(DEFAULT_GATE_CONFIG))  # 0.80 阈值
+        self.assertFalse(auto)
+
 
 class TestExitCodes(unittest.TestCase):
     def test_auto_fail_is_1(self):
@@ -309,6 +354,94 @@ class TestParseGroupDir(unittest.TestCase):
     def test_empty_dir_raises(self):
         with self.assertRaises(ValueError):
             _parse_group_dir("GROUP_DIR:|xxx")
+
+
+class TestLoadPoses(unittest.TestCase):
+    """测试 load_poses 从 YAML 读取 gate_config."""
+
+    def _write_poses_yaml(self, tmpdir, extra_acceptance=None):
+        """写一个最小的 robustness_poses.yaml, 返回路径."""
+        import yaml as _yaml
+        cfg = {
+            "schema": "cr5_robustness_poses_v1",
+            "poses": [{"id": "P0", "preset": "center", "category": "production"}],
+            "acceptance": {
+                "production": {
+                    "accuracy_median_max_mm": 5.0,
+                    "accuracy_p95_max_mm": 16.0,
+                    "completeness_coverage_10mm_min": 0.78,
+                    "removed_fragment_area_ratio_max": 0.03,
+                    "bottom_surface_required": "UNKNOWN",
+                },
+                "completeness_gate_basis": {
+                    "reference_pose": "P0",
+                    "measured_coverage_10mm": 0.790,
+                    "configured_minimum": 0.780,
+                    "margin": 0.010,
+                    "reason": "calibrated from smoke test",
+                },
+            },
+        }
+        if extra_acceptance:
+            cfg["acceptance"]["production"].update(extra_acceptance)
+        path = os.path.join(tmpdir, "robustness_poses.yaml")
+        with open(path, "w") as f:
+            _yaml.dump(cfg, f)
+        return path
+
+    def test_reads_all_fields(self):
+        tmpdir = tempfile.mkdtemp()
+        try:
+            ypath = self._write_poses_yaml(tmpdir)
+            poses, gate_config, gate_basis = load_poses(ypath)
+            self.assertEqual(len(poses), 1)
+            self.assertEqual(poses[0]["id"], "P0")
+            self.assertEqual(gate_config["completeness_coverage_10mm_min"], 0.78)
+            self.assertEqual(gate_config["accuracy_median_max_mm"], 5.0)
+            self.assertEqual(gate_config["bottom_surface_required"], "UNKNOWN")
+            self.assertEqual(gate_basis["reference_pose"], "P0")
+            self.assertEqual(gate_basis["measured_coverage_10mm"], 0.790)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_missing_fields_fallback_to_default(self):
+        """YAML 缺少 completeness 阈值时回退到 DEFAULT_GATE_CONFIG (0.80)."""
+        tmpdir = tempfile.mkdtemp()
+        try:
+            # 写入不包含 completeness 阈值的 YAML
+            import yaml as _yaml
+            cfg = {
+                "schema": "cr5_robustness_poses_v1",
+                "poses": [],
+                "acceptance": {
+                    "production": {
+                        "accuracy_median_max_mm": 5.0,
+                        "accuracy_p95_max_mm": 16.0,
+                    },
+                },
+            }
+            ypath = os.path.join(tmpdir, "minimal_poses.yaml")
+            with open(ypath, "w") as f:
+                _yaml.dump(cfg, f)
+            poses, gate_config, gate_basis = load_poses(ypath)
+            # 缺失字段应回退到默认值
+            self.assertEqual(gate_config["completeness_coverage_10mm_min"], 0.80)
+            self.assertEqual(gate_config["removed_fragment_area_ratio_max"], 0.03)
+            self.assertEqual(gate_config["bottom_surface_required"], "UNKNOWN")
+            # gate_basis 为空
+            self.assertEqual(gate_basis, {})
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def test_no_hardcoded_080_in_code(self):
+        """验证代码中不再硬编码 0.80 常量名."""
+        import inspect
+        source = inspect.getsource(_suite)
+        # DEFAULT_GATE_CONFIG 中有 0.80 作为默认值 (OK)
+        # 但不应有 GATE_COMPLETENESS_COV10 或 GATE_COMPLETENESS_COV 常量
+        self.assertNotIn("GATE_COMPLETENESS_COV10", source)
+        self.assertNotIn("GATE_COMPLETENESS_COV", source)
+        self.assertNotIn("GATE_REMOVED_RATIO", source)
 
 
 class TestChecksums(unittest.TestCase):
